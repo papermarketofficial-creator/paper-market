@@ -63,23 +63,23 @@ const TestimonialsSection = () => {
   };
 
   return (
-    <section className="py-24 bg-[#02040a] relative overflow-hidden min-h-[700px]">
-      {/* Background Image - Right Side */}
+    <section className="py-24 bg-white dark:bg-[#02040a] relative overflow-hidden min-h-[700px] transition-colors duration-300">
+      {/* Background Image - Adjusted opacity for light mode */}
       <div 
-        className="absolute top-0 right-0 w-1/2 h-full opacity-30 pointer-events-none bg-no-repeat bg-right-top z-0"
+        className="absolute top-0 right-0 w-1/2 h-full opacity-[0.05] dark:opacity-30 pointer-events-none bg-no-repeat bg-right-top z-0"
         style={{ backgroundImage: "url('/shapes/steps-bg.png')", backgroundSize: 'contain' }}
       />
 
       <div className="container mx-auto px-4 relative z-10">
-        {/* HEADER LINE: H2 and Stats aligned */}
+        {/* HEADER LINE */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-20 gap-8">
-          <h2 className="text-4xl md:text-5xl font-bold text-white tracking-tight">
+          <h2 className="text-4xl md:text-5xl font-bold text-slate-900 dark:text-white tracking-tight">
             Hear From Our Traders
           </h2>
           
           <div className="flex items-center gap-5">
             <span className="text-6xl md:text-7xl font-bold text-blue-600 leading-none">95%</span>
-            <p className="text-white/60 text-lg font-medium leading-tight">
+            <p className="text-slate-600 dark:text-white/60 text-lg font-medium leading-tight">
               Positive feedback<br />from our Traders.
             </p>
           </div>
@@ -90,7 +90,8 @@ const TestimonialsSection = () => {
           <div className="flex-1">
             <div className="flex flex-col md:flex-row gap-10 items-start">
               {/* User Image Animation */}
-              <div className="w-full md:w-[320px] h-[380px] rounded-[32px] overflow-hidden shrink-0 border border-white/5 relative bg-[#0b101b]">
+              <div className="w-full md:w-[320px] h-[380px] rounded-[32px] overflow-hidden shrink-0 
+                border border-slate-200 dark:border-white/5 relative bg-slate-100 dark:bg-[#0b101b] shadow-sm">
                 <AnimatePresence mode="wait" custom={direction}>
                   <motion.img
                     key={current.id}
@@ -123,19 +124,19 @@ const TestimonialsSection = () => {
                       {[...Array(5)].map((_, i) => (
                         <Star 
                           key={i} 
-                          className={`w-5 h-5 ${i < Math.floor(current.rating) ? 'text-blue-500 fill-blue-500' : 'text-white/10'}`} 
+                          className={`w-5 h-5 ${i < Math.floor(current.rating) ? 'text-blue-500 fill-blue-500' : 'text-slate-200 dark:text-white/10'}`} 
                         />
                       ))}
-                      <span className="text-blue-500 ml-3 text-xl font-bold">{current.rating}</span>
+                      <span className="text-blue-600 dark:text-blue-500 ml-3 text-xl font-bold">{current.rating}</span>
                     </div>
 
-                    <p className="text-white/80 text-xl leading-relaxed mb-8 font-medium">
+                    <p className="text-slate-700 dark:text-white/80 text-xl leading-relaxed mb-8 font-medium italic">
                       "{current.text}"
                     </p>
 
                     <div className="mb-10">
-                      <span className="text-white font-bold text-xl">{current.author}</span>
-                      <span className="text-white/40 ml-3 font-medium">| {current.title}</span>
+                      <span className="text-slate-900 dark:text-white font-bold text-xl">{current.author}</span>
+                      <span className="text-slate-400 dark:text-white/40 ml-3 font-medium">| {current.title}</span>
                     </div>
                   </motion.div>
                 </AnimatePresence>
@@ -144,13 +145,17 @@ const TestimonialsSection = () => {
                 <div className="flex gap-4">
                   <button 
                     onClick={handlePrev}
-                    className="p-4 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white hover:bg-blue-600 hover:border-blue-600 transition-all active:scale-95"
+                    className="p-4 rounded-full border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 
+                      text-slate-600 dark:text-white/60 hover:text-white hover:bg-blue-600 hover:border-blue-600 
+                      transition-all active:scale-95 shadow-sm"
                   >
                     <ChevronLeft className="w-6 h-6" />
                   </button>
                   <button 
                     onClick={handleNext}
-                    className="p-4 rounded-full border border-white/10 bg-white/5 text-white/60 hover:text-white hover:bg-blue-600 hover:border-blue-600 transition-all active:scale-95"
+                    className="p-4 rounded-full border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 
+                      text-slate-600 dark:text-white/60 hover:text-white hover:bg-blue-600 hover:border-blue-600 
+                      transition-all active:scale-95 shadow-sm"
                   >
                     <ChevronRight className="w-6 h-6" />
                   </button>
@@ -159,10 +164,11 @@ const TestimonialsSection = () => {
             </div>
           </div>
 
-          {/* RIGHT SIDE: Preview Card positioned at the TOP */}
+          {/* RIGHT SIDE: Preview Card */}
           <div className="lg:w-[380px] flex flex-col justify-start pt-2">
             <div className="relative">
-               <div className="p-8 rounded-[32px] border  bg-white/[0.03] backdrop-blur-2xl relative overflow-hidden ">
+              <div className="p-8 rounded-[32px] border border-slate-200 dark:border-white/10 
+                bg-slate-50 dark:bg-white/[0.03] backdrop-blur-2xl relative overflow-hidden shadow-sm">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={nextPreview.id}
@@ -171,16 +177,17 @@ const TestimonialsSection = () => {
                     exit={{ opacity: 0, y: -10 }}
                     className="relative z-10"
                   >
-                    <p className="text-white/40 text-sm leading-relaxed mb-6 italic">
+                    <p className="text-slate-500 dark:text-white/40 text-sm leading-relaxed mb-6 italic">
                       "{nextPreview.text}"
                     </p>
                     <div className="text-sm">
-                      <span className="text-white/70 font-bold">{nextPreview.author}</span>
-                      <span className="text-white/30 ml-2">| {nextPreview.title}</span>
+                      <span className="text-slate-700 dark:text-white/70 font-bold">{nextPreview.author}</span>
+                      <span className="text-slate-400 dark:text-white/30 ml-2">| {nextPreview.title}</span>
                     </div>
                   </motion.div>
                 </AnimatePresence>
-                <div className="absolute inset-0 bg-gradient-to-b from-transparent to-[#02040a]/60 pointer-events-none" />
+                {/* Dynamic Gradient for the Preview Card */}
+                <div className="absolute inset-0 bg-gradient-to-b from-transparent to-slate-100/50 dark:to-[#02040a]/60 pointer-events-none" />
               </div>
             </div>
           </div>

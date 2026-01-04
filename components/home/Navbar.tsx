@@ -1,8 +1,18 @@
+'use client';
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, Sun, Moon } from "lucide-react";
+import { useTheme } from 'next-themes';
+import { useEffect, useState } from 'react';
 
 const Navbar = () => {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   return (
     // Wrapper to center the capsule and provide top spacing
     <div className="fixed top-4 left-0 right-0 z-50 flex justify-center px-4">
@@ -29,7 +39,16 @@ const Navbar = () => {
 
           {/* CTA Buttons */}
           <div className="flex items-center gap-2">
-          
+            {mounted && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+                className="rounded-full"
+              >
+                {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </Button>
+            )}
             <Button size="sm" className="rounded-full bg-primary hover:bg-primary/90 px-5">
               Sign In
             </Button>

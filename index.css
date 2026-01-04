@@ -184,11 +184,32 @@
 
 /* Home Page About */
 
-/* === Pixel-Perfect Feature Card Styling === */
+/* === Updated Feature Card Styling === */
+
+/* LIGHT MODE STYLES (Default) */
 .feature-card {
   position: relative;
-  border-radius: 32px; /* Increased for a smoother capsule look */
-  /* Gradient border effect: blue highlight at top-left fading to dark */
+  border-radius: 32px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1) 0%, transparent 100%);
+  padding: 1px;
+  transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.feature-card-inner {
+  border-radius: 31px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.05);
+}
+
+.feature-card-highlight .feature-card-inner {
+  background: linear-gradient(180deg, #ffffff 0%, #f8faff 100%);
+  border-color: rgba(59, 130, 246, 0.2);
+  box-shadow: 0 20px 40px -15px rgba(59, 130, 246, 0.15);
+}
+
+/* DARK MODE OVERRIDES */
+.dark .feature-card {
   background: linear-gradient(
     135deg,
     rgba(59, 130, 246, 0.5) 0%,
@@ -196,24 +217,19 @@
     rgba(255, 255, 255, 0.05) 50%,
     rgba(0, 0, 0, 0) 100%
   );
-  padding: 1px; /* The thickness of the gradient border */
-  transition: transform 0.3s ease;
 }
 
-.feature-card-inner {
-  border-radius: 31px;
-  /* Darker deep-blue gradient for the card body */
+.dark .feature-card-inner {
   background: linear-gradient(
     180deg,
     rgba(17, 24, 39, 0.8) 0%,
     rgba(3, 7, 18, 0.95) 100%
   );
   backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.03); /* Subtle inner edge */
+  border: 1px solid rgba(255, 255, 255, 0.03);
 }
 
-/* Specific glow for the highlighted center card */
-.feature-card-highlight {
+.dark .feature-card-highlight {
   background: linear-gradient(
     135deg,
     rgba(59, 130, 246, 0.8) 0%,
@@ -224,28 +240,26 @@
 }
 
 
-
 .text-gradient {
-  /* This creates the White -> Light Blue -> Solid Blue look */
-  background: linear-gradient(
-    to bottom, 
-    #ffffff 20%,    /* Bright top */
-    #a2c2ff 50%,    /* Soft blue middle */
-    #6392ff 100%    /* Deeper blue bottom */
-  );
-  
-  /* Standard properties to clip the background to the text */
+  background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
-  background-clip: text;
   color: transparent;
   
-  /* Visual weight */
-  font-family: sans-serif;
+  /* Light Mode Gradient: Deep Blue to Slate */
+  background-image: linear-gradient(
+    to bottom, 
+    #0f172a 30%,    /* Slate 900 */
+    #1e40af 100%    /* Blue 800 */
+  );
 }
 
-
-
-
-
-
+/* Dark Mode Override */
+.dark .text-gradient {
+  background-image: linear-gradient(
+    to bottom, 
+    #ffffff 20%, 
+    #a2c2ff 50%, 
+    #6392ff 100%
+  );
+}
