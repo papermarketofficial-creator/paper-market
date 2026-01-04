@@ -8,11 +8,11 @@ import {
   BookOpen, 
   Settings,
   ChevronLeft,
-  ChevronRight,
-  LineChart
+  ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import Logo from '@/components/general/Logo';
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -42,21 +42,15 @@ export function Sidebar({ isAdmin = true, collapsed = false, onToggle }: Sidebar
       <div className="flex h-full flex-col">
         {/* Logo */}
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
-          {!collapsed && (
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-                <LineChart className="h-5 w-5 text-primary-foreground" />
-              </div>
-              <span className="text-lg font-semibold text-sidebar-foreground">
-                TradePro
-              </span>
-            </div>
-          )}
-          {collapsed && (
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary mx-auto">
-              <LineChart className="h-5 w-5 text-primary-foreground" />
-            </div>
-          )}
+          <Logo hideText={collapsed} className="flex-shrink-0" />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onToggle}
+            className="h-8 w-8 p-0"
+          >
+            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+          </Button>
         </div>
 
         {/* Navigation */}

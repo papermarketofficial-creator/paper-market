@@ -48,14 +48,14 @@ const FeaturesSection = () => {
         {/* SECTION HEADING */}
         <h2 className="text-center text-[40px] md:text-[52px] font-bold 
           text-slate-900 dark:text-white mb-6 tracking-tight">
-          Why Traders Love TradePro
+          Why Traders Love Paper Market Pro
         </h2>
 
         {/* SUBTITLE */}
         <p className="max-w-2xl mx-auto text-center 
           text-slate-600 dark:text-white/50 
           text-[17px] leading-relaxed mb-20">
-          Built for both beginners and seasoned traders, TradePro combines
+          Built for both beginners and seasoned traders, Paper Market Pro combines
           intuitive design, powerful analytics, and low fees.
         </p>
 

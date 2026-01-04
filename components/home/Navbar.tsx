@@ -1,9 +1,10 @@
 'use client';
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
-import { TrendingUp, Sun, Moon } from "lucide-react";
+import { Sun, Moon } from "lucide-react";
 import { useTheme } from 'next-themes';
 import { useEffect, useState } from 'react';
+import Logo from '@/components/general/Logo';
 
 const Navbar = () => {
   const { theme, setTheme } = useTheme();
@@ -21,12 +22,7 @@ const Navbar = () => {
           
           {/* Logo Section */}
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-9 h-9 bg-primary rounded-full flex items-center justify-center transition-transform group-hover:scale-105">
-              <TrendingUp className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="text-lg font-bold tracking-tight text-foreground">
-              Trade Pro
-            </span>
+            <Logo className="group-hover:scale-105 transition-transform" />
           </Link>
 
           {/* Navigation Links - Centered visually */}

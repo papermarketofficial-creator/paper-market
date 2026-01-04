@@ -8,7 +8,7 @@ const testimonials = [
     id: 1,
     image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=800&h=800&fit=crop',
     rating: 4.8,
-    text: "As a beginner, I was intimidated by trading platforms. TradePro's interface and educational resources made it easy to get started.",
+    text: "As a beginner, I was intimidated by trading platforms. Paper Market Pro's interface and educational resources made it easy to get started.",
     author: "James K.",
     title: "Crypto Investor"
   },
@@ -24,7 +24,7 @@ const testimonials = [
     id: 3,
     image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=800&h=800&fit=crop',
     rating: 4.5,
-    text: "Low fees and fast execution are crucial for my day trading. TradePro delivers on both fronts flawlessly.",
+    text: "Low fees and fast execution are crucial for my day trading. Paper Market Pro delivers on both fronts flawlessly.",
     author: "Sarah L.",
     title: "Day Trader"
   }
