@@ -63,7 +63,7 @@ const TestimonialsSection = () => {
   };
 
   return (
-    <section className="py-24 bg-white dark:bg-[#02040a] relative overflow-hidden min-h-[700px] transition-colors duration-300">
+    <section className="py-24 bg-blue-50/45 dark:bg-background relative overflow-hidden min-h-[700px] transition-colors duration-300">
       {/* Background Image - Adjusted opacity for light mode */}
       <div 
         className="absolute top-0 right-0 w-1/2 h-full opacity-[0.05] dark:opacity-30 pointer-events-none bg-no-repeat bg-right-top z-0"

@@ -59,7 +59,7 @@ const FAQSection = () => {
   const currentFAQs = faqData[activeTab];
 
   return (
-    <section className="py-24 bg-white dark:bg-[#02040a] relative overflow-hidden transition-colors duration-300">
+    <section className="py-24 bg-blue-50/45 dark:bg-background relative overflow-hidden transition-colors duration-300">
       <div className="container mx-auto px-4 relative z-10">
         {/* Section Badge */}
         <div className="flex justify-center mb-6">

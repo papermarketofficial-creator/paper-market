@@ -27,7 +27,7 @@ const StepsSection = () => {
     <section className="relative py-24 overflow-hidden bg-slate-50 dark:bg-[#02040a]">
       {/* Background Grid */}
       <div
-        className="absolute top-0 left-0 w-1/2 h-full pointer-events-none bg-no-repeat bg-left-top opacity-20 dark:opacity-50"
+        className="absolute top-0 left-0 w-1/2 h-full pointer-events-none bg-no-repeat bg-left-top opacity-5 dark:opacity-50"
         style={{
           backgroundImage: "url('/shapes/steps-bg.png')",
           backgroundSize: "contain",

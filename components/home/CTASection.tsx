@@ -4,7 +4,7 @@ import { ArrowRight } from "lucide-react";
 
 const CTASection = () => {
   return (
-    <section className="py-20">
+    <section className="py-20 bg-blue-50/45 dark:bg-background">
       <div className="container mx-auto px-4">
         <div className="relative bg-gradient-to-br from-primary/20 via-background to-primary/10 rounded-[48px] p-12 md:p-20 text-center overflow-hidden border border-primary/20">
           {/* Background Effects */}

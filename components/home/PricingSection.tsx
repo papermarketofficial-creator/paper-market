@@ -52,7 +52,7 @@ const plans = [
 
 const PricingSection = () => {
   return (
-    <section id="pricing" className="py-20">
+    <section id="pricing" className="py-20 bg-blue-50/45 dark:bg-background transition-colors duration-300">
       <div className="container mx-auto px-4">
         {/* Section Tag */}
         <div className="flex justify-center mb-6">

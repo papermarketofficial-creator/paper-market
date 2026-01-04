@@ -10,7 +10,7 @@ const PartnersSection = () => {
   ];
 
   return (
-    <section className="py-12 md:py-20 border-y border-slate-200/50 dark:border-white/5 bg-slate-50/30 dark:bg-transparent">
+    <section className="py-12 md:py-20   bg-blue-50/45 dark:bg-background transition-colors duration-300">
       <div className="container mx-auto px-4">
         <p className="text-center text-sm font-medium uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-10">
           Trusted by Industry Leaders
