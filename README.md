@@ -1,4 +1,4 @@
-# Learn NSE Play - Paper Trading Platform
+# Paper Market Pro - Paper Trading Platform
 
 A modern, production-ready paper trading platform built with Next.js App Router, featuring real-time charts, portfolio management, and comprehensive trading analytics.
 
@@ -28,7 +28,7 @@ A modern, production-ready paper trading platform built with Next.js App Router,
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd learn-nse-play
+cd paper-market-pro
 ```
 
 2. Install dependencies:

@@ -4,14 +4,14 @@ import { ReactNode } from 'react';
 
 export const metadata = {
   title: {
-    default: 'Learn NSE Play - Paper Trading Platform',
-    template: '%s | Learn NSE Play'
+    default: 'Paper Market Pro - Paper Trading Platform',
+    template: '%s | Paper Market Pro'
   },
   description: 'Master stock trading with our advanced paper trading platform. Practice NSE trading with virtual money, real-time data, and comprehensive analytics.',
   keywords: ['NSE', 'paper trading', 'stock trading', 'virtual trading', 'trading platform', 'learn trading'],
-  authors: [{ name: 'Learn NSE Play Team' }],
-  creator: 'Learn NSE Play',
-  publisher: 'Learn NSE Play',
+  authors: [{ name: 'Paper Market Pro Team' }],
+  creator: 'Paper Market Pro',
+  publisher: 'Paper Market Pro',
   robots: {
     index: true,
     follow: true,
@@ -26,16 +26,16 @@ export const metadata = {
   openGraph: {
     type: 'website',
     locale: 'en_US',
-    url: 'https://learn-nse-play.com',
-    title: 'Learn NSE Play - Paper Trading Platform',
+    url: 'https://paper-market-pro.com',
+    title: 'Paper Market Pro - Paper Trading Platform',
     description: 'Master stock trading with our advanced paper trading platform.',
-    siteName: 'Learn NSE Play',
+    siteName: 'Paper Market Pro',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Learn NSE Play - Paper Trading Platform',
+    title: 'Paper Market Pro - Paper Trading Platform',
     description: 'Master stock trading with our advanced paper trading platform.',
-    creator: '@learnnseplay',
+    creator: '@papermarketpro',
   },
 };
 
