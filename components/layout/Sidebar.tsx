@@ -43,14 +43,7 @@ export function Sidebar({ isAdmin = true, collapsed = false, onToggle }: Sidebar
         {/* Logo */}
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-4">
           <Logo hideText={collapsed} className="flex-shrink-0" />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onToggle}
-            className="h-8 w-8 p-0"
-          >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-          </Button>
+          
         </div>
 
         {/* Navigation */}
