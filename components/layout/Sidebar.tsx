@@ -26,10 +26,11 @@ const navItems = [
 
 interface SidebarProps {
   isAdmin?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }
 
-export function Sidebar({ isAdmin = true }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false);
+export function Sidebar({ isAdmin = true, collapsed = false, onToggle }: SidebarProps) {
   const filteredNavItems = navItems.filter((item) => !item.adminOnly || isAdmin);
 
   return (
@@ -84,7 +85,7 @@ export function Sidebar({ isAdmin = true }: SidebarProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={onToggle}
             className="w-full justify-center text-sidebar-foreground hover:bg-sidebar-accent"
           >
             {collapsed ? (

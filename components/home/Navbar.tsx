@@ -29,11 +29,9 @@ const Navbar = () => {
 
           {/* CTA Buttons */}
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="rounded-full text-foreground hidden sm:flex">
-              Log in
-            </Button>
+          
             <Button size="sm" className="rounded-full bg-primary hover:bg-primary/90 px-5">
-              Sign up
+              Sign In
             </Button>
           </div>
         </div>

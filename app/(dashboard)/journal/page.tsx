@@ -5,7 +5,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useTradingStore, Trade } from '@/stores/tradingStore';
+import { useTradingStore } from '@/stores/tradingStore';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { BookOpen, TrendingUp, TrendingDown, Save } from 'lucide-react';
