@@ -1,0 +1,251 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 225 100% 3%;
+    --foreground: 0 0% 100%;
+
+    --card: 225 100% 5%;
+    --card-foreground: 0 0% 100%;
+
+    --popover: 225 100% 5%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 224 96% 57%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 180 68% 46%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 224 30% 20%;
+    --muted-foreground: 223 25% 77%;
+
+    --accent: 224 96% 57%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 100% 65%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 180 68% 46%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 224 30% 15%;
+    --input: 224 30% 15%;
+    --ring: 224 96% 57%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 225 100% 4%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 224 96% 57%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 224 30% 15%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 224 30% 15%;
+    --sidebar-ring: 224 96% 57%;
+
+    --chart-profit: 180 68% 46%;
+    --chart-loss: 0 100% 65%;
+    --chart-neutral: 224 96% 57%;
+  }
+
+  .light {
+    --background: 0 0% 98%;
+    --foreground: 225 100% 3%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 225 100% 3%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 225 100% 3%;
+
+    --primary: 224 96% 57%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 180 68% 46%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 224 96% 57%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 100% 65%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 180 68% 46%;
+    --success-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 224 96% 57%;
+
+    --sidebar-background: 220 14% 96%;
+    --sidebar-foreground: 225 100% 3%;
+    --sidebar-primary: 224 96% 57%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 13% 91%;
+    --sidebar-accent-foreground: 225 100% 3%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 224 96% 57%;
+
+    --chart-profit: 180 68% 46%;
+    --chart-loss: 0 100% 65%;
+    --chart-neutral: 224 96% 57%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Outfit', system-ui, sans-serif;
+  }
+
+  /* Custom scrollbar for dark theme */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-background;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-muted rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/50;
+  }
+}
+
+@layer utilities {
+  .text-profit {
+    @apply text-[hsl(var(--success))];
+  }
+
+  .text-loss {
+    @apply text-destructive;
+  }
+
+  .bg-profit {
+    @apply bg-[hsl(var(--success))];
+  }
+
+  .bg-loss {
+    @apply bg-destructive;
+  }
+
+  .animate-number {
+    animation: countUp 0.6s ease-out forwards;
+  }
+
+  @keyframes countUp {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .flash-green {
+    animation: flashGreen 0.3s ease-out;
+  }
+
+  .flash-red {
+    animation: flashRed 0.3s ease-out;
+  }
+
+  @keyframes flashGreen {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: hsl(var(--success) / 0.2); }
+  }
+
+  @keyframes flashRed {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: hsl(var(--destructive) / 0.2); }
+  }
+}
+
+
+
+/* Home Page About */
+
+/* === Pixel-Perfect Feature Card Styling === */
+.feature-card {
+  position: relative;
+  border-radius: 32px; /* Increased for a smoother capsule look */
+  /* Gradient border effect: blue highlight at top-left fading to dark */
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.5) 0%,
+    rgba(59, 130, 246, 0.1) 25%,
+    rgba(255, 255, 255, 0.05) 50%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  padding: 1px; /* The thickness of the gradient border */
+  transition: transform 0.3s ease;
+}
+
+.feature-card-inner {
+  border-radius: 31px;
+  /* Darker deep-blue gradient for the card body */
+  background: linear-gradient(
+    180deg,
+    rgba(17, 24, 39, 0.8) 0%,
+    rgba(3, 7, 18, 0.95) 100%
+  );
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.03); /* Subtle inner edge */
+}
+
+/* Specific glow for the highlighted center card */
+.feature-card-highlight {
+  background: linear-gradient(
+    135deg,
+    rgba(59, 130, 246, 0.8) 0%,
+    rgba(59, 130, 246, 0.2) 40%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  box-shadow: 0 0 40px -10px rgba(59, 130, 246, 0.2);
+}
+
+
+
+.text-gradient {
+  /* This creates the White -> Light Blue -> Solid Blue look */
+  background: linear-gradient(
+    to bottom, 
+    #ffffff 20%,    /* Bright top */
+    #a2c2ff 50%,    /* Soft blue middle */
+    #6392ff 100%    /* Deeper blue bottom */
+  );
+  
+  /* Standard properties to clip the background to the text */
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  color: transparent;
+  
+  /* Visual weight */
+  font-family: sans-serif;
+}
+
+
+
+
+
+
