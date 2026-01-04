@@ -37,11 +37,6 @@ export const metadata = {
     description: 'Master stock trading with our advanced paper trading platform.',
     creator: '@learnnseplay',
   },
-  icons: {
-    icon: '/favicon.ico',
-    shortcut: '/favicon-16x16.png',
-    apple: '/apple-touch-icon.png',
-  },
 };
 
 export const viewport = {
