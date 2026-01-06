@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -218,6 +218,7 @@ const LessonPage = () => {
   const chapterId = params.chapter as string;
   const lessonId = params.lesson as string;
   const [progress, setProgress] = useState(0);
+  const [isCompleted, setIsCompleted] = useState(false);
 
   // Simulate reading progress - moved before early return to follow rules of hooks
   useEffect(() => {
@@ -232,8 +233,31 @@ const LessonPage = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const lesson = lessonContent[lessonId as keyof typeof lessonContent];
-  if (!lesson) {
+  // Check if lesson is completed and find next lesson
+  const chapter = lessonContent[lessonId as keyof typeof lessonContent];
+  const allLessons = Object.keys(lessonContent);
+  const currentLessonIndex = allLessons.indexOf(lessonId);
+  const nextLessonId = currentLessonIndex < allLessons.length - 1 ? allLessons[currentLessonIndex + 1] : null;
+
+  const handleMarkComplete = () => {
+    setIsCompleted(true);
+    // Here you would typically save to localStorage or send to backend
+    localStorage.setItem(`lesson-${lessonId}-completed`, 'true');
+  };
+
+  const handleNextLesson = () => {
+    if (nextLessonId) {
+      router.push(`/learn/futures-options/${chapterId}/${nextLessonId}`);
+    }
+  };
+
+  // Check completion status on load
+  useEffect(() => {
+    const completed = localStorage.getItem(`lesson-${lessonId}-completed`) === 'true';
+    setIsCompleted(completed);
+  }, [lessonId]);
+
+  if (!chapter) {
     return <div>Lesson not found</div>;
   }
 
@@ -300,11 +324,11 @@ const LessonPage = () => {
                 <div className="font-semibold text-center p-2 bg-blue-100 dark:bg-blue-900 rounded">Futures</div>
                 <div className="font-semibold text-center p-2 bg-green-100 dark:bg-green-900 rounded">Options</div>
                 {item.items?.map((comp, i: number) => (
-                  <>
-                    <div key={`aspect-${i}`} className="p-2 border-b">{comp.aspect}</div>
-                    <div key={`futures-${i}`} className="p-2 border-b bg-blue-50 dark:bg-blue-950">{comp.futures}</div>
-                    <div key={`options-${i}`} className="p-2 border-b bg-green-50 dark:bg-green-950">{comp.options}</div>
-                  </>
+                  <React.Fragment key={`comparison-row-${i}`}>
+                    <div className="p-2 border-b">{comp.aspect}</div>
+                    <div className="p-2 border-b bg-blue-50 dark:bg-blue-950">{comp.futures}</div>
+                    <div className="p-2 border-b bg-green-50 dark:bg-green-950">{comp.options}</div>
+                  </React.Fragment>
                 ))}
               </div>
             </CardContent>
@@ -352,12 +376,12 @@ const LessonPage = () => {
             </Link>
             <Badge variant="secondary">
               <Clock className="h-3 w-3 mr-1" />
-              {lesson.estimatedTime}
+              {chapter.estimatedTime}
             </Badge>
           </div>
 
           <h1 className="text-3xl font-bold text-foreground mb-2">
-            {lesson.title}
+            {chapter.title}
           </h1>
 
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -368,7 +392,7 @@ const LessonPage = () => {
 
         {/* Content */}
         <div className="prose prose-gray dark:prose-invert max-w-none">
-          {lesson.content.map((item, index) => renderContent(item, index))}
+          {chapter.content.map((item, index) => renderContent(item, index))}
         </div>
 
         {/* Navigation */}
@@ -382,13 +406,26 @@ const LessonPage = () => {
             </Link>
 
             <div className="flex gap-3">
-              <Button variant="outline">
-                Mark as Complete
+              <Button 
+                variant="outline" 
+                onClick={handleMarkComplete}
+                disabled={isCompleted}
+              >
+                {isCompleted ? "Completed ✓" : "Mark as Complete"}
               </Button>
-              <Button>
-                Next Lesson
-                <ArrowRight className="h-4 w-4 ml-2" />
-              </Button>
+              {nextLessonId ? (
+                <Button onClick={handleNextLesson}>
+                  Next Lesson
+                  <ArrowRight className="h-4 w-4 ml-2" />
+                </Button>
+              ) : (
+                <Link href={`/learn/futures-options/${chapterId}`}>
+                  <Button>
+                    Back to Chapter
+                    <ArrowLeft className="h-4 w-4 ml-2" />
+                  </Button>
+                </Link>
+              )}
             </div>
           </div>
         </div>

@@ -327,50 +327,47 @@ const ChapterPage = () => {
             {/* Lessons List */}
             <div className="space-y-4">
               {chapter.lessons.map((lesson, index) => (
-                <Card key={lesson.id} className="group hover:shadow-md transition-all">
-                  <CardContent className="p-6">
-                    <div className="flex items-start gap-4">
-                      <div className="flex-shrink-0 mt-1">
-                        {lesson.completed ? (
-                          <CheckCircle className="h-6 w-6 text-green-600" />
-                        ) : (
-                          <div className="h-6 w-6 rounded-full border-2 border-muted-foreground flex items-center justify-center">
-                            <span className="text-xs font-medium text-muted-foreground">
-                              {index + 1}
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                <Link key={lesson.id} href={`/learn/futures-options/${chapterId}/${lesson.id}`}>
+                  <Card className="group hover:shadow-md transition-all cursor-pointer">
+                    <CardContent className="p-6">
+                      <div className="flex items-start gap-4">
+                        <div className="flex-shrink-0 mt-1">
+                          {lesson.completed ? (
+                            <CheckCircle className="h-6 w-6 text-green-600" />
+                          ) : (
+                            <div className="h-6 w-6 rounded-full border-2 border-muted-foreground flex items-center justify-center">
+                              <span className="text-xs font-medium text-muted-foreground">
+                                {index + 1}
+                              </span>
+                            </div>
+                          )}
+                        </div>
 
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-lg font-semibold mb-1">
-                          {lesson.title}
-                        </h3>
-                        <p className="text-muted-foreground mb-3">
-                          {lesson.description}
-                        </p>
-                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-4 w-4" />
-                            {lesson.estimatedTime}
-                          </span>
-                          <Badge variant={lesson.completed ? "default" : "secondary"}>
-                            {lesson.completed ? "Completed" : "Not Started"}
-                          </Badge>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-lg font-semibold mb-1 group-hover:text-primary transition-colors">
+                            {lesson.title}
+                          </h3>
+                          <p className="text-muted-foreground mb-3">
+                            {lesson.description}
+                          </p>
+                          <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                            <span className="flex items-center gap-1">
+                              <Clock className="h-4 w-4" />
+                              {lesson.estimatedTime}
+                            </span>
+                            <Badge variant={lesson.completed ? "default" : "secondary"}>
+                              {lesson.completed ? "Completed" : "Not Started"}
+                            </Badge>
+                          </div>
+                        </div>
+
+                        <div className="flex-shrink-0">
+                          <ArrowRight className="h-5 w-5 text-muted-foreground group-hover:text-primary group-hover:translate-x-1 transition-all" />
                         </div>
                       </div>
-
-                      <div className="flex-shrink-0">
-                        <Link href={`/learn/futures-options/${chapterId}/${lesson.id}`}>
-                          <Button variant="outline" size="sm" className="group-hover:bg-primary group-hover:text-primary-foreground transition-colors">
-                            {lesson.completed ? "Review" : "Start"}
-                            <ArrowRight className="ml-2 h-4 w-4" />
-                          </Button>
-                        </Link>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                </Link>
               ))}
             </div>
           </main>
