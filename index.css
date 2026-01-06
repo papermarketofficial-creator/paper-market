@@ -175,6 +175,27 @@
 }
 
 
+.text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-foreground to-foreground/60;
+  }
+  
+  .dark .text-gradient-primary {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-white via-blue-100 to-blue-300;
+  }
+  
+  .light .text-gradient-primary {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-700 via-blue-600 to-blue-900;
+  }
+
+  /* Grid Background Utility */
+  .bg-grid-pattern {
+    background-size: 40px 40px;
+    background-image: linear-gradient(to right, rgb(var(--border) / 0.1) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(var(--border) / 0.1) 1px, transparent 1px);
+    mask-image: linear-gradient(to bottom, black 40%, transparent 100%);
+  }
+
+
   @keyframes flashGreen {
     0%, 100% { background-color: transparent; }
     50% { background-color: hsl(var(--success) / 0.2); }
