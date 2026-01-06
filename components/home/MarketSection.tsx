@@ -8,82 +8,69 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
+  Tooltip
 } from "recharts";
+import { IndianRupee } from "lucide-react";
 
-// --- Types & Interfaces ---
+// --- Types ---
 interface MarketItem {
   symbol: string;
+  name: string;
   price: string;
   change: string;
   up: boolean;
 }
 
 interface MarketDataPoint {
-  date: string;
+  time: string;
   value: number;
 }
 
 interface Market {
   name: string;
+  indexValue: string;
   color: string;
-  darkColor: string;
   data: MarketDataPoint[];
   items: MarketItem[];
-  date?: string;
 }
 
-// --- Helper Functions ---
+// --- Helper: Generate Intraday-like Data ---
 const generateData = (base: number, volatility: number): MarketDataPoint[] =>
-  Array.from({ length: 20 }, (_, i) => ({
-    date:
-      i === 0
-        ? "2/26"
-        : i === 4
-        ? "3/13"
-        : i === 8
-        ? "3/26"
-        : i === 12
-        ? "4/13"
-        : i === 16
-        ? "5/13"
-        : i === 19
-        ? "5/26"
-        : "",
+  Array.from({ length: 25 }, (_, i) => ({
+    time: `${9 + Math.floor(i / 4)}:${(i % 4) * 15 || "00"}`,
     value: base + Math.random() * volatility - volatility / 2,
   }));
 
-// --- Data (Educational / Simulation) ---
+// --- Data: Indian Context ---
 const markets: Market[] = [
   {
-    name: "Stocks (Simulation)",
-    color: "#10b981",
-    darkColor: "#22c55e",
-    data: generateData(180, 40),
+    name: "NIFTY 50",
+    indexValue: "22,450.30",
+    color: "#10b981", // Emerald
+    data: generateData(22400, 120),
     items: [
-      { symbol: "AAPL", price: "189.84", change: "+1.2%", up: true },
-      { symbol: "MSFT", price: "412.65", change: "+0.75%", up: true },
+      { symbol: "RELIANCE", name: "Reliance Ind.", price: "2,980.45", change: "+1.2%", up: true },
+      { symbol: "TCS", name: "Tata Consultancy", price: "4,120.65", change: "+0.75%", up: true },
     ],
   },
   {
-    name: "Crypto (Simulation)",
-    date: "Sample Market Data",
-    color: "#2563eb",
-    darkColor: "#3b82f6",
-    data: generateData(60000, 15000),
+    name: "BANK NIFTY",
+    indexValue: "47,850.15",
+    color: "#ef4444", // Red
+    data: generateData(47800, 350),
     items: [
-      { symbol: "BTC/USD", price: "68,421", change: "+2.3%", up: true },
-      { symbol: "ETH/USD", price: "3,845", change: "-0.5%", up: false },
+      { symbol: "HDFCBANK", name: "HDFC Bank", price: "1,440.00", change: "-0.85%", up: false },
+      { symbol: "SBIN", name: "State Bank India", price: "765.30", change: "-1.10%", up: false },
     ],
   },
   {
-    name: "Forex (Simulation)",
-    date: "Sample Market Data",
-    color: "#ea580c",
-    darkColor: "#f97316",
-    data: generateData(1.2, 0.4),
+    name: "TOP GAINERS",
+    indexValue: "Intraday",
+    color: "#3b82f6", // Blue
+    data: generateData(18000, 150),
     items: [
-      { symbol: "EUR/USD", price: "1.0921", change: "+0.15%", up: true },
-      { symbol: "GBP/USD", price: "1.2654", change: "-0.08%", up: false },
+      { symbol: "TATAMOTORS", name: "Tata Motors", price: "985.50", change: "+3.4%", up: true },
+      { symbol: "BAJFINANCE", name: "Bajaj Finance", price: "7,240.00", change: "+2.1%", up: true },
     ],
   },
 ];
@@ -95,61 +82,60 @@ const MarketSection = () => {
   return (
     <section
       ref={sectionRef}
-      className="relative py-24 bg-slate-50 dark:bg-[#02040a] transition-colors duration-300"
+      className="relative py-20 bg-slate-50 dark:bg-[#02040a] transition-colors duration-300"
     >
       <div className="container mx-auto px-4">
         {/* Header Label */}
         <div className="flex justify-center mb-6">
           <span className="px-4 py-1.5 rounded-full bg-blue-50 dark:bg-white/5 border border-blue-100 dark:border-white/10 text-xs font-semibold text-blue-600 dark:text-white/80 backdrop-blur">
-            Market Simulation
+            Indian Markets
           </span>
         </div>
 
-        {/* Header */}
-        <div className="text-center mb-20">
-          <h2 className="text-[40px] md:text-[48px] font-bold text-slate-900 dark:text-white mb-4 tracking-tight">
-            Practice with Real Market Behavior
+        {/* Header Title */}
+        <div className="text-center mb-16">
+          <h2 className="text-3xl md:text-4xl font-bold text-slate-900 dark:text-white mb-4 tracking-tight">
+            Trade the Indian Markets
           </h2>
           <p className="text-slate-500 dark:text-white/45 max-w-2xl mx-auto text-lg leading-relaxed">
-            Analyze price movements across stocks, crypto, and forex using
-            simulated trades powered by real market data.
+            Practice trading NIFTY, BANKNIFTY, and top Indian stocks with 
+            simulated data before risking real capital.
           </p>
         </div>
 
         {/* Market Cards Grid */}
-        <div className="grid md:grid-cols-3 gap-8 lg:gap-10 max-w-7xl mx-auto">
+        <div className="grid md:grid-cols-3 gap-6 max-w-6xl mx-auto">
           {markets.map((market, index) => (
             <div
               key={index}
-              className="relative rounded-[28px] overflow-hidden bg-white dark:bg-[#060913]/80 backdrop-blur-xl border border-slate-200 dark:border-white/10 shadow-sm dark:shadow-[0_30px_80px_rgba(0,0,0,0.6)] group transition-all duration-300 hover:border-blue-400/30"
+              // Changes: rounded-xl (less curvy), remove hover scale, smaller padding
+              className="relative rounded-xl overflow-hidden bg-white dark:bg-[#060913]/80 backdrop-blur-xl border border-slate-200 dark:border-white/10 shadow-sm dark:shadow-[0_20px_40px_rgba(0,0,0,0.4)] transition-colors duration-300 hover:border-blue-400/40"
             >
-              <div className="px-6 pt-6 pb-2">
+              {/* Card Header - Compact */}
+              <div className="px-5 pt-5 pb-2">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                    {market.name}
-                  </h3>
-                  {market.date && (
-                    <span className="text-xs font-medium text-slate-400 dark:text-white/30">
-                      {market.date}
-                    </span>
-                  )}
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                      {market.name}
+                    </h3>
+                    <div className="flex items-center text-xs font-medium text-slate-400 dark:text-white/40 mt-0.5">
+                      {market.name !== "TOP GAINERS" && <IndianRupee className="w-3 h-3 mr-0.5" />}
+                      {market.indexValue}
+                    </div>
+                  </div>
+                  
+                 
                 </div>
               </div>
 
-              {/* Chart Section */}
-              <div className="h-[220px] w-full px-4">
+              {/* Chart Section - Reduced Height */}
+              <div className="h-[160px] w-full px-4 mt-2">
                 <ResponsiveContainer width="100%" height="100%">
                   {isInView ? (
                     <AreaChart data={market.data}>
                       <defs>
-                        <linearGradient
-                          id={`gradient-${index}`}
-                          x1="0"
-                          y1="0"
-                          x2="0"
-                          y2="1"
-                        >
-                          <stop offset="0%" stopColor={market.color} stopOpacity={0.2} />
+                        <linearGradient id={`gradient-${index}`} x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor={market.color} stopOpacity={0.15} />
                           <stop offset="100%" stopColor={market.color} stopOpacity={0} />
                         </linearGradient>
                       </defs>
@@ -157,24 +143,21 @@ const MarketSection = () => {
                         vertical={false}
                         stroke="currentColor"
                         className="text-slate-100 dark:text-white/5"
+                        strokeDasharray="3 3"
                       />
-                      <XAxis
-                        dataKey="date"
-                        axisLine={false}
-                        tickLine={false}
-                        interval={0}
-                        tick={{
-                          fill: "currentColor",
-                          fontSize: 10,
-                          className: "text-slate-400 dark:text-white/25",
-                        }}
+                      <XAxis hide />
+                      <YAxis hide domain={['auto', 'auto']} />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#0f172a', borderColor: '#1e293b', borderRadius: '6px', fontSize: '11px', padding: '6px' }}
+                        itemStyle={{ color: '#e2e8f0' }}
+                        labelStyle={{ display: 'none' }}
+                        formatter={(value: number) => [`₹${value.toFixed(2)}`, "Value"]}
                       />
-                      <YAxis hide />
                       <Area
                         type="monotone"
                         dataKey="value"
                         stroke={market.color}
-                        strokeWidth={2.5}
+                        strokeWidth={2}
                         fill={`url(#gradient-${index})`}
                         dot={false}
                         isAnimationActive
@@ -187,27 +170,28 @@ const MarketSection = () => {
                 </ResponsiveContainer>
               </div>
 
-              {/* Footer List */}
-              <div className="mt-4 bg-slate-50/80 dark:bg-[#0b101b]/70 border-t border-slate-100 dark:border-white/10">
-                <div className="grid grid-cols-2 px-6 py-5">
+              {/* Footer List - Compact 2-column layout */}
+              <div className="mt-2 bg-slate-50/80 dark:bg-[#0b101b]/70 border-t border-slate-100 dark:border-white/10">
+                <div className="grid grid-cols-2 px-4 py-4">
                   {market.items.map((item, i) => (
                     <div
                       key={i}
-                      className={`flex flex-col items-center gap-1 ${
+                      className={`flex flex-col items-center gap-0.5 ${
                         i === 0
-                          ? "pr-6 border-r border-slate-200 dark:border-white/10"
-                          : "pl-6"
+                          ? "pr-4 border-r border-slate-200 dark:border-white/10"
+                          : "pl-4"
                       }`}
                     >
-                      <span className="text-[10px] font-bold text-slate-400 dark:text-white/40 uppercase tracking-wider text-center">
-                        {item.symbol}
+                      <span className="text-[10px] font-bold text-slate-400 dark:text-white/40 uppercase tracking-wider text-center truncate w-full">
+                        {item.name}
                       </span>
-                      <div className="flex items-center gap-2 justify-center">
-                        <span className="text-sm font-bold text-slate-900 dark:text-white">
+                      <div className="flex flex-col items-center">
+                        <span className="text-sm font-bold text-slate-900 dark:text-white flex items-center">
+                          <span className="text-[10px] text-slate-400 mr-0.5">₹</span>
                           {item.price}
                         </span>
                         <span
-                          className={`text-[11px] font-bold ${
+                          className={`text-[10px] font-bold ${
                             item.up
                               ? "text-emerald-600 dark:text-emerald-400"
                               : "text-red-600 dark:text-red-500"
@@ -225,9 +209,8 @@ const MarketSection = () => {
         </div>
 
         {/* Disclaimer */}
-        <p className="mt-16 text-center text-xs text-slate-500 dark:text-white/40">
-          Educational simulation only. Market data shown for learning purposes —
-          no real money trading or investment advice.
+        <p className="mt-12 text-center text-[10px] text-slate-500 dark:text-white/30 uppercase tracking-wider">
+          Educational simulation only. Market data shown for learning purposes.
         </p>
       </div>
     </section>
