@@ -234,7 +234,7 @@ const AdminPage = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-border">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="border-border hover:bg-muted hover:text-muted-foreground">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => resetUserId && handleResetBalance(resetUserId)}
               className="bg-destructive hover:bg-destructive/90"

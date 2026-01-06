@@ -22,7 +22,7 @@ import {
 import { useTradingStore } from '@/stores/tradingStore';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { Search, ArrowUpDown, History, TrendingUp, TrendingDown } from 'lucide-react';
+import { Search, ArrowUpDown, History, TrendingUp, TrendingDown, Download } from 'lucide-react';
 
 const OrdersPage = () => {
   const { trades } = useTradingStore();
@@ -82,6 +82,20 @@ const OrdersPage = () => {
 
   const totalPages = Math.ceil(filteredAndSortedTrades.length / itemsPerPage);
 
+  const handleExport = () => {
+    const csv = filteredAndSortedTrades.map(trade => 
+      `${trade.symbol},${trade.side},${trade.quantity},${trade.entryPrice},${trade.exitPrice || ''},${trade.pnl},${format(trade.timestamp, 'yyyy-MM-dd HH:mm:ss')}`
+    ).join('\n');
+    const csvContent = `Symbol,Side,Quantity,Entry Price,Exit Price,P&L,Timestamp\n${csv}`;
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'trade-history.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const toggleSort = (field: 'date' | 'pnl') => {
     if (sortBy === field) {
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -132,6 +146,10 @@ const OrdersPage = () => {
                   <SelectItem value="pnl">P&L</SelectItem>
                 </SelectContent>
               </Select>
+              <Button onClick={handleExport} variant="outline" className="w-full sm:w-auto">
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </Button>
             </div>
           </div>
         </CardContent>

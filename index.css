@@ -18,7 +18,7 @@
     --primary: 224 96% 57%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 180 68% 46%;
+    --success: 158 64% 42%;
     --secondary-foreground: 0 0% 100%;
 
     --muted: 224 30% 20%;
@@ -30,7 +30,8 @@
     --destructive: 0 100% 65%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 180 68% 46%;
+--success: 158 64% 42%;
+
     --success-foreground: 0 0% 100%;
 
     --border: 224 30% 15%;
@@ -66,7 +67,7 @@
     --primary: 224 96% 57%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 180 68% 46%;
+    --success: 158 64% 42%;
     --secondary-foreground: 0 0% 100%;
 
     --muted: 220 14% 96%;
@@ -78,7 +79,7 @@
     --destructive: 0 100% 65%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 180 68% 46%;
+    --success: 158 64% 42%;
     --success-foreground: 0 0% 100%;
 
     --border: 220 13% 91%;
@@ -168,6 +169,11 @@
   .flash-red {
     animation: flashRed 0.3s ease-out;
   }
+
+  .bg-success-soft {
+  background-color: hsl(var(--success) / 0.15);
+}
+
 
   @keyframes flashGreen {
     0%, 100% { background-color: transparent; }

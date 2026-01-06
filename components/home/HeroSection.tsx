@@ -77,13 +77,14 @@ const HeroSection = () => {
               </Button>
             </Link>
 
-  {/* CTA Button */}
-                <Button
-                  className={"w-fit rounded-full bg-muted hover:bg-muted/80 text-foreground"
-                  }
-                >
-                  How It Works?
-                </Button>
+            <Link href="/learn/futures-options">
+              <Button
+                size="lg"
+                className="h-12 px-8 rounded-full bg-muted hover:bg-muted/80 text-foreground text-base font-medium"
+              >
+                How It Works?
+              </Button>
+            </Link>
           </div>
 
           {/* Disclaimer */}

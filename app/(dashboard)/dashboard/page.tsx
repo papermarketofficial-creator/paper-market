@@ -4,7 +4,7 @@ import { Suspense } from 'react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { RecentTradesTable } from '@/components/dashboard/RecentTradesTable';
 import { useTradingStore } from '@/stores/tradingStore';
-import { Wallet, TrendingUp, Briefcase, Target } from 'lucide-react';
+import { Wallet, TrendingUp, Briefcase, Target, TrendingDown, BarChart3, Award } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const EquityChart = dynamic(() => import('@/components/dashboard/EquityChart').then(mod => ({ default: mod.EquityChart })), { ssr: false });
@@ -22,6 +22,12 @@ const DashboardPage = () => {
   const closedPnL = trades.reduce((acc, trade) => acc + trade.pnl, 0);
   const winningTrades = trades.filter((t) => t.pnl > 0).length;
   const winRate = trades.length > 0 ? (winningTrades / trades.length) * 100 : 0;
+
+  // Calculate additional metrics
+  const maxDrawdown = -12.5; // Mock value
+  const sharpeRatio = 1.23; // Mock value
+  const dailyPnL = 2450; // Mock value
+  const bestTrade = Math.max(...trades.map(t => t.pnl), 0);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -67,6 +73,34 @@ const DashboardPage = () => {
           icon={Target}
           trend={winRate >= 50 ? 'up' : winRate > 0 ? 'down' : 'neutral'}
           subtitle={`${winningTrades}/${trades.length} trades`}
+        />
+        <StatCard
+          title="Max Drawdown"
+          value={`${maxDrawdown}%`}
+          icon={TrendingDown}
+          trend="down"
+          subtitle="Worst loss streak"
+        />
+        <StatCard
+          title="Sharpe Ratio"
+          value={sharpeRatio.toString()}
+          icon={BarChart3}
+          trend={sharpeRatio > 1 ? 'up' : 'neutral'}
+          subtitle="Risk-adjusted return"
+        />
+        <StatCard
+          title="Daily P&L"
+          value={`${dailyPnL >= 0 ? '+' : ''}${formatCurrency(dailyPnL)}`}
+          icon={TrendingUp}
+          trend={dailyPnL >= 0 ? 'up' : 'down'}
+          subtitle="Today's performance"
+        />
+        <StatCard
+          title="Best Trade"
+          value={formatCurrency(bestTrade)}
+          icon={Award}
+          trend="up"
+          subtitle="Highest profit"
         />
       </div>
 

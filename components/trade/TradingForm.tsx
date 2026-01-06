@@ -20,6 +20,16 @@ import {
   CommandList,
 } from '@/components/ui/command';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -28,7 +38,9 @@ import { toast } from 'sonner';
 import { useTradingStore } from '@/stores/tradingStore';
 import { stocksList, Stock } from '@/data/stocks';
 import { cn } from '@/lib/utils';
-import { Check, ChevronsUpDown, TrendingUp, TrendingDown } from 'lucide-react';
+import { Check, ChevronsUpDown, TrendingUp, TrendingDown, Info } from 'lucide-react';
+import { EducationalTooltip } from '@/components/ui/educational-tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 
 interface TradingFormProps {
   selectedStock: Stock | null;
@@ -41,6 +53,7 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
   const [quantity, setQuantity] = useState('1');
   const [productType, setProductType] = useState<'CNC' | 'MIS'>('CNC');
   const [leverage, setLeverage] = useState('1');
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const { executeTrade, balance } = useTradingStore();
 
@@ -61,6 +74,11 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
 
   const handleSubmit = () => {
     if (!selectedStock || !canTrade) return;
+    setShowConfirmDialog(true);
+  };
+
+  const confirmTrade = () => {
+    if (!selectedStock) return;
 
     executeTrade({
       symbol: selectedStock.symbol,
@@ -78,14 +96,16 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
     });
 
     setQuantity('1');
+    setShowConfirmDialog(false);
   };
 
   return (
-    <Card className="bg-card border-border h-full">
-      <CardHeader>
-        <CardTitle className="text-foreground">Place Order</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-6">
+    <TooltipProvider>
+      <Card className="bg-card border-border h-full">
+        <CardHeader>
+          <CardTitle className="text-foreground">Place Order</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
         {/* Stock Search */}
         <div className="space-y-2">
           <Label className="text-muted-foreground">Select Stock</Label>
@@ -95,7 +115,7 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
                 variant="outline"
                 role="combobox"
                 aria-expanded={open}
-                className="w-full justify-between bg-background border-input text-foreground"
+                className="w-full justify-between bg-background border-input text-foreground hover:bg-muted hover:text-muted-foreground"
               >
                 {selectedStock ? (
                   <span className="flex items-center gap-2">
@@ -124,6 +144,7 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
                           onStockSelect(stock);
                           setOpen(false);
                         }}
+                        className="data-[selected=true]:bg-muted data-[selected=true]:text-muted-foreground"
                       >
                         <Check
                           className={cn(
@@ -166,7 +187,7 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
               className={cn(
                 'w-full transition-all',
                 side === 'BUY'
-                  ? 'bg-success hover:bg-success/90 text-success-foreground'
+                  ? 'bg-success hover:bg-muted text-success-foreground hover:text-muted-foreground'
                   : 'border-border text-muted-foreground hover:text-foreground hover:border-success/50'
               )}
             >
@@ -179,7 +200,7 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
               className={cn(
                 'w-full transition-all',
                 side === 'SELL'
-                  ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground'
+                  ? 'bg-destructive hover:bg-muted text-destructive-foreground hover:text-muted-foreground'
                   : 'border-border text-muted-foreground hover:text-foreground hover:border-destructive/50'
               )}
             >
@@ -191,7 +212,12 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
 
         {/* Quantity */}
         <div className="space-y-2">
-          <Label className="text-muted-foreground">Quantity</Label>
+          <div className="flex items-center gap-2">
+            <Label className="text-muted-foreground">Quantity</Label>
+            <EducationalTooltip content="Quantity represents the number of shares you want to trade.">
+              <Info className="h-4 w-4" />
+            </EducationalTooltip>
+          </div>
           <Input
             type="number"
             min="1"
@@ -200,6 +226,14 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
             className="bg-background border-input text-foreground"
           />
         </div>
+
+        {/* Risk Preview */}
+        {selectedStock && quantityValue > 0 && (
+          <div className="p-3 bg-muted rounded-lg">
+            <p className="text-sm font-medium">Position Size: {((currentPrice * quantityValue) / balance * 100).toFixed(1)}% of portfolio</p>
+            <p className="text-xs text-muted-foreground">Recommended: Keep under 5% for risk management</p>
+          </div>
+        )}
 
         {/* Product Type */}
         <div className="space-y-2">
@@ -258,13 +292,50 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
           className={cn(
             'w-full h-12 text-lg font-semibold transition-all',
             side === 'BUY'
-              ? 'bg-success hover:bg-success/90 text-success-foreground'
-              : 'bg-destructive hover:bg-destructive/90 text-destructive-foreground'
+              ? 'bg-success hover:bg-muted text-success-foreground hover:text-muted-foreground'
+              : 'bg-destructive hover:bg-muted text-destructive-foreground hover:text-muted-foreground'
           )}
         >
           {side === 'BUY' ? 'BUY' : 'SELL'} {selectedStock?.symbol || 'Stock'}
         </Button>
       </CardContent>
     </Card>
+
+    {/* Trade Confirmation Dialog */}
+    <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+      <AlertDialogContent className="bg-card border-border">
+        <AlertDialogHeader>
+          <AlertDialogTitle className="text-foreground">Confirm Trade</AlertDialogTitle>
+          <AlertDialogDescription className="text-muted-foreground">
+            Are you sure you want to {side.toLowerCase()} {quantityValue} shares of {selectedStock?.symbol}?
+            <br />
+            <br />
+            <strong>Details:</strong>
+            <br />
+            Price: {formatCurrency(currentPrice)}
+            <br />
+            Total Value: {formatCurrency(currentPrice * quantityValue)}
+            <br />
+            Required Margin: {formatCurrency(requiredMargin)}
+            <br />
+            Product Type: {productType} {leverageValue > 1 ? `(${leverageValue}x leverage)` : ''}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="border-border hover:bg-muted hover:text-muted-foreground">Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={confirmTrade}
+            className={cn(
+              side === 'BUY'
+                ? 'bg-success hover:bg-success/90 text-success-foreground'
+                : 'bg-destructive hover:bg-destructive/90 text-destructive-foreground'
+            )}
+          >
+            Confirm {side}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </TooltipProvider>
   );
 }

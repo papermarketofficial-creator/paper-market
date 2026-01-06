@@ -8,7 +8,9 @@ import {
   BookOpen, 
   Settings,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Eye,
+  BarChart3
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -19,6 +21,8 @@ const navItems = [
   { to: '/trade', icon: TrendingUp, label: 'Trade' },
   { to: '/positions', icon: Briefcase, label: 'Positions' },
   { to: '/orders', icon: History, label: 'Orders' },
+  { to: '/watchlist', icon: Eye, label: 'Watchlist' },
+  { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/journal', icon: BookOpen, label: 'Journal' },
   { to: '/admin', icon: Settings, label: 'Admin', adminOnly: true },
 ];
@@ -57,7 +61,7 @@ export function Sidebar({ isAdmin = true, collapsed = false, onToggle }: Sidebar
                   'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
                   'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                 )}
-                activeClassName="bg-sidebar-accent text-primary"
+                activeClassName="bg-sidebar-accent text-sidebar-accent-foreground"
               >
                 <item.icon className={cn('h-5 w-5 flex-shrink-0')} />
                 {!collapsed && <span>{item.label}</span>}

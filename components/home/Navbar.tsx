@@ -27,6 +27,7 @@ const Navbar = () => {
 
           {/* Navigation Links - Centered visually */}
           <div className="hidden md:flex items-center gap-8">
+            <Link href="/learn" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors">Learn</Link>
             <a href="#about" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors">About</a>
             <a href="#features" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors">Features</a>
             <a href="#pricing" className="text-sm font-medium text-muted-foreground hover:text-primary transition-colors">Pricing</a>
