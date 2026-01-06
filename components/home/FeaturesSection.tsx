@@ -3,19 +3,22 @@ import { ChartLine, DollarSign, Shield } from "lucide-react";
 const features = [
   {
     icon: ChartLine,
-    title: "Real-Time Market Data",
-    description: "Stay ahead with up-to-the-second prices and news.",
+    title: "Live NSE Market Simulation",
+    description:
+      "Practice trading with real-time Indian market prices using virtual money.",
   },
   {
     icon: DollarSign,
-    title: "Low Fees, High Returns",
-    description: "Maximize your profits with competitive spreads.",
+    title: "₹10,00,000 Virtual Capital",
+    description:
+      "Start with a realistic virtual balance to learn position sizing and risk management.",
     highlight: true,
   },
   {
     icon: Shield,
-    title: "Secure & Reliable",
-    description: "Bank-level encryption and 24/7 monitoring.",
+    title: "100% Risk-Free Learning",
+    description:
+      "No real money involved. Learn strategies, psychology, and discipline safely.",
   },
 ];
 
@@ -48,15 +51,17 @@ const FeaturesSection = () => {
         {/* SECTION HEADING */}
         <h2 className="text-center text-[40px] md:text-[52px] font-bold 
           text-slate-900 dark:text-white mb-6 tracking-tight">
-          Why Traders Love Paper Market Pro
+Why Traders Learn Faster with Paper Market Pro
         </h2>
 
         {/* SUBTITLE */}
         <p className="max-w-2xl mx-auto text-center 
           text-slate-600 dark:text-white/50 
           text-[17px] leading-relaxed mb-20">
-          Built for both beginners and seasoned traders, Paper Market Pro combines
-          intuitive design, powerful analytics, and low fees.
+          Paper Market Pro is an educational paper trading platform that helps beginners
+and serious learners practice stock market trading with real market data —
+without risking real money.
+
         </p>
 
         {/* FEATURE CARDS GRID */}

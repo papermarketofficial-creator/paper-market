@@ -4,20 +4,20 @@ const steps = [
   {
     number: "01.",
     title: "Create an Account",
-    description: "Sign up in just minutes.",
+    description: "Sign up for free and get instant access to the paper trading platform.",
     highlight: false,
   },
   {
     number: "02.",
-    title: "Fund Your Wallet",
+    title: "Get Virtual Capital",
     description:
-      "Choose from a range of trusted payment methods and deposit securely with full encryption.",
+      "Receive virtual money in your demo account to practice trading without any real financial risk.",
     highlight: true,
   },
   {
     number: "03.",
-    title: "Start Trading",
-    description: "Access global markets instantly.",
+    title: "Start Paper Trading",
+    description: "Buy and sell using real market prices and learn by doing.",
     highlight: false,
   },
 ];
@@ -38,21 +38,25 @@ const StepsSection = () => {
         {/* Header */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-16 gap-8">
           <div className="max-w-xl">
-            <span className="inline-block px-4 py-1.5 mb-6 rounded-full text-xs font-medium
+            <span
+              className="inline-block px-4 py-1.5 mb-6 rounded-full text-xs font-medium
               bg-blue-100 text-blue-700
-              dark:bg-white/5 dark:text-white/80 dark:border dark:border-white/10">
+              dark:bg-white/5 dark:text-white/80 dark:border dark:border-white/10"
+            >
               Getting Started
             </span>
 
-            <h2 className="text-4xl md:text-5xl font-bold leading-[1.1]
-              text-slate-900 dark:text-white">
+            <h2
+              className="text-4xl md:text-5xl font-bold leading-[1.1]
+              text-slate-900 dark:text-white"
+            >
               Your <span className="text-blue-600 dark:text-blue-400">First Trade</span>, Made
               <br /> Simple
             </h2>
           </div>
 
           <p className="text-slate-600 dark:text-white/40 text-lg max-w-[400px] leading-relaxed mb-2">
-            Jumpstart your trading experience with intuitive tools and instant market access.
+            Learn how trading works step by step using virtual money and real market data.
           </p>
         </div>
 
@@ -136,7 +140,7 @@ const StepsSection = () => {
                     href="#"
                     className="flex items-center gap-2 text-lg font-semibold text-white group"
                   >
-                    Learn more
+                    Learn how it works
                     <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
                   </a>
                 )}
@@ -144,6 +148,11 @@ const StepsSection = () => {
             </div>
           ))}
         </div>
+
+        {/* Disclaimer */}
+        <p className="mt-12 text-center text-xs text-slate-500 dark:text-white/40">
+          This platform is for educational purposes only. No real money trading or investment advice.
+        </p>
       </div>
     </section>
   );

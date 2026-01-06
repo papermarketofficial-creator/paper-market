@@ -29,20 +29,33 @@ interface Market {
   darkColor: string;
   data: MarketDataPoint[];
   items: MarketItem[];
-  date?: string; // Optional property fixes the TS(2339) error
+  date?: string;
 }
 
 // --- Helper Functions ---
 const generateData = (base: number, volatility: number): MarketDataPoint[] =>
   Array.from({ length: 20 }, (_, i) => ({
-    date: i === 0 ? "2/26" : i === 4 ? "3/13" : i === 8 ? "3/26" : i === 12 ? "4/13" : i === 16 ? "5/13" : i === 19 ? "5/26" : "",
+    date:
+      i === 0
+        ? "2/26"
+        : i === 4
+        ? "3/13"
+        : i === 8
+        ? "3/26"
+        : i === 12
+        ? "4/13"
+        : i === 16
+        ? "5/13"
+        : i === 19
+        ? "5/26"
+        : "",
     value: base + Math.random() * volatility - volatility / 2,
   }));
 
-// --- Data ---
+// --- Data (Educational / Simulation) ---
 const markets: Market[] = [
   {
-    name: "Stocks",
+    name: "Stocks (Simulation)",
     color: "#10b981",
     darkColor: "#22c55e",
     data: generateData(180, 40),
@@ -52,8 +65,8 @@ const markets: Market[] = [
     ],
   },
   {
-    name: "Crypto",
-    date: "May 26, 2025",
+    name: "Crypto (Simulation)",
+    date: "Sample Market Data",
     color: "#2563eb",
     darkColor: "#3b82f6",
     data: generateData(60000, 15000),
@@ -63,8 +76,8 @@ const markets: Market[] = [
     ],
   },
   {
-    name: "Forex",
-    date: "May 26, 2025",
+    name: "Forex (Simulation)",
+    date: "Sample Market Data",
     color: "#ea580c",
     darkColor: "#f97316",
     data: generateData(1.2, 0.4),
@@ -80,21 +93,26 @@ const MarketSection = () => {
   const isInView = useInView(sectionRef, { amount: 0.3, once: true });
 
   return (
-    <section ref={sectionRef} className="relative py-24 bg-slate-50 dark:bg-[#02040a] transition-colors duration-300">
+    <section
+      ref={sectionRef}
+      className="relative py-24 bg-slate-50 dark:bg-[#02040a] transition-colors duration-300"
+    >
       <div className="container mx-auto px-4">
         {/* Header Label */}
         <div className="flex justify-center mb-6">
           <span className="px-4 py-1.5 rounded-full bg-blue-50 dark:bg-white/5 border border-blue-100 dark:border-white/10 text-xs font-semibold text-blue-600 dark:text-white/80 backdrop-blur">
-            Market
+            Market Simulation
           </span>
         </div>
 
+        {/* Header */}
         <div className="text-center mb-20">
           <h2 className="text-[40px] md:text-[48px] font-bold text-slate-900 dark:text-white mb-4 tracking-tight">
-            Today’s Market Highlights
+            Practice with Real Market Behavior
           </h2>
           <p className="text-slate-500 dark:text-white/45 max-w-2xl mx-auto text-lg leading-relaxed">
-            Stay ahead with real-time updates on the biggest market movers and trending assets.
+            Analyze price movements across stocks, crypto, and forex using
+            simulated trades powered by real market data.
           </p>
         </div>
 
@@ -107,7 +125,9 @@ const MarketSection = () => {
             >
               <div className="px-6 pt-6 pb-2">
                 <div className="flex justify-between items-center">
-                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">{market.name}</h3>
+                  <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                    {market.name}
+                  </h3>
                   {market.date && (
                     <span className="text-xs font-medium text-slate-400 dark:text-white/30">
                       {market.date}
@@ -122,22 +142,32 @@ const MarketSection = () => {
                   {isInView ? (
                     <AreaChart data={market.data}>
                       <defs>
-                        <linearGradient id={`gradient-${index}`} x1="0" y1="0" x2="0" y2="1">
+                        <linearGradient
+                          id={`gradient-${index}`}
+                          x1="0"
+                          y1="0"
+                          x2="0"
+                          y2="1"
+                        >
                           <stop offset="0%" stopColor={market.color} stopOpacity={0.2} />
                           <stop offset="100%" stopColor={market.color} stopOpacity={0} />
                         </linearGradient>
                       </defs>
-                      <CartesianGrid 
-                        vertical={false} 
-                        stroke="currentColor" 
-                        className="text-slate-100 dark:text-white/5" 
+                      <CartesianGrid
+                        vertical={false}
+                        stroke="currentColor"
+                        className="text-slate-100 dark:text-white/5"
                       />
                       <XAxis
                         dataKey="date"
                         axisLine={false}
                         tickLine={false}
                         interval={0}
-                        tick={{ fill: "currentColor", fontSize: 10, className: "text-slate-400 dark:text-white/25" }}
+                        tick={{
+                          fill: "currentColor",
+                          fontSize: 10,
+                          className: "text-slate-400 dark:text-white/25",
+                        }}
                       />
                       <YAxis hide />
                       <Area
@@ -147,7 +177,7 @@ const MarketSection = () => {
                         strokeWidth={2.5}
                         fill={`url(#gradient-${index})`}
                         dot={false}
-                        isAnimationActive={true}
+                        isAnimationActive
                         animationDuration={1500}
                       />
                     </AreaChart>
@@ -164,17 +194,25 @@ const MarketSection = () => {
                     <div
                       key={i}
                       className={`flex flex-col items-center gap-1 ${
-                        i === 0 ? "pr-6 border-r border-slate-200 dark:border-white/10" : "pl-6"
+                        i === 0
+                          ? "pr-6 border-r border-slate-200 dark:border-white/10"
+                          : "pl-6"
                       }`}
                     >
                       <span className="text-[10px] font-bold text-slate-400 dark:text-white/40 uppercase tracking-wider text-center">
                         {item.symbol}
                       </span>
                       <div className="flex items-center gap-2 justify-center">
-                        <span className="text-sm font-bold text-slate-900 dark:text-white">{item.price}</span>
-                        <span className={`text-[11px] font-bold ${
-                          item.up ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-500"
-                        }`}>
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">
+                          {item.price}
+                        </span>
+                        <span
+                          className={`text-[11px] font-bold ${
+                            item.up
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-red-600 dark:text-red-500"
+                          }`}
+                        >
                           {item.change}
                         </span>
                       </div>
@@ -185,6 +223,12 @@ const MarketSection = () => {
             </div>
           ))}
         </div>
+
+        {/* Disclaimer */}
+        <p className="mt-16 text-center text-xs text-slate-500 dark:text-white/40">
+          Educational simulation only. Market data shown for learning purposes —
+          no real money trading or investment advice.
+        </p>
       </div>
     </section>
   );
