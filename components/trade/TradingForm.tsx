@@ -7,8 +7,8 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
 import { useRiskStore } from '@/stores/trading/risk.store';
-import { useMarketStore } from '@/stores/trading/market.store';
 import { Stock } from '@/types/equity.types';
+import { InstrumentMode } from '@/types/general.types'; // Import type
 import { cn } from '@/lib/utils';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import {
@@ -28,61 +28,47 @@ interface TradingFormProps {
   selectedStock: Stock | null;
   onStockSelect: (stock: Stock) => void;
   instruments: Stock[];
+  instrumentMode: InstrumentMode; // ✅ Required Prop
 }
 
-export function TradingForm({ selectedStock, onStockSelect, instruments }: TradingFormProps) {
+export function TradingForm({ selectedStock, onStockSelect, instruments, instrumentMode }: TradingFormProps) {
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
-  const [quantity, setQuantity] = useState('1'); // User input (Lots for F&O, Shares for Eq)
+  const [quantity, setQuantity] = useState('1'); 
   const [productType, setProductType] = useState<'CNC' | 'MIS'>('CNC');
   const [leverage, setLeverage] = useState('1');
   const [stopLoss, setStopLoss] = useState('');
   const [target, setTarget] = useState('');
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
-  const { instrumentMode } = useMarketStore();
+  // Removed useMarketStore hook for mode
   const executeTrade = useTradeExecutionStore((state) => state.executeTrade);
   const balance = useRiskStore((state) => state.balance);
 
-  // Derived Values
+  // ... (Derived values unchanged) ...
   const currentPrice = selectedStock?.price || 0;
   const leverageValue = parseInt(leverage);
-  
-  // Input represents "Lots", so we multiply for calculations
   const inputValue = parseInt(quantity) || 0;
   const lotSize = selectedStock?.lotSize || 1;
   const totalQuantity = inputValue * lotSize; 
-
   const requiredMargin = (currentPrice * totalQuantity) / leverageValue;
 
-  // --- VALIDATION LOGIC ---
+  // ... (Validation Logic unchanged) ...
   const slValue = parseFloat(stopLoss);
   const targetValue = parseFloat(target);
-  
   const hasSl = stopLoss.trim() !== '' && !isNaN(slValue);
   const hasTarget = target.trim() !== '' && !isNaN(targetValue);
 
-  // 1. SL Validation (Absolute Price)
   let isSlValid = true;
   if (hasSl) {
-    isSlValid = side === 'BUY' 
-      ? slValue < currentPrice 
-      : slValue > currentPrice;
+    isSlValid = side === 'BUY' ? slValue < currentPrice : slValue > currentPrice;
   }
-
-  // 2. Target Validation (Absolute Price)
   let isTargetValid = true;
   if (hasTarget) {
-    isTargetValid = side === 'BUY' 
-      ? targetValue > currentPrice 
-      : targetValue < currentPrice;
+    isTargetValid = side === 'BUY' ? targetValue > currentPrice : targetValue < currentPrice;
   }
 
-  // 3. Quantity Validation
-  // Fix: Removed `inputValue % lotSize === 0` check. 
-  // Since input is "Lots", any integer > 0 is valid.
   const isQuantityValid = inputValue > 0;
   const hasSufficientMargin = requiredMargin <= balance;
-  
   const canTrade = selectedStock && isQuantityValid && hasSufficientMargin && isSlValid && isTargetValid;
 
   const handleSubmit = () => {
@@ -97,7 +83,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments }: Tradi
       symbol: selectedStock.symbol,
       name: selectedStock.name,
       side,
-      quantity: totalQuantity, // ✅ Send Total Shares (Lots * LotSize)
+      quantity: totalQuantity,
       entryPrice: currentPrice,
       productType,
       leverage: leverageValue,
@@ -105,7 +91,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments }: Tradi
       expiryDate: selectedStock.expiryDate,
       stopLoss: hasSl ? slValue : undefined,
       target: hasTarget ? targetValue : undefined,
-    }, selectedStock.lotSize);
+    }, selectedStock.lotSize, instrumentMode); // ✅ Pass explicit mode
 
     toast.success('Trade Sent', {
       description: `${side} ${totalQuantity} shares (${inputValue} Lots) of ${selectedStock.symbol} at market.`,
@@ -132,45 +118,39 @@ export function TradingForm({ selectedStock, onStockSelect, instruments }: Tradi
 
           <OrderTypeToggle side={side} onSideChange={setSide} />
 
-          {/* Quantity Input Label Update could be helpful, but keeping component standard */}
           <QuantityInput quantity={quantity} onQuantityChange={setQuantity} />
           
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-muted-foreground text-xs">
-                Stop Loss {instrumentMode === 'equity' && '(Opt)'}
+                {/* ✅ Use prop instead of store */}
+                Stop Loss {instrumentMode !== 'futures' && '(Opt)'}
               </Label>
               <Input 
                 type="number" 
                 placeholder={side === 'BUY' ? '< Entry' : '> Entry'}
                 value={stopLoss}
                 onChange={(e) => setStopLoss(e.target.value)}
-                className={cn(
-                  "bg-background",
-                  hasSl && !isSlValid && "border-destructive focus-visible:ring-destructive"
-                )}
+                className={cn("bg-background", hasSl && !isSlValid && "border-destructive focus-visible:ring-destructive")}
               />
             </div>
             <div className="space-y-2">
               <Label className="text-muted-foreground text-xs">
-                Target {instrumentMode === 'equity' && '(Opt)'}
+                Target {instrumentMode !== 'futures' && '(Opt)'}
               </Label>
               <Input 
                 type="number" 
                 placeholder={side === 'BUY' ? '> Entry' : '< Entry'}
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
-                className={cn(
-                  "bg-background",
-                  hasTarget && !isTargetValid && "border-destructive focus-visible:ring-destructive"
-                )}
+                className={cn("bg-background", hasTarget && !isTargetValid && "border-destructive focus-visible:ring-destructive")}
               />
             </div>
           </div>
 
           <RiskPreview
             selectedStock={selectedStock}
-            quantityValue={inputValue} // Pass lots to preview if it expects lots, or handle logic there
+            quantityValue={inputValue}
             currentPrice={currentPrice}
             balance={balance}
           />
@@ -193,23 +173,14 @@ export function TradingForm({ selectedStock, onStockSelect, instruments }: Tradi
 
           <ProductTypeSelector productType={productType} onProductTypeChange={setProductType} />
           <LeverageSelector leverage={leverage} onLeverageChange={setLeverage} />
-          
-          {/* Ensure MarginDisplay receives the full required margin calculated above */}
-          <MarginDisplay 
-            selectedStock={selectedStock} 
-            currentPrice={currentPrice} 
-            requiredMargin={requiredMargin} 
-            balance={balance} 
-          />
+          <MarginDisplay selectedStock={selectedStock} currentPrice={currentPrice} requiredMargin={requiredMargin} balance={balance} />
 
           <Button
             onClick={handleSubmit}
             disabled={!canTrade}
             className={cn(
               'w-full h-12 text-lg font-semibold transition-all',
-              side === 'BUY'
-                ? 'bg-success hover:bg-muted text-success-foreground hover:text-muted-foreground'
-                : 'bg-destructive hover:bg-muted text-destructive-foreground hover:text-muted-foreground'
+              side === 'BUY' ? 'bg-success hover:bg-muted text-success-foreground' : 'bg-destructive hover:bg-muted text-destructive-foreground'
             )}
           >
             {side === 'BUY' ? 'BUY' : 'SELL'} {selectedStock?.symbol || 'Stock'}
@@ -222,7 +193,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments }: Tradi
         onOpenChange={setShowConfirmDialog}
         selectedStock={selectedStock}
         side={side}
-        quantityValue={totalQuantity} // Confirm Dialog shows Total Shares
+        quantityValue={totalQuantity}
         currentPrice={currentPrice}
         requiredMargin={requiredMargin}
         productType={productType}

@@ -9,26 +9,20 @@ interface MarketState {
   stocks: Stock[];
   futures: Stock[];
   options: Stock[];
-  instrumentMode: InstrumentMode;
   watchlist: string[];
   // Actions
-  setInstrumentMode: (mode: InstrumentMode) => void;
   addToWatchlist: (symbol: string) => void;
   removeFromWatchlist: (symbol: string) => void;
   updateStockPrice: (symbol: string, price: number) => void;
-  getCurrentInstruments: () => Stock[];
+  // ✅ Pure function getter, requires mode to be passed
+  getCurrentInstruments: (mode: InstrumentMode) => Stock[];
 }
 
 export const useMarketStore = create<MarketState>((set, get) => ({
   stocks: stocksList,
   futures: futuresList,
   options: optionsList,
-  instrumentMode: 'equity',
-  watchlist: ['RELIANCE', 'TCS', 'INFY'], // Default watchlist
-
-  setInstrumentMode: (mode) => {
-    set({ instrumentMode: mode });
-  },
+  watchlist: ['RELIANCE', 'TCS', 'INFY'],
 
   addToWatchlist: (symbol) => {
     set((state) => ({
@@ -56,9 +50,10 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     }));
   },
 
-  getCurrentInstruments: () => {
+  // ✅ Logic relies on argument, not internal state
+  getCurrentInstruments: (mode: InstrumentMode) => {
     const state = get();
-    switch (state.instrumentMode) {
+    switch (mode) {
       case 'equity':
         return state.stocks;
       case 'futures':

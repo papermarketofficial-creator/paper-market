@@ -1,160 +1,161 @@
 import { create } from 'zustand';
 import { Position } from '@/types/position.types';
 import { Trade } from '@/types/order.types';
-import { ExitReason } from '@/types/general.types';
+import { InstrumentMode } from '@/types/general.types';
 import { usePositionsStore } from './positions.store';
 import { useOrdersStore } from './orders.store';
 import { useRiskStore } from './risk.store';
-import { useMarketStore } from './market.store';
 import { useJournalStore } from './journal.store';
 import { parseOptionSymbol, calculateOptionRiskMetrics } from '@/lib/fno-utils';
-import { JournalEntry } from '@/types/journal.types';
+import { JournalEntry, ExitReason } from '@/types/journal.types';
 
 interface TradeExecutionState {
-  // ✅ UPDATED: Params include optional SL/Target
-  executeTrade: (trade: Omit<Position, 'id' | 'currentPrice' | 'instrument' | 'lotSize' | 'currentPnL'>, lotSize: number) => Promise<void>;
-  // ✅ UPDATED: exitReason is now strongly typed
-  closePosition: (positionId: string, exitPrice: number, reason?: ExitReason) => void;
+  // ✅ Updated Signature: added instrumentMode
+  executeTrade: (
+    trade: Omit<Position, 'id' | 'currentPrice' | 'instrument' | 'lotSize' | 'currentPnL'>, 
+    lotSize: number,
+    instrumentMode: InstrumentMode 
+  ) => Promise<void>;
+  
+  closePosition: (positionId: string, exitPrice: number, reason?: string) => void;
   settleExpiredPositions: () => void;
 }
 
-// Helpers...
 const randomRange = (min: number, max: number) => Math.random() * (max - min) + min;
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => ({
-  executeTrade: async (tradeParams, lotSize) => {
-    // ... (Order Creation Logic - largely same, adding SL/Target to Trade object)
+  executeTrade: async (tradeParams, lotSize, instrumentMode) => { // ✅ Added param
+    // 1. EXECUTION DELAY
+    const delay = randomRange(300, 700);
+    await new Promise(resolve => setTimeout(resolve, delay));
+
     const tradeId = Date.now().toString();
-    const instrumentMode = useMarketStore.getState().instrumentMode;
-    const requestedQty = tradeParams.quantity;
     
-    // ... [Order State CREATED -> SENT] ...
+    // 2. SLIPPAGE SIMULATION (Using passed mode)
+    let slippagePercent = 0;
+    switch (instrumentMode) {
+      case 'futures':
+        slippagePercent = randomRange(0.0002, 0.0008);
+        break;
+      case 'options':
+        slippagePercent = randomRange(0.0010, 0.0030); 
+        break;
+      case 'equity':
+      default:
+        slippagePercent = randomRange(0.0005, 0.0015);
+        break;
+    }
+
+    // ... (Price Calculation - unchanged) ...
+    const requestedPrice = tradeParams.entryPrice;
+    let fillPrice = requestedPrice;
+    if (tradeParams.side === 'BUY') {
+      fillPrice = requestedPrice * (1 + slippagePercent);
+    } else {
+      fillPrice = requestedPrice * (1 - slippagePercent);
+    }
+    fillPrice = Math.round(fillPrice * 100) / 100;
+    const slippageAmount = Math.abs(fillPrice - requestedPrice);
+    const executionNote = `Req: ${requestedPrice.toFixed(2)} | Fill: ${fillPrice.toFixed(2)} | Slip: ${slippageAmount.toFixed(2)}`;
+
+    // Create Position Object
+    const newPosition: Position = {
+      ...tradeParams,
+      id: tradeId,
+      entryPrice: fillPrice,
+      currentPrice: fillPrice,
+      instrument: instrumentMode, // ✅ Use param
+      lotSize,
+      currentPnL: 0,
+    };
+
+    // Create Trade Object
     const newTrade: Trade = {
-      // ... existing props
       id: tradeId,
       symbol: tradeParams.symbol,
       name: tradeParams.name,
       side: tradeParams.side,
-      quantity: requestedQty,
-      filledQuantity: 0,
-      entryPrice: tradeParams.entryPrice,
-      exitPrice: null,
+      quantity: tradeParams.quantity,
+      filledQuantity: tradeParams.quantity,
+      entryPrice: fillPrice,
+      exitPrice: 0,
       pnl: 0,
-      status: 'CREATED',
+      status: 'FILLED',
       entryTime: new Date(),
       exitTime: null,
       updatedAt: new Date(),
-      instrument: instrumentMode,
+      instrument: instrumentMode, // ✅ Use param
       expiryDate: tradeParams.expiryDate,
-      notes: 'Order Created',
-      // ✅ NEW: Store SL/Target
+      notes: executionNote,
       stopLoss: tradeParams.stopLoss,
       target: tradeParams.target,
     };
+
+    const requiredMargin = (fillPrice * tradeParams.quantity) / tradeParams.leverage;
+
+    // Update Stores
+    usePositionsStore.getState().addPosition(newPosition);
     useOrdersStore.getState().addTrade(newTrade);
-    
-    await delay(300);
-    // ... [Order State SENT -> Fill Calc] ...
-    
-    // Fill Calculation
-    const slippagePercent = instrumentMode === 'options' ? 0.002 : 0.0005;
-    const fillPrice = tradeParams.side === 'BUY' 
-      ? tradeParams.entryPrice * (1 + slippagePercent)
-      : tradeParams.entryPrice * (1 - slippagePercent);
-    const finalPrice = Math.round(fillPrice * 100) / 100;
-    
-    // ... [Partial Fill Logic] ... 
-    // Assuming immediate full fill for brevity in this snippet since logic is complex
-    // In full impl, ensure SL/Target is passed to Position creation below:
-
-    const updateOrderAndPosition = (qty: number, status: 'FILLED' | 'PARTIALLY_FILLED') => {
-      useOrdersStore.getState().updateTrade(tradeId, { 
-        status, 
-        filledQuantity: qty,
-        entryPrice: finalPrice,
-        notes: `Filled ${qty}/${requestedQty} @ ${finalPrice}`
-      });
-
-      usePositionsStore.getState().removePosition(tradeId);
-      
-      const positionEntry: Position = {
-        ...tradeParams,
-        id: tradeId,
-        quantity: qty,
-        entryPrice: finalPrice, // Actual fill
-        currentPrice: finalPrice,
-        instrument: instrumentMode,
-        lotSize,
-        currentPnL: 0,
-        // ✅ NEW: Persist SL/Target to Active Position
-        stopLoss: tradeParams.stopLoss,
-        target: tradeParams.target,
-      };
-      
-      usePositionsStore.getState().addPosition(positionEntry);
-    };
-
-    updateOrderAndPosition(requestedQty, 'FILLED');
-    const requiredMargin = (finalPrice * requestedQty) / tradeParams.leverage;
     useRiskStore.getState().deductMargin(requiredMargin);
 
-    // ... [Journaling Logic] ...
-    // ... (Use finalPrice and risk snapshot logic) ...
-    // Note: JournalEntry type might need update if we want to store SL/Target specifically there too
-    // For now, adhering to existing Journal Entry logic.
+    // Journaling
+    let riskSnapshot = undefined;
+    if (instrumentMode === 'options') {
+       const optionDetails = parseOptionSymbol(tradeParams.symbol);
+       const metrics = calculateOptionRiskMetrics(fillPrice, tradeParams.quantity * lotSize, lotSize, optionDetails, tradeParams.side);
+       if(metrics) riskSnapshot = { maxLoss: metrics.maxLoss, maxProfit: metrics.maxProfit, breakeven: metrics.breakeven, capitalAtRisk: metrics.capitalAtRisk };
+    }
+
     const journalEntry: JournalEntry = {
       id: tradeId,
-      instrument: instrumentMode,
+      instrument: instrumentMode, // ✅ Use param
       symbol: tradeParams.symbol,
       expiryDate: tradeParams.expiryDate,
       side: tradeParams.side,
-      quantity: requestedQty,
-      entryPrice: finalPrice,
+      quantity: tradeParams.quantity,
+      entryPrice: fillPrice,
       entryTime: new Date(),
-      // riskSnapshot...
+      riskSnapshot,
     };
+
     useJournalStore.getState().addJournalEntry(journalEntry);
   },
 
-  // ✅ UPDATED: closePosition handles ExitReason
   closePosition: (positionId, exitPrice, reason = 'MANUAL') => {
-    const positionsStore = usePositionsStore.getState();
-    const ordersStore = useOrdersStore.getState();
-    const riskStore = useRiskStore.getState();
-    
-    const position = positionsStore.positions.find((p) => p.id === positionId);
-    if (!position) return;
-
-    const pnl = position.side === 'BUY'
-      ? (exitPrice - position.entryPrice) * position.quantity
-      : (position.entryPrice - exitPrice) * position.quantity;
-
-    const requiredMargin = (position.entryPrice * position.quantity) / position.leverage;
-
-    ordersStore.updateTrade(positionId, {
-      exitPrice,
-      pnl,
-      status: 'CLOSED',
-      exitTime: new Date(),
-      // ✅ NEW: Store explicit exit reason
-      exitReason: reason, 
-      notes: `Closed via ${reason}`,
-    });
-
-    positionsStore.removePosition(positionId);
-    riskStore.addToBalance(requiredMargin + pnl);
-    riskStore.addEquityPoint(Date.now(), riskStore.balance + requiredMargin + pnl);
-    
-    // Map ExitReason types to Journal types if they differ
-    // (Journal.types.ts defines ExitReason as MANUAL | EXPIRY | STOP_LOSS etc)
-    // We can cast directly if they align
-    useJournalStore.getState().updateJournalOnExit(positionId, {
-      exitPrice,
-      exitTime: new Date(),
-      realizedPnL: pnl,
-      exitReason: reason as any // Cast or map if needed
-    });
+      // ... (No changes needed here) ...
+      const positionsStore = usePositionsStore.getState();
+      const ordersStore = useOrdersStore.getState();
+      const riskStore = useRiskStore.getState();
+      
+      const position = positionsStore.positions.find((p) => p.id === positionId);
+      if (!position) return;
+  
+      const pnl = position.side === 'BUY'
+        ? (exitPrice - position.entryPrice) * position.quantity
+        : (position.entryPrice - exitPrice) * position.quantity;
+  
+      const requiredMargin = (position.entryPrice * position.quantity) / position.leverage;
+  
+      ordersStore.updateTrade(positionId, {
+        exitPrice,
+        pnl,
+        status: 'CLOSED',
+        exitTime: new Date(),
+        notes: reason,
+      });
+  
+      positionsStore.removePosition(positionId);
+      riskStore.addToBalance(requiredMargin + pnl);
+      riskStore.addEquityPoint(Date.now(), riskStore.balance + requiredMargin + pnl);
+  
+      const exitReason: ExitReason = reason === 'EXPIRY SETTLEMENT' ? 'EXPIRY' : 'MANUAL';
+      
+      useJournalStore.getState().updateJournalOnExit(positionId, {
+        exitPrice,
+        exitTime: new Date(),
+        realizedPnL: pnl,
+        exitReason
+      });
   },
 
   settleExpiredPositions: () => {
@@ -163,7 +164,11 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
     if (expiredPositions.length === 0) return;
 
     expiredPositions.forEach((position) => {
-      get().closePosition(position.id, position.currentPrice, 'EXPIRY');
+      get().closePosition(
+        position.id, 
+        position.currentPrice, 
+        'EXPIRY SETTLEMENT'
+      );
     });
   }
 }));
