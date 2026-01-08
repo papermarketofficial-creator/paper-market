@@ -139,6 +139,14 @@
     @apply text-destructive;
   }
 
+  .text-call {
+    @apply text-[hsl(var(--success))];
+  }
+
+  .text-put {
+    @apply text-destructive;
+  }
+
   .bg-profit {
     @apply bg-[hsl(var(--success))];
   }

@@ -3,14 +3,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { useTradingStore } from '@/stores/tradingStore';
+import { useRiskStore } from '@/stores/trading/risk.store';
 import { User, Mail, Wallet, Crown, LogOut } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 
 const ProfilePage = () => {
   const router = useRouter();
-  const { balance } = useTradingStore();
+  const balance = useRiskStore((state) => state.balance);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {

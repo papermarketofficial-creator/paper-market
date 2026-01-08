@@ -24,17 +24,21 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useTradingStore, Position } from '@/stores/tradingStore';
+import { Position } from '@/types/position.types';
+import { usePositionsStore } from '@/stores/trading/positions.store';
+import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
 import { cn } from '@/lib/utils';
 import { X, TrendingUp, TrendingDown } from 'lucide-react';
 import { toast } from 'sonner';
+import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
 
 interface PositionsTableProps {
   loading?: boolean;
 }
 
 export function PositionsTable({ loading = false }: PositionsTableProps) {
-  const { positions, closePosition } = useTradingStore();
+  const positions = usePositionsStore((state) => state.positions);
+  const closePosition = useTradeExecutionStore((state) => state.closePosition);
   const [closingPosition, setClosingPosition] = useState<Position | null>(null);
   const [partialClose, setPartialClose] = useState<{position: Position, quantity: number} | null>(null);
 
@@ -50,6 +54,11 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
     return position.side === 'BUY'
       ? (position.currentPrice - position.entryPrice) * position.quantity
       : (position.entryPrice - position.currentPrice) * position.quantity;
+  };
+
+  // Use the store's calculated P&L for display
+  const getPositionPnL = (position: Position) => {
+    return position.currentPnL || calculatePnL(position);
   };
 
   const handleClose = (position: Position) => {
@@ -115,6 +124,7 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
                 <TableHeader>
                   <TableRow className="border-border hover:bg-transparent">
                     <TableHead className="text-muted-foreground">Symbol</TableHead>
+                    <TableHead className="text-muted-foreground">Type</TableHead>
                     <TableHead className="text-muted-foreground">Side</TableHead>
                     <TableHead className="text-muted-foreground text-right">Qty</TableHead>
                     <TableHead className="text-muted-foreground text-right">Entry</TableHead>
@@ -125,8 +135,8 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
                 </TableHeader>
                 <TableBody>
                   {positions.map((position) => {
-                    const pnl = calculatePnL(position);
-                    const pnlPercent = ((pnl / (position.entryPrice * position.quantity)) * 100).toFixed(2);
+                    const pnl = getPositionPnL(position);
+                    const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
                     
                     return (
                       <TableRow
@@ -136,11 +146,31 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
                           pnl >= 0 ? 'hover:bg-success/5' : 'hover:bg-destructive/5'
                         )}
                       >
+<TableCell>
+  <div>
+    <p className="font-medium text-foreground">{position.symbol}</p>
+    <p className="text-xs text-muted-foreground">
+      {position.productType} • {position.leverage}x
+      {/* START EXPIRY INDICATOR */}
+      {position.expiryDate && (
+        <span className={cn(
+          "ml-1",
+          isExpired(position.expiryDate) ? "text-muted-foreground" :
+          daysToExpiry(position.expiryDate) === 0 ? "text-destructive font-medium" :
+          daysToExpiry(position.expiryDate) === 1 ? "text-orange-500" :
+          "text-muted-foreground"
+        )}>
+          • {formatExpiryLabel(position.expiryDate)}
+        </span>
+      )}
+      {/* END EXPIRY INDICATOR */}
+    </p>
+  </div>
+</TableCell>
                         <TableCell>
-                          <div>
-                            <p className="font-medium text-foreground">{position.symbol}</p>
-                            <p className="text-xs text-muted-foreground">{position.productType} • {position.leverage}x</p>
-                          </div>
+                          <Badge variant="secondary" className="text-xs">
+                            {position.instrument.toUpperCase()}
+                          </Badge>
                         </TableCell>
                         <TableCell>
                           <Badge
@@ -220,10 +250,10 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
               {closingPosition && (
                 <span className={cn(
                   'block mt-2 font-medium',
-                  calculatePnL(closingPosition) >= 0 ? 'text-profit' : 'text-loss'
+                  getPositionPnL(closingPosition) >= 0 ? 'text-profit' : 'text-loss'
                 )}>
-                  P&L: {calculatePnL(closingPosition) >= 0 ? '+' : ''}
-                  {formatCurrency(calculatePnL(closingPosition))}
+                  P&L: {getPositionPnL(closingPosition) >= 0 ? '+' : ''}
+                  {formatCurrency(getPositionPnL(closingPosition))}
                 </span>
               )}
             </AlertDialogDescription>

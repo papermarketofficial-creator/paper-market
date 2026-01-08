@@ -1,76 +1,89 @@
 "use client";
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-} from '@/components/ui/command';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover';
 import { toast } from 'sonner';
-import { useTradingStore } from '@/stores/tradingStore';
-import { stocksList, Stock } from '@/data/stocks';
+import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
+import { useRiskStore } from '@/stores/trading/risk.store';
+import { useMarketStore } from '@/stores/trading/market.store';
+import { Stock } from '@/types/equity.types';
 import { cn } from '@/lib/utils';
-import { Check, ChevronsUpDown, TrendingUp, TrendingDown, Info } from 'lucide-react';
-import { EducationalTooltip } from '@/components/ui/educational-tooltip';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import {
+  StockSearch,
+  OrderTypeToggle,
+  QuantityInput,
+  RiskPreview,
+  OptionsRiskMetrics,
+  OptionsPayoffChart,
+  ProductTypeSelector,
+  LeverageSelector,
+  MarginDisplay,
+  TradeConfirmationDialog,
+} from './form';
 
 interface TradingFormProps {
   selectedStock: Stock | null;
   onStockSelect: (stock: Stock) => void;
+  instruments: Stock[];
 }
 
-export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) {
-  const [open, setOpen] = useState(false);
+export function TradingForm({ selectedStock, onStockSelect, instruments }: TradingFormProps) {
   const [side, setSide] = useState<'BUY' | 'SELL'>('BUY');
-  const [quantity, setQuantity] = useState('1');
+  const [quantity, setQuantity] = useState('1'); // User input (Lots for F&O, Shares for Eq)
   const [productType, setProductType] = useState<'CNC' | 'MIS'>('CNC');
   const [leverage, setLeverage] = useState('1');
+  const [stopLoss, setStopLoss] = useState('');
+  const [target, setTarget] = useState('');
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
-  const { executeTrade, balance } = useTradingStore();
+  const { instrumentMode } = useMarketStore();
+  const executeTrade = useTradeExecutionStore((state) => state.executeTrade);
+  const balance = useRiskStore((state) => state.balance);
 
+  // Derived Values
   const currentPrice = selectedStock?.price || 0;
   const leverageValue = parseInt(leverage);
-  const quantityValue = parseInt(quantity) || 0;
-  const requiredMargin = (currentPrice * quantityValue) / leverageValue;
+  
+  // Input represents "Lots", so we multiply for calculations
+  const inputValue = parseInt(quantity) || 0;
+  const lotSize = selectedStock?.lotSize || 1;
+  const totalQuantity = inputValue * lotSize; 
 
-  const canTrade = selectedStock && quantityValue > 0 && requiredMargin <= balance;
+  const requiredMargin = (currentPrice * totalQuantity) / leverageValue;
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-IN', {
-      style: 'currency',
-      currency: 'INR',
-      maximumFractionDigits: 2,
-    }).format(value);
-  };
+  // --- VALIDATION LOGIC ---
+  const slValue = parseFloat(stopLoss);
+  const targetValue = parseFloat(target);
+  
+  const hasSl = stopLoss.trim() !== '' && !isNaN(slValue);
+  const hasTarget = target.trim() !== '' && !isNaN(targetValue);
+
+  // 1. SL Validation (Absolute Price)
+  let isSlValid = true;
+  if (hasSl) {
+    isSlValid = side === 'BUY' 
+      ? slValue < currentPrice 
+      : slValue > currentPrice;
+  }
+
+  // 2. Target Validation (Absolute Price)
+  let isTargetValid = true;
+  if (hasTarget) {
+    isTargetValid = side === 'BUY' 
+      ? targetValue > currentPrice 
+      : targetValue < currentPrice;
+  }
+
+  // 3. Quantity Validation
+  // Fix: Removed `inputValue % lotSize === 0` check. 
+  // Since input is "Lots", any integer > 0 is valid.
+  const isQuantityValid = inputValue > 0;
+  const hasSufficientMargin = requiredMargin <= balance;
+  
+  const canTrade = selectedStock && isQuantityValid && hasSufficientMargin && isSlValid && isTargetValid;
 
   const handleSubmit = () => {
     if (!selectedStock || !canTrade) return;
@@ -84,18 +97,23 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
       symbol: selectedStock.symbol,
       name: selectedStock.name,
       side,
-      quantity: quantityValue,
+      quantity: totalQuantity, // ✅ Send Total Shares (Lots * LotSize)
       entryPrice: currentPrice,
       productType,
       leverage: leverageValue,
       timestamp: new Date(),
-    });
+      expiryDate: selectedStock.expiryDate,
+      stopLoss: hasSl ? slValue : undefined,
+      target: hasTarget ? targetValue : undefined,
+    }, selectedStock.lotSize);
 
-    toast.success('Trade Executed Successfully (Simulated)', {
-      description: `${side} ${quantityValue} shares of ${selectedStock.symbol} at ${formatCurrency(currentPrice)}`,
+    toast.success('Trade Sent', {
+      description: `${side} ${totalQuantity} shares (${inputValue} Lots) of ${selectedStock.symbol} at market.`,
     });
 
     setQuantity('1');
+    setStopLoss('');
+    setTarget('');
     setShowConfirmDialog(false);
   };
 
@@ -106,236 +124,111 @@ export function TradingForm({ selectedStock, onStockSelect }: TradingFormProps) 
           <CardTitle className="text-foreground">Place Order</CardTitle>
         </CardHeader>
         <CardContent className="space-y-6">
-        {/* Stock Search */}
-        <div className="space-y-2">
-          <Label className="text-muted-foreground">Select Stock</Label>
-          <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                role="combobox"
-                aria-expanded={open}
-                className="w-full justify-between bg-background border-input text-foreground hover:bg-muted hover:text-muted-foreground"
-              >
-                {selectedStock ? (
-                  <span className="flex items-center gap-2">
-                    <span className="font-medium">{selectedStock.symbol}</span>
-                    <span className="text-muted-foreground text-xs truncate">
-                      {selectedStock.name}
-                    </span>
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">Search stocks...</span>
-                )}
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[350px] p-0" align="start">
-              <Command>
-                <CommandInput placeholder="Search stocks..." />
-                <CommandList>
-                  <CommandEmpty>No stock found.</CommandEmpty>
-                  <CommandGroup>
-                    {stocksList.map((stock) => (
-                      <CommandItem
-                        key={stock.symbol}
-                        value={`${stock.symbol} ${stock.name}`}
-                        onSelect={() => {
-                          onStockSelect(stock);
-                          setOpen(false);
-                        }}
-                        className="data-[selected=true]:bg-muted data-[selected=true]:text-muted-foreground"
-                      >
-                        <Check
-                          className={cn(
-                            'mr-2 h-4 w-4',
-                            selectedStock?.symbol === stock.symbol
-                              ? 'opacity-100'
-                              : 'opacity-0'
-                          )}
-                        />
-                        <div className="flex flex-1 items-center justify-between">
-                          <div>
-                            <span className="font-medium">{stock.symbol}</span>
-                            <p className="text-xs text-muted-foreground truncate max-w-[180px]">
-                              {stock.name}
-                            </p>
-                          </div>
-                          <span className={cn(
-                            'text-sm font-medium',
-                            stock.change >= 0 ? 'text-profit' : 'text-loss'
-                          )}>
-                            ₹{stock.price.toLocaleString()}
-                          </span>
-                        </div>
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
-
-        {/* Buy/Sell Toggle */}
-        <div className="space-y-2">
-          <Label className="text-muted-foreground">Order Type</Label>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant={side === 'BUY' ? 'default' : 'outline'}
-              onClick={() => setSide('BUY')}
-              className={cn(
-                'w-full transition-all',
-                side === 'BUY'
-                  ? 'bg-success hover:bg-muted text-success-foreground hover:text-muted-foreground'
-                  : 'border-border text-muted-foreground hover:text-foreground hover:border-success/50'
-              )}
-            >
-              <TrendingUp className="mr-2 h-4 w-4" />
-              BUY
-            </Button>
-            <Button
-              variant={side === 'SELL' ? 'default' : 'outline'}
-              onClick={() => setSide('SELL')}
-              className={cn(
-                'w-full transition-all',
-                side === 'SELL'
-                  ? 'bg-destructive hover:bg-muted text-destructive-foreground hover:text-muted-foreground'
-                  : 'border-border text-muted-foreground hover:text-foreground hover:border-destructive/50'
-              )}
-            >
-              <TrendingDown className="mr-2 h-4 w-4" />
-              SELL
-            </Button>
-          </div>
-        </div>
-
-        {/* Quantity */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <Label className="text-muted-foreground">Quantity</Label>
-            <EducationalTooltip content="Quantity represents the number of shares you want to trade.">
-              <Info className="h-4 w-4" />
-            </EducationalTooltip>
-          </div>
-          <Input
-            type="number"
-            min="1"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-            className="bg-background border-input text-foreground"
+          <StockSearch
+            selectedStock={selectedStock}
+            onStockSelect={onStockSelect}
+            instruments={instruments}
           />
-        </div>
 
-        {/* Risk Preview */}
-        {selectedStock && quantityValue > 0 && (
-          <div className="p-3 bg-muted rounded-lg">
-            <p className="text-sm font-medium">Position Size: {((currentPrice * quantityValue) / balance * 100).toFixed(1)}% of portfolio</p>
-            <p className="text-xs text-muted-foreground">Recommended: Keep under 5% for risk management</p>
-          </div>
-        )}
+          <OrderTypeToggle side={side} onSideChange={setSide} />
 
-        {/* Product Type */}
-        <div className="space-y-2">
-          <Label className="text-muted-foreground">Product Type</Label>
-          <Select value={productType} onValueChange={(v) => setProductType(v as 'CNC' | 'MIS')}>
-            <SelectTrigger className="bg-background border-input text-foreground">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="CNC">CNC (Delivery)</SelectItem>
-              <SelectItem value="MIS">MIS (Intraday)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Leverage */}
-        <div className="space-y-2">
-          <Label className="text-muted-foreground">Leverage</Label>
-          <Select value={leverage} onValueChange={setLeverage}>
-            <SelectTrigger className="bg-background border-input text-foreground">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="1">1x</SelectItem>
-              <SelectItem value="2">2x</SelectItem>
-              <SelectItem value="5">5x</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Read-only Fields */}
-        {selectedStock && (
-          <div className="space-y-4 rounded-lg bg-muted/30 p-4">
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Market Price</span>
-              <span className="text-sm font-medium text-foreground">
-                {formatCurrency(currentPrice)}
-              </span>
+          {/* Quantity Input Label Update could be helpful, but keeping component standard */}
+          <QuantityInput quantity={quantity} onQuantityChange={setQuantity} />
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-muted-foreground text-xs">
+                Stop Loss {instrumentMode === 'equity' && '(Opt)'}
+              </Label>
+              <Input 
+                type="number" 
+                placeholder={side === 'BUY' ? '< Entry' : '> Entry'}
+                value={stopLoss}
+                onChange={(e) => setStopLoss(e.target.value)}
+                className={cn(
+                  "bg-background",
+                  hasSl && !isSlValid && "border-destructive focus-visible:ring-destructive"
+                )}
+              />
             </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Required Margin</span>
-              <span className={cn(
-                'text-sm font-medium',
-                requiredMargin > balance ? 'text-loss' : 'text-foreground'
-              )}>
-                {formatCurrency(requiredMargin)}
-              </span>
+            <div className="space-y-2">
+              <Label className="text-muted-foreground text-xs">
+                Target {instrumentMode === 'equity' && '(Opt)'}
+              </Label>
+              <Input 
+                type="number" 
+                placeholder={side === 'BUY' ? '> Entry' : '< Entry'}
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                className={cn(
+                  "bg-background",
+                  hasTarget && !isTargetValid && "border-destructive focus-visible:ring-destructive"
+                )}
+              />
             </div>
           </div>
-        )}
 
-        {/* Submit Button */}
-        <Button
-          onClick={handleSubmit}
-          disabled={!canTrade}
-          className={cn(
-            'w-full h-12 text-lg font-semibold transition-all',
-            side === 'BUY'
-              ? 'bg-success hover:bg-muted text-success-foreground hover:text-muted-foreground'
-              : 'bg-destructive hover:bg-muted text-destructive-foreground hover:text-muted-foreground'
-          )}
-        >
-          {side === 'BUY' ? 'BUY' : 'SELL'} {selectedStock?.symbol || 'Stock'}
-        </Button>
-      </CardContent>
-    </Card>
+          <RiskPreview
+            selectedStock={selectedStock}
+            quantityValue={inputValue} // Pass lots to preview if it expects lots, or handle logic there
+            currentPrice={currentPrice}
+            balance={balance}
+          />
 
-    {/* Trade Confirmation Dialog */}
-    <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
-      <AlertDialogContent className="bg-card border-border">
-        <AlertDialogHeader>
-          <AlertDialogTitle className="text-foreground">Confirm Trade</AlertDialogTitle>
-          <AlertDialogDescription className="text-muted-foreground">
-            Are you sure you want to {side.toLowerCase()} {quantityValue} shares of {selectedStock?.symbol}?
-            <br />
-            <br />
-            <strong>Details:</strong>
-            <br />
-            Price: {formatCurrency(currentPrice)}
-            <br />
-            Total Value: {formatCurrency(currentPrice * quantityValue)}
-            <br />
-            Required Margin: {formatCurrency(requiredMargin)}
-            <br />
-            Product Type: {productType} {leverageValue > 1 ? `(${leverageValue}x leverage)` : ''}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel className="border-border hover:bg-muted hover:text-muted-foreground">Cancel</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={confirmTrade}
+          <OptionsRiskMetrics
+            selectedStock={selectedStock}
+            quantityValue={inputValue}
+            currentPrice={currentPrice}
+            lotSize={lotSize}
+            side={side}
+          />
+
+          <OptionsPayoffChart
+            selectedStock={selectedStock}
+            quantityValue={inputValue}
+            currentPrice={currentPrice}
+            lotSize={lotSize}
+            side={side}
+          />
+
+          <ProductTypeSelector productType={productType} onProductTypeChange={setProductType} />
+          <LeverageSelector leverage={leverage} onLeverageChange={setLeverage} />
+          
+          {/* Ensure MarginDisplay receives the full required margin calculated above */}
+          <MarginDisplay 
+            selectedStock={selectedStock} 
+            currentPrice={currentPrice} 
+            requiredMargin={requiredMargin} 
+            balance={balance} 
+          />
+
+          <Button
+            onClick={handleSubmit}
+            disabled={!canTrade}
             className={cn(
+              'w-full h-12 text-lg font-semibold transition-all',
               side === 'BUY'
-                ? 'bg-success hover:bg-success/90 text-success-foreground'
-                : 'bg-destructive hover:bg-destructive/90 text-destructive-foreground'
+                ? 'bg-success hover:bg-muted text-success-foreground hover:text-muted-foreground'
+                : 'bg-destructive hover:bg-muted text-destructive-foreground hover:text-muted-foreground'
             )}
           >
-            Confirm {side}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+            {side === 'BUY' ? 'BUY' : 'SELL'} {selectedStock?.symbol || 'Stock'}
+          </Button>
+        </CardContent>
+      </Card>
+
+      <TradeConfirmationDialog
+        open={showConfirmDialog}
+        onOpenChange={setShowConfirmDialog}
+        selectedStock={selectedStock}
+        side={side}
+        quantityValue={totalQuantity} // Confirm Dialog shows Total Shares
+        currentPrice={currentPrice}
+        requiredMargin={requiredMargin}
+        productType={productType}
+        leverageValue={leverageValue}
+        onConfirm={confirmTrade}
+      />
     </TooltipProvider>
   );
 }

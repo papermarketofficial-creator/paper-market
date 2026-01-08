@@ -3,14 +3,20 @@ import dynamic from 'next/dynamic';
 import { Suspense } from 'react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { RecentTradesTable } from '@/components/dashboard/RecentTradesTable';
-import { useTradingStore } from '@/stores/tradingStore';
+import { useRiskStore } from '@/stores/trading/risk.store';
+import { usePositionsStore } from '@/stores/trading/positions.store';
+import { useOrdersStore } from '@/stores/trading/orders.store';
+import { dashboardMetrics } from '@/content/dashboard';
 import { Wallet, TrendingUp, Briefcase, Target, TrendingDown, BarChart3, Award } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const EquityChart = dynamic(() => import('@/components/dashboard/EquityChart').then(mod => ({ default: mod.EquityChart })), { ssr: false });
 
 const DashboardPage = () => {
-  const { balance, positions, trades, equityHistory } = useTradingStore();
+  const balance = useRiskStore((state) => state.balance);
+  const positions = usePositionsStore((state) => state.positions);
+  const trades = useOrdersStore((state) => state.trades);
+  const equityHistory = useRiskStore((state) => state.equityHistory);
 
   const totalPnL = positions.reduce((acc, pos) => {
     const pnl = pos.side === 'BUY'
@@ -24,9 +30,7 @@ const DashboardPage = () => {
   const winRate = trades.length > 0 ? (winningTrades / trades.length) * 100 : 0;
 
   // Calculate additional metrics
-  const maxDrawdown = -12.5; // Mock value
-  const sharpeRatio = 1.23; // Mock value
-  const dailyPnL = 2450; // Mock value
+  const { maxDrawdown, sharpeRatio, dailyPnL } = dashboardMetrics;
   const bestTrade = Math.max(...trades.map(t => t.pnl), 0);
 
   const formatCurrency = (value: number) => {

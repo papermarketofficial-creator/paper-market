@@ -19,13 +19,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useTradingStore } from '@/stores/tradingStore';
+import { useOrdersStore } from '@/stores/trading/orders.store';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Search, ArrowUpDown, History, TrendingUp, TrendingDown, Download } from 'lucide-react';
+import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
 
 const OrdersPage = () => {
-  const { trades } = useTradingStore();
+  const trades = useOrdersStore((state) => state.trades);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'pnl'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -83,7 +84,7 @@ const OrdersPage = () => {
   const totalPages = Math.ceil(filteredAndSortedTrades.length / itemsPerPage);
 
   const handleExport = () => {
-    const csv = filteredAndSortedTrades.map(trade => 
+    const csv = filteredAndSortedTrades.map(trade =>
       `${trade.symbol},${trade.side},${trade.quantity},${trade.entryPrice},${trade.exitPrice || ''},${trade.pnl},${format(trade.timestamp, 'yyyy-MM-dd HH:mm:ss')}`
     ).join('\n');
     const csvContent = `Symbol,Side,Quantity,Entry Price,Exit Price,P&L,Timestamp\n${csv}`;
@@ -196,12 +197,12 @@ const OrdersPage = () => {
                           {trade.side}
                         </Badge>
                       </div>
-                      <Badge 
-                        variant="secondary" 
+                      <Badge
+                        variant="secondary"
                         className={cn(
                           'text-xs',
-                          trade.status === 'OPEN' 
-                            ? 'bg-primary/20 text-primary' 
+                          trade.status === 'OPEN'
+                            ? 'bg-primary/20 text-primary'
                             : 'bg-muted text-muted-foreground'
                         )}
                       >
@@ -228,9 +229,9 @@ const OrdersPage = () => {
                         <p className={cn(
                           'font-semibold',
                           trade.status === 'OPEN' ? 'text-muted-foreground' :
-                          trade.pnl >= 0 ? 'text-profit' : 'text-loss'
+                            trade.pnl >= 0 ? 'text-profit' : 'text-loss'
                         )}>
-                          {trade.status === 'CLOSED' 
+                          {trade.status === 'CLOSED'
                             ? `${trade.pnl >= 0 ? '+' : ''}${formatCurrency(trade.pnl)}`
                             : '-'
                           }
@@ -249,7 +250,7 @@ const OrdersPage = () => {
                 <Table>
                   <TableHeader>
                     <TableRow className="border-border hover:bg-transparent">
-                      <TableHead 
+                      <TableHead
                         className="text-muted-foreground cursor-pointer hover:text-foreground"
                         onClick={() => toggleSort('date')}
                       >
@@ -263,7 +264,7 @@ const OrdersPage = () => {
                       <TableHead className="text-muted-foreground text-right">Qty</TableHead>
                       <TableHead className="text-muted-foreground text-right">Entry</TableHead>
                       <TableHead className="text-muted-foreground text-right">Exit</TableHead>
-                      <TableHead 
+                      <TableHead
                         className="text-muted-foreground text-right cursor-pointer hover:text-foreground"
                         onClick={() => toggleSort('pnl')}
                       >
@@ -291,6 +292,19 @@ const OrdersPage = () => {
                             <p className="font-medium text-foreground">{trade.symbol}</p>
                             <p className="text-xs text-muted-foreground truncate max-w-[120px]">
                               {trade.name}
+                              {/* START EXPIRY INDICATOR */}
+                              {trade.expiryDate && (
+                                <span className={cn(
+                                  "block mt-0.5", // Using block to put it on new line if name is long, or inline if preferred
+                                  isExpired(trade.expiryDate) ? "text-muted-foreground" :
+                                    daysToExpiry(trade.expiryDate) === 0 ? "text-destructive font-medium" :
+                                      daysToExpiry(trade.expiryDate) === 1 ? "text-orange-500" :
+                                        "text-muted-foreground"
+                                )}>
+                                  {formatExpiryLabel(trade.expiryDate)}
+                                </span>
+                              )}
+                              {/* END EXPIRY INDICATOR */}
                             </p>
                           </div>
                         </TableCell>
@@ -324,19 +338,19 @@ const OrdersPage = () => {
                         <TableCell className={cn(
                           'text-right font-semibold',
                           trade.status === 'OPEN' ? 'text-muted-foreground' :
-                          trade.pnl >= 0 ? 'text-profit' : 'text-loss'
+                            trade.pnl >= 0 ? 'text-profit' : 'text-loss'
                         )}>
-                          {trade.status === 'CLOSED' 
+                          {trade.status === 'CLOSED'
                             ? `${trade.pnl >= 0 ? '+' : ''}${formatCurrency(trade.pnl)}`
                             : '-'
                           }
                         </TableCell>
                         <TableCell>
-                          <Badge 
-                            variant="secondary" 
+                          <Badge
+                            variant="secondary"
                             className={cn(
-                              trade.status === 'OPEN' 
-                                ? 'bg-primary/20 text-primary' 
+                              trade.status === 'OPEN'
+                                ? 'bg-primary/20 text-primary'
                                 : 'bg-muted text-muted-foreground'
                             )}
                           >

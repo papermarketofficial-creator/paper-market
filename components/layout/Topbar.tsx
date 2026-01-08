@@ -1,5 +1,6 @@
 "use client";
-import { useTradingStore } from '@/stores/tradingStore';
+import { useRiskStore } from '@/stores/trading/risk.store';
+import { usePositionsStore } from '@/stores/trading/positions.store';
 import { useRouter } from 'next/navigation';
 import { 
   User, 
@@ -25,7 +26,8 @@ interface TopbarProps {
 
 export function Topbar({ onMobileMenuToggle }: TopbarProps) {
   const router = useRouter();
-  const { balance, positions } = useTradingStore();
+  const balance = useRiskStore((state) => state.balance);
+  const positions = usePositionsStore((state) => state.positions);
 
   const totalPnL = positions.reduce((acc, pos) => {
     const pnl = pos.side === 'BUY'

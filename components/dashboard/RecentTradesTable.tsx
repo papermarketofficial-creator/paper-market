@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Trade } from '@/stores/tradingStore';
+import { Trade } from '@/types/order.types';
 import { cn } from '@/lib/utils';
 
 interface RecentTradesTableProps {

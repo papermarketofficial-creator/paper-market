@@ -23,19 +23,11 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { stocksList } from '@/data/stocks';
+import { stocksList } from '@/content/watchlist';
+import { mockUsers } from '@/content/admin';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Settings, Users, RefreshCw, Plus, X, ShieldCheck } from 'lucide-react';
-
-// Mock admin users data
-const mockUsers = [
-  { id: '1', email: 'john@example.com', balance: 1000000, totalPnL: 15420, isAdmin: true },
-  { id: '2', email: 'jane@example.com', balance: 950000, totalPnL: -50000, isAdmin: false },
-  { id: '3', email: 'bob@example.com', balance: 1125000, totalPnL: 125000, isAdmin: false },
-  { id: '4', email: 'alice@example.com', balance: 875000, totalPnL: -125000, isAdmin: false },
-  { id: '5', email: 'charlie@example.com', balance: 1050000, totalPnL: 50000, isAdmin: false },
-];
 
 const AdminPage = () => {
   const [users, setUsers] = useState(mockUsers);

@@ -95,7 +95,8 @@ For production deployment, consider adding:
 ├── hooks/                # Custom React hooks
 ├── lib/                  # Utility functions
 ├── stores/               # Zustand state stores
-├── data/                 # Mock data and constants
+├── content/              # Static and dummy data
+├── types/                # TypeScript type definitions
 └── public/               # Static assets
 ```
 
