@@ -9,6 +9,7 @@ interface NavLinkProps {
   className?: string;
   activeClassName?: string;
   children?: React.ReactNode;
+  onClick?: () => void;
 }
 
 const NavLink = forwardRef<HTMLAnchorElement, NavLinkProps>(

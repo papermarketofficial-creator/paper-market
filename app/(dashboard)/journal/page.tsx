@@ -1,16 +1,14 @@
 "use client";
-import { useJournalStore } from '@/stores/trading/journal.store';
+import { useJournalEntries } from '@/hooks/use-journal-entries';
 import { JournalTable } from '@/components/journal/JournalTable';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { BookOpen } from 'lucide-react';
 
 export default function JournalPage() {
-  const entries = useJournalStore((state) => state.entries);
+  const sortedEntries = useJournalEntries();
 
-  // Sort entries by date descending (newest first)
-  const sortedEntries = [...entries].sort((a, b) => 
-    new Date(b.entryTime).getTime() - new Date(a.entryTime).getTime()
-  );
+  // (Optional) Additional sorting if the hook doesn't guarantee the exact order we want for this table, 
+  // but the hook already sorts by entryTime desc.
 
   return (
     <div className="space-y-6">

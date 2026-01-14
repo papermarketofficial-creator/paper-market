@@ -40,7 +40,7 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
   const positions = usePositionsStore((state) => state.positions);
   const closePosition = useTradeExecutionStore((state) => state.closePosition);
   const [closingPosition, setClosingPosition] = useState<Position | null>(null);
-  const [partialClose, setPartialClose] = useState<{position: Position, quantity: number} | null>(null);
+  const [partialClose, setPartialClose] = useState<{ position: Position, quantity: number } | null>(null);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -119,123 +119,201 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
               <p className="text-sm">Start trading to see your positions here</p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border hover:bg-transparent">
-                    <TableHead className="text-muted-foreground">Symbol</TableHead>
-                    <TableHead className="text-muted-foreground">Type</TableHead>
-                    <TableHead className="text-muted-foreground">Side</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Qty</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Entry</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Current</TableHead>
-                    <TableHead className="text-muted-foreground text-right">P&L</TableHead>
-                    <TableHead className="text-muted-foreground text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {positions.map((position) => {
-                    const pnl = getPositionPnL(position);
-                    const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
-                    
-                    return (
-                      <TableRow
-                        key={position.id}
-                        className={cn(
-                          'border-border transition-colors',
-                          pnl >= 0 ? 'hover:bg-success/5' : 'hover:bg-destructive/5'
-                        )}
-                      >
-<TableCell>
-  <div>
-    <p className="font-medium text-foreground">{position.symbol}</p>
-    <p className="text-xs text-muted-foreground">
-      {position.productType} • {position.leverage}x
-      {/* START EXPIRY INDICATOR */}
-      {position.expiryDate && (
-        <span className={cn(
-          "ml-1",
-          isExpired(position.expiryDate) ? "text-muted-foreground" :
-          daysToExpiry(position.expiryDate) === 0 ? "text-destructive font-medium" :
-          daysToExpiry(position.expiryDate) === 1 ? "text-orange-500" :
-          "text-muted-foreground"
-        )}>
-          • {formatExpiryLabel(position.expiryDate)}
-        </span>
-      )}
-      {/* END EXPIRY INDICATOR */}
-    </p>
-  </div>
-</TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="text-xs">
-                            {position.instrument.toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              'font-medium',
-                              position.side === 'BUY'
-                                ? 'border-success text-success'
-                                : 'border-destructive text-destructive'
-                            )}
-                          >
-                            {position.side === 'BUY' ? (
-                              <TrendingUp className="mr-1 h-3 w-3" />
-                            ) : (
-                              <TrendingDown className="mr-1 h-3 w-3" />
-                            )}
-                            {position.side}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right text-foreground font-medium">
-                          {position.quantity}
-                        </TableCell>
-                        <TableCell className="text-right text-foreground">
-                          {formatCurrency(position.entryPrice)}
-                        </TableCell>
-                        <TableCell className="text-right text-foreground">
-                          {formatCurrency(position.currentPrice)}
-                        </TableCell>
-                        <TableCell className={cn(
-                          'text-right font-semibold',
-                          pnl >= 0 ? 'text-profit' : 'text-loss'
-                        )}>
-                          <div className="animate-pulse-glow">
-                            {pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}
-                            <p className="text-xs font-normal">
-                              ({pnl >= 0 ? '+' : ''}{pnlPercent}%)
-                            </p>
+            <>
+              {/* Mobile Card View */}
+              <div className="sm:hidden space-y-3">
+                {positions.map((position) => {
+                  const pnl = getPositionPnL(position);
+                  const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
+
+                  return (
+                    <div key={position.id} className="bg-muted/30 rounded-lg p-3 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-foreground">{position.symbol}</span>
+                            <Badge variant="outline" className="text-xs">{position.instrument}</Badge>
                           </div>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setPartialClose({position, quantity: 1})}
-                              className="border-blue-500/50 text-blue-600 hover:bg-blue-500 hover:text-white"
-                            >
-                              Partial
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setClosingPosition(position)}
-                              className="border-destructive/50 text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {position.productType} • {position.quantity} qty
+                          </p>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            'font-medium text-xs',
+                            position.side === 'BUY'
+                              ? 'border-success text-success'
+                              : 'border-destructive text-destructive'
+                          )}
+                        >
+                          {position.side}
+                        </Badge>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <p className="text-muted-foreground text-xs">Entry</p>
+                          <p className="font-medium">{formatCurrency(position.entryPrice)}</p>
+                        </div>
+                        <div>
+                          <p className="text-muted-foreground text-xs">Current</p>
+                          <p className="font-medium">{formatCurrency(position.currentPrice)}</p>
+                        </div>
+                        <div className="col-span-2">
+                          <p className="text-muted-foreground text-xs">P&L</p>
+                          <div className={cn(
+                            'font-semibold flex items-center gap-2',
+                            pnl >= 0 ? 'text-profit' : 'text-loss'
+                          )}>
+                            <span>{pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}</span>
+                            <span className="text-xs font-normal">({pnl >= 0 ? '+' : ''}{pnlPercent}%)</span>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2 pt-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setPartialClose({ position, quantity: 1 })}
+                          className="flex-1 border-blue-500/50 text-blue-600 hover:bg-blue-500 hover:text-white h-8 text-xs"
+                        >
+                          Partial
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setClosingPosition(position)}
+                          className="flex-1 border-destructive/50 text-destructive hover:bg-destructive hover:text-destructive-foreground h-8 text-xs"
+                        >
+                          Close
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table View */}
+              <div className="hidden sm:block overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableHead className="text-muted-foreground">Symbol</TableHead>
+                      <TableHead className="text-muted-foreground">Type</TableHead>
+                      <TableHead className="text-muted-foreground">Side</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Qty</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Entry</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Current</TableHead>
+                      <TableHead className="text-muted-foreground text-right">P&L</TableHead>
+                      <TableHead className="text-muted-foreground text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {positions.map((position) => {
+                      const pnl = getPositionPnL(position);
+                      const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
+
+                      return (
+                        <TableRow
+                          key={position.id}
+                          className={cn(
+                            'border-border transition-colors',
+                            pnl >= 0 ? 'hover:bg-success/5' : 'hover:bg-destructive/5'
+                          )}
+                        >
+                          <TableCell>
+                            <div>
+                              <p className="font-medium text-foreground">{position.symbol}</p>
+                              <p className="text-xs text-muted-foreground">
+                                {position.productType} • {position.leverage}x
+                                {/* START EXPIRY INDICATOR */}
+                                {position.expiryDate && (
+                                  <span className={cn(
+                                    "ml-1",
+                                    isExpired(position.expiryDate) ? "text-muted-foreground" :
+                                      daysToExpiry(position.expiryDate) === 0 ? "text-destructive font-medium" :
+                                        daysToExpiry(position.expiryDate) === 1 ? "text-orange-500" :
+                                          "text-muted-foreground"
+                                  )}>
+                                    • {formatExpiryLabel(position.expiryDate)}
+                                  </span>
+                                )}
+                                {/* END EXPIRY INDICATOR */}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="text-xs">
+                              {position.instrument.toUpperCase()}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                'font-medium',
+                                position.side === 'BUY'
+                                  ? 'border-success text-success'
+                                  : 'border-destructive text-destructive'
+                              )}
+                            >
+                              {position.side === 'BUY' ? (
+                                <TrendingUp className="mr-1 h-3 w-3" />
+                              ) : (
+                                <TrendingDown className="mr-1 h-3 w-3" />
+                              )}
+                              {position.side}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right text-foreground font-medium">
+                            {position.quantity}
+                          </TableCell>
+                          <TableCell className="text-right text-foreground">
+                            {formatCurrency(position.entryPrice)}
+                          </TableCell>
+                          <TableCell className="text-right text-foreground">
+                            {formatCurrency(position.currentPrice)}
+                          </TableCell>
+                          <TableCell className={cn(
+                            'text-right font-semibold',
+                            pnl >= 0 ? 'text-profit' : 'text-loss'
+                          )}>
+                            <div className="animate-pulse-glow">
+                              {pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}
+                              <p className="text-xs font-normal">
+                                ({pnl >= 0 ? '+' : ''}{pnlPercent}%)
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex gap-2 justify-end">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setPartialClose({ position, quantity: 1 })}
+                                className="border-blue-500/50 text-blue-600 hover:bg-blue-500 hover:text-white"
+                              >
+                                Partial
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setClosingPosition(position)}
+                                className="border-destructive/50 text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -287,7 +365,7 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
                 id="partial-quantity"
                 type="number"
                 value={partialClose?.quantity || ''}
-                onChange={(e) => setPartialClose(prev => prev ? {...prev, quantity: +e.target.value} : null)}
+                onChange={(e) => setPartialClose(prev => prev ? { ...prev, quantity: +e.target.value } : null)}
                 max={partialClose?.position.quantity}
                 min={1}
               />

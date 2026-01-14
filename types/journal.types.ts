@@ -21,7 +21,7 @@ export interface JournalEntry {
   id: string;
   instrument: InstrumentMode;
   symbol: string;
-  expiryDate?: Date;      
+  expiryDate?: Date;
   side: Side;
   quantity: number;
   entryPrice: number;
@@ -34,4 +34,5 @@ export interface JournalEntry {
   exitTime?: Date;
   realizedPnL?: number;
   exitReason?: ExitReason;
+  notes?: string;
 }

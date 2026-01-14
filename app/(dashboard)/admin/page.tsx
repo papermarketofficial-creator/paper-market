@@ -113,54 +113,102 @@ const AdminPage = () => {
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-border hover:bg-transparent">
-                      <TableHead className="text-muted-foreground">Email</TableHead>
-                      <TableHead className="text-muted-foreground">Role</TableHead>
-                      <TableHead className="text-muted-foreground text-right">Balance</TableHead>
-                      <TableHead className="text-muted-foreground text-right">Total P&L</TableHead>
-                      <TableHead className="text-muted-foreground text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {users.map((user) => (
-                      <TableRow key={user.id} className="border-border">
-                        <TableCell className="text-foreground font-medium">
-                          {user.email}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={user.isAdmin ? 'default' : 'secondary'}
-                            className={user.isAdmin ? 'bg-primary' : 'bg-muted text-muted-foreground'}
-                          >
-                            {user.isAdmin ? 'Admin' : 'User'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right text-foreground">
-                          {formatCurrency(user.balance)}
-                        </TableCell>
-                        <TableCell className={cn(
-                          'text-right font-medium',
-                          user.totalPnL >= 0 ? 'text-profit' : 'text-loss'
-                        )}>
-                          {user.totalPnL >= 0 ? '+' : ''}{formatCurrency(user.totalPnL)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setResetUserId(user.id)}
-                            className="border-border text-muted-foreground hover:text-foreground"
-                          >
-                            <RefreshCw className="h-4 w-4 mr-1" />
-                            Reset
-                          </Button>
-                        </TableCell>
+                {/* Mobile Card View */}
+                <div className="sm:hidden space-y-3">
+                  {users.map((user) => (
+                    <div key={user.id} className="bg-muted/30 rounded-lg p-3 space-y-3 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-foreground">{user.email}</span>
+                        <Badge
+                          variant={user.isAdmin ? 'default' : 'secondary'}
+                          className={user.isAdmin ? 'bg-primary' : 'bg-muted text-muted-foreground'}
+                        >
+                          {user.isAdmin ? 'Admin' : 'User'}
+                        </Badge>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="block text-muted-foreground mb-0.5">Balance</span>
+                          <span className="font-medium text-foreground text-sm">{formatCurrency(user.balance)}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="block text-muted-foreground mb-0.5">Total P&L</span>
+                          <span className={cn(
+                            'font-medium text-sm',
+                            user.totalPnL >= 0 ? 'text-profit' : 'text-loss'
+                          )}>
+                            {user.totalPnL >= 0 ? '+' : ''}{formatCurrency(user.totalPnL)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="pt-2 border-t border-border/50">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setResetUserId(user.id)}
+                          className="w-full border-border text-muted-foreground hover:text-foreground h-8 text-xs"
+                        >
+                          <RefreshCw className="h-3 w-3 mr-2" />
+                          Reset Balance
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop Table View */}
+                <div className="hidden sm:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-border hover:bg-transparent">
+                        <TableHead className="text-muted-foreground">Email</TableHead>
+                        <TableHead className="text-muted-foreground">Role</TableHead>
+                        <TableHead className="text-muted-foreground text-right">Balance</TableHead>
+                        <TableHead className="text-muted-foreground text-right">Total P&L</TableHead>
+                        <TableHead className="text-muted-foreground text-right">Actions</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {users.map((user) => (
+                        <TableRow key={user.id} className="border-border">
+                          <TableCell className="text-foreground font-medium">
+                            {user.email}
+                          </TableCell>
+                          <TableCell>
+                            <Badge
+                              variant={user.isAdmin ? 'default' : 'secondary'}
+                              className={user.isAdmin ? 'bg-primary' : 'bg-muted text-muted-foreground'}
+                            >
+                              {user.isAdmin ? 'Admin' : 'User'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right text-foreground">
+                            {formatCurrency(user.balance)}
+                          </TableCell>
+                          <TableCell className={cn(
+                            'text-right font-medium',
+                            user.totalPnL >= 0 ? 'text-profit' : 'text-loss'
+                          )}>
+                            {user.totalPnL >= 0 ? '+' : ''}{formatCurrency(user.totalPnL)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setResetUserId(user.id)}
+                              className="border-border text-muted-foreground hover:text-foreground"
+                            >
+                              <RefreshCw className="h-4 w-4 mr-1" />
+                              Reset
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             </CardContent>
           </Card>

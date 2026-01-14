@@ -1,8 +1,12 @@
 import { create } from 'zustand';
-import { EquityPoint } from '@/types/pnl.types';
-import { generateEquityHistory } from '@/content/charts';
+import { persist, createJSONStorage } from 'zustand/middleware';
 
-const INITIAL_BALANCE = 1000000; // ₹10,00,000
+interface EquityPoint {
+  time: number;
+  value: number;
+}
+
+const INITIAL_BALANCE = 100000;
 
 interface RiskState {
   balance: number;
@@ -11,38 +15,38 @@ interface RiskState {
   deductMargin: (amount: number) => void;
   addToBalance: (amount: number) => void;
   addEquityPoint: (time: number, value: number) => void;
-  resetBalance: () => void;
+  reset: () => void;
 }
 
-export const useRiskStore = create<RiskState>((set, get) => ({
-  balance: INITIAL_BALANCE,
-  equityHistory: generateEquityHistory(),
-
-  deductMargin: (amount) => {
-    set((state) => ({
-      balance: state.balance - amount,
-    }));
-  },
-
-  addToBalance: (amount) => {
-    set((state) => ({
-      balance: state.balance + amount,
-    }));
-  },
-
-  addEquityPoint: (time, value) => {
-    set((state) => ({
-      equityHistory: [
-        ...state.equityHistory,
-        { time, value },
-      ],
-    }));
-  },
-
-  resetBalance: () => {
-    set({
+export const useRiskStore = create<RiskState>()(
+  persist(
+    (set) => ({
       balance: INITIAL_BALANCE,
-      equityHistory: generateEquityHistory(),
-    });
-  },
-}));
+      equityHistory: [{ time: Date.now(), value: INITIAL_BALANCE }],
+
+      deductMargin: (amount) =>
+        set((state) => ({
+          balance: state.balance - amount,
+        })),
+
+      addToBalance: (amount) =>
+        set((state) => ({
+          balance: state.balance + amount,
+        })),
+
+      addEquityPoint: (time, value) =>
+        set((state) => ({
+          equityHistory: [...state.equityHistory, { time, value }],
+        })),
+
+      reset: () => set({
+        balance: INITIAL_BALANCE,
+        equityHistory: [{ time: Date.now(), value: INITIAL_BALANCE }]
+      }),
+    }),
+    {
+      name: 'paper-market-risk',
+      storage: createJSONStorage(() => localStorage),
+    }
+  )
+);

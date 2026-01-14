@@ -6,8 +6,8 @@ import PartnersSection from '@/components/home/PartnersSection';
 import FeaturesSection from "@/components/home/FeaturesSection";
 import StepsSection from "@/components/home/StepsSection";
 import PricingSection from "@/components/home/PricingSection";
-import CTASection from "@/components/home/CTASection";
 import Footer from "@/components/home/Footer";
+import FixedCTA from "@/components/home/FixedCTA";
 
 const MarketSection = dynamic(() => import('@/components/home/MarketSection'), { ssr: false });
 const TestimonialsSection = dynamic(() => import('@/components/home/TestimonialsSection'), { ssr: false });
@@ -25,7 +25,7 @@ const Home = () => {
       <TestimonialsSection />
       <PricingSection />
       <FAQSection />
-      <CTASection />
+      <FixedCTA />
       <Footer />
     </div>
   );

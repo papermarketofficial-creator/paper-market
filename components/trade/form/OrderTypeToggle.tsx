@@ -20,21 +20,21 @@ export function OrderTypeToggle({ side, onSideChange }: OrderTypeToggleProps) {
           className={cn(
             'w-full transition-all',
             side === 'BUY'
-              ? 'bg-success hover:bg-muted text-success-foreground hover:text-muted-foreground'
-              : 'border-border text-muted-foreground hover:text-foreground hover:border-success/50'
+              ? 'bg-success hover:bg-success/90 text-success-foreground'
+              : 'border-border text-muted-foreground hover:text-foreground hover:border-success/50 hover:bg-success/10'
           )}
         >
           <TrendingUp className="mr-2 h-4 w-4" />
           BUY
         </Button>
         <Button
-          variant={side === 'SELL' ? 'default' : 'outline'}
+          variant={side === 'SELL' ? 'destructive' : 'outline'}
           onClick={() => onSideChange('SELL')}
           className={cn(
             'w-full transition-all',
             side === 'SELL'
-              ? 'bg-destructive hover:bg-muted text-destructive-foreground hover:text-muted-foreground'
-              : 'border-border text-muted-foreground hover:text-foreground hover:border-destructive/50'
+              ? '' // Destructive handles active state
+              : 'border-border text-muted-foreground hover:text-foreground hover:border-destructive/50 hover:bg-destructive/10'
           )}
         >
           <TrendingDown className="mr-2 h-4 w-4" />

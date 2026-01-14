@@ -25,13 +25,13 @@ const DashboardPage = () => {
     return acc + pnl;
   }, 0);
 
-  const closedPnL = trades.reduce((acc, trade) => acc + trade.pnl, 0);
-  const winningTrades = trades.filter((t) => t.pnl > 0).length;
+  const closedPnL = trades.reduce((acc, trade) => acc + (trade.pnl || 0), 0);
+  const winningTrades = trades.filter((t) => (t.pnl || 0) > 0).length;
   const winRate = trades.length > 0 ? (winningTrades / trades.length) * 100 : 0;
 
   // Calculate additional metrics
   const { maxDrawdown, sharpeRatio, dailyPnL } = dashboardMetrics;
-  const bestTrade = Math.max(...trades.map(t => t.pnl), 0);
+  const bestTrade = Math.max(...trades.map(t => t.pnl || 0), 0);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -50,7 +50,7 @@ const DashboardPage = () => {
       </div>
 
       {/* Stat Cards - Responsive grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
         <StatCard
           title="Available Balance"
           value={formatCurrency(balance)}

@@ -1,40 +1,29 @@
 "use client";
+import { cn } from '@/lib/utils';
 import { useRiskStore } from '@/stores/trading/risk.store';
 import { usePositionsStore } from '@/stores/trading/positions.store';
-import { useRouter } from 'next/navigation';
-import { 
-  User, 
-  LogOut, 
-  Settings, 
-  Menu
-} from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { cn } from '@/lib/utils';
-import { toast } from 'sonner';
+import { useOrdersStore } from '@/stores/trading/orders.store';
 
 interface TopbarProps {
   onMobileMenuToggle?: () => void;
+  mobileMenuOpen?: boolean;
 }
 
-export function Topbar({ onMobileMenuToggle }: TopbarProps) {
-  const router = useRouter();
+export function Topbar({ onMobileMenuToggle, mobileMenuOpen = false }: TopbarProps) {
   const balance = useRiskStore((state) => state.balance);
   const positions = usePositionsStore((state) => state.positions);
 
-  const totalPnL = positions.reduce((acc, pos) => {
+  const trades = useOrdersStore((state) => state.trades);
+
+  const openPnL = positions.reduce((acc, pos) => {
     const pnl = pos.side === 'BUY'
       ? (pos.currentPrice - pos.entryPrice) * pos.quantity
       : (pos.entryPrice - pos.currentPrice) * pos.quantity;
     return acc + pnl;
   }, 0);
+
+  const closedPnL = trades.reduce((acc, trade) => acc + (trade.pnl || 0), 0);
+  const totalPnL = openPnL + closedPnL;
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -44,22 +33,32 @@ export function Topbar({ onMobileMenuToggle }: TopbarProps) {
     }).format(value);
   };
 
-  const handleLogout = () => {
-    toast.success('Logged out successfully');
-    router.push('/');
-  };
-
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 lg:px-6">
-      {/* Mobile Menu Button */}
-      <Button
-        variant="ghost"
-        size="icon"
-        className="lg:hidden"
-        onClick={onMobileMenuToggle}
-      >
-        <Menu className="h-5 w-5" />
-      </Button>
+      {/* Mobile Menu Button & Logo */}
+      <div className="flex items-center gap-3 md:hidden">
+        <button
+          onClick={onMobileMenuToggle}
+          className="flex h-10 w-10 flex-col items-center justify-center gap-[6px] rounded-full bg-secondary/50 transition-all active:scale-90"
+          aria-label="Toggle menu"
+        >
+          <span
+            className={cn(
+              "h-[2px] w-5 rounded-full bg-foreground transition-all duration-300 origin-left",
+              mobileMenuOpen && "rotate-45 w-6 translate-y-[0px]"
+            )}
+          />
+          <span
+            className={cn(
+              "h-[2px] w-3 rounded-full bg-foreground transition-all duration-300 origin-left self-start ml-[10px]",
+              mobileMenuOpen && "-rotate-45 w-6 ml-0"
+            )}
+          />
+        </button>
+        <div className="font-bold text-lg tracking-tight flex items-center gap-1">
+          <span className="text-primary">Paper</span>Market
+        </div>
+      </div>
 
       {/* Balance & P&L */}
       <div className="flex items-center gap-4 sm:gap-6">
@@ -69,9 +68,9 @@ export function Topbar({ onMobileMenuToggle }: TopbarProps) {
             {formatCurrency(balance)}
           </p>
         </div>
-        
+
         <div className="hidden sm:block h-8 w-px bg-border" />
-        
+
         <div>
           <p className="text-xs text-muted-foreground">Total P&L</p>
           <p className={cn(
@@ -83,48 +82,7 @@ export function Topbar({ onMobileMenuToggle }: TopbarProps) {
         </div>
       </div>
 
-      {/* User Menu */}
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-10 w-10 rounded-full">
-            <Avatar className="h-10 w-10 border-2 border-primary/20">
-              <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                JD
-              </AvatarFallback>
-            </Avatar>
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent className="w-56" align="end" forceMount>
-          <div className="flex items-center gap-2 p-2">
-            <Avatar className="h-8 w-8">
-              <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                JD
-              </AvatarFallback>
-            </Avatar>
-            <div className="flex flex-col space-y-0.5">
-              <p className="text-sm font-medium">John Doe</p>
-              <p className="text-xs text-muted-foreground">john@example.com</p>
-            </div>
-          </div>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => router.push('/profile')} className="cursor-pointer">
-            <User className="mr-2 h-4 w-4" />
-            Profile
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => router.push('/settings')} className="cursor-pointer">
-            <Settings className="mr-2 h-4 w-4" />
-            Settings
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem 
-            onClick={handleLogout}
-            className="text-destructive focus:text-destructive cursor-pointer"
-          >
-            <LogOut className="mr-2 h-4 w-4" />
-            Logout
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+
     </header>
   );
 }

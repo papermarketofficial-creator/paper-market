@@ -1,5 +1,5 @@
 'use client';
-import { ReactNode, useEffect } from 'react';
+import { ReactNode, useEffect, useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { useMarketSimulation } from '@/hooks/use-market-simulation';
@@ -17,21 +17,26 @@ export default function DashboardLayoutClient({ children }: { children: ReactNod
   }, [settleExpiredPositions]);
 
   return (
-    <div className="min-h-screen flex bg-background">
-      {/* Sidebar handles its own hover expansion */}
-      <Sidebar />
-      
-      {/* Main Content 
-         ml-16 reserves space for the collapsed sidebar.
-         When sidebar expands to w-64, it overlays this content (z-50),
-         preserving the "Trading Terminal" feel.
-      */}
-      <div className="flex-1 flex flex-col ml-16 transition-all duration-300">
-        <Topbar />
-        <main className="flex-1 p-4 md:p-6 overflow-x-hidden">
+    <DashboardContentWrapper>
+      {children}
+    </DashboardContentWrapper>
+  );
+}
+
+// Internal wrapper to manage state without making the refined Sidebar too complex
+function DashboardContentWrapper({ children }: { children: ReactNode }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  return (
+    <>
+      <Sidebar mobileOpen={mobileMenuOpen} setMobileOpen={setMobileMenuOpen} />
+
+      <div className="flex-1 flex flex-col md:ml-16 transition-all duration-300">
+        <Topbar mobileMenuOpen={mobileMenuOpen} onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)} />
+        <main className="flex-1 p-4 md:p-6 overflow-x-hidden w-full max-w-full">
           {children}
         </main>
       </div>
-    </div>
-  );
+    </>
+  )
 }

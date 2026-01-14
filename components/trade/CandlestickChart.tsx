@@ -152,7 +152,7 @@ export function CandlestickChart({ symbol }: CandlestickChartProps) {
             className={cn(
               'text-xs',
               selectedTimeframe === tf
-                ? 'bg-secondary text-secondary-foreground'
+                ? 'bg-primary text-primary-foreground'
                 : 'border-border text-muted-foreground hover:text-foreground'
             )}
           >

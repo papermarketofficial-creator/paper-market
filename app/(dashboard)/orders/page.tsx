@@ -64,11 +64,11 @@ const OrdersPage = () => {
     result.sort((a, b) => {
       let comparison = 0;
       if (sortBy === 'date') {
-        const aTime = a.exitTime ? new Date(a.exitTime).getTime() : new Date(a.entryTime).getTime();
-        const bTime = b.exitTime ? new Date(b.exitTime).getTime() : new Date(b.entryTime).getTime();
+        const aTime = new Date(a.entryTime).getTime();
+        const bTime = new Date(b.entryTime).getTime();
         comparison = bTime - aTime;
       } else if (sortBy === 'pnl') {
-        comparison = b.pnl - a.pnl;
+        comparison = (b.pnl || 0) - (a.pnl || 0);
       }
       return sortOrder === 'asc' ? -comparison : comparison;
     });
@@ -118,39 +118,41 @@ const OrdersPage = () => {
       <Card className="bg-card border-border">
         <CardContent className="pt-6">
           <div className="flex flex-col gap-4">
-            <div className="flex flex-col sm:flex-row gap-4">
-              <div className="relative flex-1">
+            <div className="flex flex-col lg:flex-row gap-4">
+              <div className="relative flex-1 w-full lg:w-auto">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   placeholder="Search by symbol or name..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 bg-background border-input"
+                  className="pl-10 bg-background border-input w-full"
                 />
               </div>
-              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as 'all' | 'OPEN' | 'CLOSED')}>
-                <SelectTrigger className="w-full sm:w-[140px] bg-background border-input">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Orders</SelectItem>
-                  <SelectItem value="OPEN">Open</SelectItem>
-                  <SelectItem value="CLOSED">Closed</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={sortBy} onValueChange={(v) => setSortBy(v as 'date' | 'pnl')}>
-                <SelectTrigger className="w-full sm:w-[140px] bg-background border-input">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="date">Date</SelectItem>
-                  <SelectItem value="pnl">P&L</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button onClick={handleExport} variant="outline" className="w-full sm:w-auto">
-                <Download className="h-4 w-4 mr-2" />
-                Export CSV
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
+                <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as 'all' | 'OPEN' | 'CLOSED')}>
+                  <SelectTrigger className="w-full sm:w-[140px] bg-background border-input">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Orders</SelectItem>
+                    <SelectItem value="OPEN">Open</SelectItem>
+                    <SelectItem value="CLOSED">Closed</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={sortBy} onValueChange={(v) => setSortBy(v as 'date' | 'pnl')}>
+                  <SelectTrigger className="w-full sm:w-[140px] bg-background border-input">
+                    <SelectValue placeholder="Sort by" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="date">Date</SelectItem>
+                    <SelectItem value="pnl">P&L</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button onClick={handleExport} variant="outline" className="w-full sm:w-auto whitespace-nowrap">
+                  <Download className="h-4 w-4 mr-2" />
+                  Export CSV
+                </Button>
+              </div>
             </div>
           </div>
         </CardContent>
@@ -229,10 +231,10 @@ const OrdersPage = () => {
                         <p className={cn(
                           'font-semibold',
                           trade.status === 'OPEN' ? 'text-muted-foreground' :
-                            trade.pnl >= 0 ? 'text-profit' : 'text-loss'
+                            (trade.pnl || 0) >= 0 ? 'text-profit' : 'text-loss'
                         )}>
                           {trade.status === 'CLOSED'
-                            ? `${trade.pnl >= 0 ? '+' : ''}${formatCurrency(trade.pnl)}`
+                            ? `${(trade.pnl || 0) >= 0 ? '+' : ''}${formatCurrency(trade.pnl || 0)}`
                             : '-'
                           }
                         </p>
@@ -333,15 +335,15 @@ const OrdersPage = () => {
                           {formatCurrency(trade.entryPrice)}
                         </TableCell>
                         <TableCell className="text-right text-foreground">
-                          {trade.status === 'CLOSED' ? formatCurrency(trade.exitPrice) : '-'}
+                          {trade.status === 'CLOSED' ? formatCurrency(trade.exitPrice!) : '-'}
                         </TableCell>
                         <TableCell className={cn(
                           'text-right font-semibold',
                           trade.status === 'OPEN' ? 'text-muted-foreground' :
-                            trade.pnl >= 0 ? 'text-profit' : 'text-loss'
+                            (trade.pnl || 0) >= 0 ? 'text-profit' : 'text-loss'
                         )}>
                           {trade.status === 'CLOSED'
-                            ? `${trade.pnl >= 0 ? '+' : ''}${formatCurrency(trade.pnl)}`
+                            ? `${(trade.pnl || 0) >= 0 ? '+' : ''}${formatCurrency(trade.pnl || 0)}`
                             : '-'
                           }
                         </TableCell>

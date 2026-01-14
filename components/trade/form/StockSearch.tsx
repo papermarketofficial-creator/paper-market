@@ -15,10 +15,9 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover';
 import { Label } from '@/components/ui/label';
-import { Stock } from '@/content/watchlist';
+import { Stock } from '@/types/equity.types'; // Fixed import path
 import { cn } from '@/lib/utils';
-import { Check, ChevronsUpDown } from 'lucide-react';
-import { useMarketStore } from '@/stores/trading/market.store';
+import { Check, ChevronsUpDown, Search } from 'lucide-react';
 import { parseOptionSymbol } from '@/lib/fno-utils';
 import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
 
@@ -26,39 +25,54 @@ interface StockSearchProps {
   selectedStock: Stock | null;
   onStockSelect: (stock: Stock) => void;
   instruments: Stock[];
+  placeholder?: string;
+  className?: string;
+  label?: string;
+  instrumentMode?: string; // Added prop
 }
 
-export function StockSearch({ selectedStock, onStockSelect, instruments }: StockSearchProps) {
+export function StockSearch({
+  selectedStock,
+  onStockSelect,
+  instruments,
+  placeholder = "Search stocks...",
+  className,
+  label = "Select Stock",
+  instrumentMode,
+}: StockSearchProps) {
   const [open, setOpen] = useState(false);
-  const { instrumentMode } = useMarketStore();
+  // Removed useMarketStore hook usage for instrumentMode
 
   return (
-    <div className="space-y-2">
-      <Label className="text-muted-foreground">Select Stock</Label>
+    <div className={cn("space-y-2", className)}>
+      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{label}</Label>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
             role="combobox"
             aria-expanded={open}
-            className="w-full justify-between bg-background border-input text-foreground hover:bg-muted hover:text-muted-foreground"
+            className="w-full justify-between bg-card hover:bg-muted/50 border-input h-10 px-3 text-sm"
           >
             {selectedStock ? (
-              <span className="flex items-center gap-2">
-                <span className="font-medium">{selectedStock.symbol}</span>
-                <span className="text-muted-foreground text-xs truncate">
+              <span className="flex items-center gap-2 truncate">
+                <span className="font-bold text-foreground">{selectedStock.symbol}</span>
+                <span className="text-muted-foreground text-xs truncate border-l pl-2 ml-1">
                   {selectedStock.name}
                 </span>
               </span>
             ) : (
-              <span className="text-muted-foreground">Search stocks...</span>
+              <span className="text-muted-foreground flex items-center gap-2">
+                <Search className="w-4 h-4 opacity-50" />
+                {placeholder}
+              </span>
             )}
             <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
           </Button>
         </PopoverTrigger>
-        <PopoverContent className="w-[350px] p-0" align="start">
+        <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[300px] p-0" align="start">
           <Command>
-            <CommandInput placeholder="Search instruments..." />
+            <CommandInput placeholder="Search symbol..." className="h-9" />
             <CommandList>
               <CommandEmpty>No instrument found.</CommandEmpty>
               <CommandGroup>
@@ -70,7 +84,7 @@ export function StockSearch({ selectedStock, onStockSelect, instruments }: Stock
                       onStockSelect(stock);
                       setOpen(false);
                     }}
-                    className="data-[selected=true]:bg-muted data-[selected=true]:text-muted-foreground"
+                    className="data-[selected=true]:bg-muted cursor-pointer"
                   >
                     <Check
                       className={cn(
@@ -80,40 +94,43 @@ export function StockSearch({ selectedStock, onStockSelect, instruments }: Stock
                           : 'opacity-0'
                       )}
                     />
-                    <div className="flex flex-1 items-center justify-between">
-                      <div>
-                        <span className="font-medium">{stock.symbol}</span>
-                        {/* ... existing option type badge ... */}
-                        {instrumentMode === 'options' && parseOptionSymbol(stock.symbol) && (
-                          <span className={cn(
-                            'ml-2 px-1 py-0.5 text-xs rounded',
-                            parseOptionSymbol(stock.symbol)?.type === 'CE' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                          )}>
-                            {parseOptionSymbol(stock.symbol)?.type}
-                          </span>
-                        )}
-                        
-                        {/* START EXPIRY INDICATOR */}
-                        {stock.expiryDate && (
-                          <span className={cn(
-                            "ml-2 text-[10px] px-1.5 py-0.5 rounded border",
-                            isExpired(stock.expiryDate) ? "border-muted bg-muted/50 text-muted-foreground" :
-                            daysToExpiry(stock.expiryDate) === 0 ? "border-destructive/30 bg-destructive/10 text-destructive" :
-                            daysToExpiry(stock.expiryDate) === 1 ? "border-orange-500/30 bg-orange-500/10 text-orange-600" :
-                            "border-border text-muted-foreground"
-                          )}>
-                            {formatExpiryLabel(stock.expiryDate)}
-                          </span>
-                        )}
-                        {/* END EXPIRY INDICATOR */}
+                    <div className="flex flex-1 items-center justify-between overflow-hidden">
+                      <div className="flex flex-col min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium truncate">{stock.symbol}</span>
 
-                        <p className="text-xs text-muted-foreground truncate max-w-[180px]">
-                          {stock.name}
-                        </p>
+                          {/* Option Type Badge */}
+                          {(instrumentMode === 'options' || parseOptionSymbol(stock.symbol)) && parseOptionSymbol(stock.symbol) && (
+                            <span className={cn(
+                              'px-1.5 py-0.5 text-[10px] uppercase font-bold rounded-sm tracking-tighter',
+                              parseOptionSymbol(stock.symbol)?.type === 'CE'
+                                ? 'bg-green-500/15 text-green-700 dark:text-green-400'
+                                : 'bg-red-500/15 text-red-700 dark:text-red-400'
+                            )}>
+                              {parseOptionSymbol(stock.symbol)?.type}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Expiry Badge */}
+                        {stock.expiryDate && (
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className={cn(
+                              "text-[10px] px-1.5 py-0.5 rounded-sm font-medium",
+                              isExpired(stock.expiryDate) ? "bg-muted text-muted-foreground line-through" :
+                                daysToExpiry(stock.expiryDate) === 0 ? "bg-destructive/10 text-destructive" :
+                                  daysToExpiry(stock.expiryDate) === 1 ? "bg-orange-500/10 text-orange-600" :
+                                    "bg-secondary text-secondary-foreground"
+                            )}>
+                              {formatExpiryLabel(stock.expiryDate)}
+                            </span>
+                          </div>
+                        )}
                       </div>
+
                       <span className={cn(
-                        'text-sm font-medium',
-                        stock.change >= 0 ? 'text-profit' : 'text-loss'
+                        'text-sm font-semibold ml-2 text-right',
+                        stock.change >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                       )}>
                         ₹{stock.price.toLocaleString()}
                       </span>

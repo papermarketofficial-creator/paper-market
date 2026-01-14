@@ -1,12 +1,12 @@
 "use client";
-import { useJournalStore } from '@/stores/trading/journal.store';
+import { useJournalEntries } from '@/hooks/use-journal-entries';
 import { calculatePerformanceMetrics } from '@/lib/performance-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Activity, Target, TrendingUp, AlertTriangle } from 'lucide-react';
 
 export function PerformanceSummary() {
-  const entries = useJournalStore((state) => state.entries);
+  const entries = useJournalEntries();
   const metrics = calculatePerformanceMetrics(entries);
 
   const formatCurrency = (value: number) => {
