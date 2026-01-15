@@ -9,14 +9,27 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
-import { optionsChainData, atmStrike, OptionStrike } from '@/content/optionsChain';
+import { InstrumentType } from './form/InstrumentSelector';
+import {
+  optionsChainData as niftyData,
+  atmStrike as niftyAtm,
+  bankNiftyChainData,
+  bankNiftyAtm
+} from '@/content/optionsChain';
 import { Badge } from '@/components/ui/badge';
 
 interface OptionsChainProps {
   onStrikeSelect: (symbol: string) => void;
+  instrumentType?: InstrumentType;
 }
 
-export function OptionsChain({ onStrikeSelect }: OptionsChainProps) {
+export function OptionsChain({ onStrikeSelect, instrumentType = "NIFTY" }: OptionsChainProps) {
+  // Determine which data to show
+  const isBankNifty = instrumentType === "BANKNIFTY";
+  const data = isBankNifty ? bankNiftyChainData : niftyData;
+  const atm = isBankNifty ? bankNiftyAtm : niftyAtm;
+  const title = isBankNifty ? "BANKNIFTY Options Chain" : "NIFTY Options Chain";
+
   const formatNumber = (value: number) => {
     return value.toLocaleString('en-IN');
   };
@@ -37,9 +50,9 @@ export function OptionsChain({ onStrikeSelect }: OptionsChainProps) {
     <Card className="bg-card border-border h-full">
       <CardHeader className="pb-3">
         <CardTitle className="text-foreground flex items-center justify-between">
-          <span>NIFTY Options Chain</span>
+          <span>{title}</span>
           <Badge variant="outline" className="text-xs">
-            ATM: {atmStrike.toLocaleString()}
+            ATM: {atm.toLocaleString()}
           </Badge>
         </CardTitle>
       </CardHeader>
@@ -68,13 +81,15 @@ export function OptionsChain({ onStrikeSelect }: OptionsChainProps) {
                 <TableHead className="text-center text-xs font-medium text-muted-foreground">VOL</TableHead>
               </TableRow>
             </TableHeader>
+
+
             <TableBody>
-              {optionsChainData.map((strikeData) => (
+              {data.map((strikeData) => (
                 <TableRow
                   key={strikeData.strike}
                   className={cn(
                     'hover:bg-muted/30 transition-colors border-border',
-                    strikeData.strike === atmStrike && 'bg-primary/5 border-primary/20 shadow-sm'
+                    strikeData.strike === atm && 'bg-primary/5 border-primary/20 shadow-sm'
                   )}
                 >
                   {/* CE Columns */}
@@ -100,10 +115,10 @@ export function OptionsChain({ onStrikeSelect }: OptionsChainProps) {
                   {/* Strike */}
                   <TableCell className={cn(
                     "text-center font-bold p-2 border-x",
-                    strikeData.strike === atmStrike && "bg-primary/10 text-primary font-extrabold"
+                    strikeData.strike === atm && "bg-primary/10 text-primary font-extrabold"
                   )}>
                     {strikeData.strike.toLocaleString()}
-                    {strikeData.strike === atmStrike && (
+                    {strikeData.strike === atm && (
                       <div className="text-xs text-primary/70 mt-1">ATM</div>
                     )}
                   </TableCell>

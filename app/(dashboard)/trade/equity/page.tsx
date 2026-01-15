@@ -7,12 +7,16 @@ import { Stock } from '@/types/equity.types';
 import { useMarketStore } from '@/stores/trading/market.store';
 import { cn } from '@/lib/utils';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { Maximize2 } from 'lucide-react';
+import { useAnalysisStore } from '@/stores/trading/analysis.store';
 
 const CandlestickChartComponent = dynamic(() => import('@/components/trade/CandlestickChart').then(mod => ({ default: mod.CandlestickChart })));
 
 export default function EquityPage() {
   const { getCurrentInstruments } = useMarketStore();
-  
+  const { setAnalysisMode } = useAnalysisStore();
+
   // ✅ Explicitly fetch equity instruments
   const currentInstruments = getCurrentInstruments('equity');
   const [selectedStock, setSelectedStock] = useState<Stock | null>(currentInstruments[0]);
@@ -52,6 +56,16 @@ export default function EquityPage() {
                   </span>
                 )}
               </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setAnalysisMode(true)}
+                className="gap-2 bg-background/80 backdrop-blur shadow-sm hover:bg-background border-primary/20 hover:border-primary h-8"
+              >
+                <Maximize2 className="h-3.5 w-3.5 text-primary" />
+                <span className="text-xs font-medium text-primary">Analyze Chart</span>
+              </Button>
             </CardTitle>
           </CardHeader>
           <CardContent>

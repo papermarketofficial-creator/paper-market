@@ -24,6 +24,11 @@ export default function DashboardLayoutClient({ children }: { children: ReactNod
 }
 
 // Internal wrapper to manage state without making the refined Sidebar too complex
+// ... imports
+import { MarketStatusBar } from '@/components/layout/MarketStatusBar';
+
+// ... (existing code)
+
 function DashboardContentWrapper({ children }: { children: ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -32,6 +37,7 @@ function DashboardContentWrapper({ children }: { children: ReactNode }) {
       <Sidebar mobileOpen={mobileMenuOpen} setMobileOpen={setMobileMenuOpen} />
 
       <div className="flex-1 flex flex-col md:ml-16 transition-all duration-300">
+        <MarketStatusBar />
         <Topbar mobileMenuOpen={mobileMenuOpen} onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)} />
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden w-full max-w-full">
           {children}

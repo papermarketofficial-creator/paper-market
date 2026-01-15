@@ -37,9 +37,19 @@ interface TradingFormProps {
   instrumentMode: InstrumentMode;
 }
 
-export function TradingForm({ selectedStock, onStockSelect, instruments: propInstruments, instrumentMode }: TradingFormProps) {
+export function TradingForm({ selectedStock, onStockSelect, instruments: propInstruments, instrumentMode, activeInstrumentType, onInstrumentTypeChange }: TradingFormProps & { activeInstrumentType?: InstrumentType, onInstrumentTypeChange?: (type: InstrumentType) => void }) {
   // New State for Redesign
-  const [instrumentType, setInstrumentType] = useState<InstrumentType>("NIFTY");
+  const [localInstrumentType, setLocalInstrumentType] = useState<InstrumentType>("NIFTY");
+
+  // Derived state: Use prop if available, else local
+  const instrumentType = activeInstrumentType || localInstrumentType;
+  const setInstrumentType = (type: InstrumentType) => {
+    if (onInstrumentTypeChange) {
+      onInstrumentTypeChange(type);
+    } else {
+      setLocalInstrumentType(type);
+    }
+  };
 
   // STRICT SEPARATION: derived from mode, no local state toggle allowed
   const tradeType = instrumentMode === 'options' ? 'options' : 'futures';

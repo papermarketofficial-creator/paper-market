@@ -22,7 +22,7 @@ export function ProductTypeSelector({ productType, onProductTypeChange }: Produc
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="CNC">CNC (Delivery)</SelectItem>
+          <SelectItem value="CNC">CNC (Long Term)</SelectItem>
           <SelectItem value="MIS">MIS (Intraday)</SelectItem>
         </SelectContent>
       </Select>

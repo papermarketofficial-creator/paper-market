@@ -4,11 +4,13 @@ import { InstrumentMode } from '@/types/general.types';
 import { stocksList } from '@/content/watchlist';
 import { futuresList } from '@/content/futures';
 import { optionsList } from '@/content/options';
+import { indicesList } from '@/content/indices';
 
 interface MarketState {
   stocks: Stock[];
   futures: Stock[];
   options: Stock[];
+  indices: Stock[];
   watchlist: string[];
   // Actions
   addToWatchlist: (symbol: string) => void;
@@ -22,6 +24,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   stocks: stocksList,
   futures: futuresList,
   options: optionsList,
+  indices: indicesList,
   watchlist: ['RELIANCE', 'TCS', 'INFY'],
 
   addToWatchlist: (symbol) => {
@@ -47,11 +50,14 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       options: state.options.map((option) =>
         option.symbol === symbol ? { ...option, price } : option
       ),
+      indices: state.indices.map((index) =>
+        index.symbol === symbol ? { ...index, price } : index
+      ),
     }));
   },
 
   // ✅ Logic relies on argument, not internal state
-  getCurrentInstruments: (mode: InstrumentMode) => {
+  getCurrentInstruments: (mode: InstrumentMode | 'indices') => {
     const state = get();
     switch (mode) {
       case 'equity':
@@ -60,6 +66,8 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         return state.futures;
       case 'options':
         return state.options;
+      case 'indices':
+        return state.indices;
       default:
         return state.stocks;
     }

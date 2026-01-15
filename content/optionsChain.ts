@@ -11,7 +11,8 @@ export interface OptionStrike {
   pe: OptionData;
 }
 
-export const optionsChainData: OptionStrike[] = [
+// Export separate chains
+export const niftyChainData: OptionStrike[] = [
   {
     strike: 21000,
     ce: { symbol: 'NIFTY26JAN21000CE', ltp: 1450.00, oi: 1250000, volume: 450000 },
@@ -59,4 +60,34 @@ export const optionsChainData: OptionStrike[] = [
   },
 ];
 
+export const bankNiftyChainData: OptionStrike[] = [
+  {
+    strike: 45500,
+    ce: { symbol: 'BANKNIFTY26JAN45500CE', ltp: 1250.00, oi: 850000, volume: 320000 },
+    pe: { symbol: 'BANKNIFTY26JAN45500PE', ltp: 120.00, oi: 950000, volume: 450000 },
+  },
+  {
+    strike: 46000,
+    ce: { symbol: 'BANKNIFTY26JAN46000CE', ltp: 850.00, oi: 1800000, volume: 1250000 },
+    pe: { symbol: 'BANKNIFTY26JAN46000PE', ltp: 620.00, oi: 1600000, volume: 980000 },
+  },
+  {
+    strike: 46500, // ATM
+    ce: { symbol: 'BANKNIFTY26JAN46500CE', ltp: 450.50, oi: 2500000, volume: 1800000 },
+    pe: { symbol: 'BANKNIFTY26JAN46500PE', ltp: 420.50, oi: 2200000, volume: 1650000 },
+  },
+  {
+    strike: 47000,
+    ce: { symbol: 'BANKNIFTY26JAN47000CE', ltp: 180.00, oi: 3200000, volume: 850000 },
+    pe: { symbol: 'BANKNIFTY26JAN47000PE', ltp: 850.00, oi: 1200000, volume: 350000 },
+  },
+  {
+    strike: 47500,
+    ce: { symbol: 'BANKNIFTY26JAN47500CE', ltp: 85.00, oi: 1500000, volume: 250000 },
+    pe: { symbol: 'BANKNIFTY26JAN47500PE', ltp: 1250.00, oi: 450000, volume: 120000 },
+  },
+];
+
+export const optionsChainData = niftyChainData; // Fallback
 export const atmStrike = 21700;
+export const bankNiftyAtm = 46500;

@@ -6,7 +6,10 @@ export const metadata = {
   description: 'Your trading dashboard with portfolio overview, positions, and analytics.',
 };
 
-export default function DashboardLayout({ children }: { children: ReactNode }) {
-  // Server component delegating interactive parts to a client wrapper
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return <DashboardLayoutClient>{children}</DashboardLayoutClient>;
 }
