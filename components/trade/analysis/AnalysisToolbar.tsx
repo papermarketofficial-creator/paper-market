@@ -1,12 +1,16 @@
 "use client";
 import { Button } from '@/components/ui/button';
-import { MousePointer2, Minus, Crosshair, TrendingUp, MoveRight, RotateCcw, Trash2 } from 'lucide-react';
+import { MousePointer2, Minus, Crosshair, TrendingUp, MoveRight, RotateCcw, Trash2, Square, Type } from 'lucide-react';
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAnalysisStore, ToolType } from '@/stores/trading/analysis.store';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-export function AnalysisToolbar() {
+interface AnalysisToolbarProps {
+  symbol: string;
+}
+
+export function AnalysisToolbar({ symbol }: AnalysisToolbarProps) {
   const { activeTool, setActiveTool } = useAnalysisStore();
 
   const tools = [
@@ -15,6 +19,8 @@ export function AnalysisToolbar() {
     { id: 'trendline', icon: TrendingUp, label: 'Trendline' },
     { id: 'ray', icon: MoveRight, label: 'Ray' },
     { id: 'horizontal-line', icon: Minus, label: 'Horiz. Line' },
+    { id: 'rectangle', icon: Square, label: 'Rectangle' },
+    { id: 'text', icon: Type, label: 'Text Note' },
   ];
 
   return (
@@ -52,16 +58,15 @@ export function AnalysisToolbar() {
         <IconAction
           icon={RotateCcw}
           label="Undo (Ctrl+Z)"
-          onClick={() => useAnalysisStore.getState().undoDrawing('BTC-USD')} // Symbol context missing in Toolbar? We'll default or need prop
+          onClick={() => useAnalysisStore.getState().undoDrawing(symbol)}
         />
         <IconAction
           icon={Trash2}
           label="Delete Selected (Del)"
-          // Logic: If selected, delete it. Else delete last? Or disable.
           onClick={() => {
             const state = useAnalysisStore.getState();
             if (state.selectedDrawingId) {
-              state.deleteDrawing('BTC-USD', state.selectedDrawingId);
+              state.deleteDrawing(symbol, state.selectedDrawingId);
             }
           }}
           disabled={!useAnalysisStore.getState().selectedDrawingId}

@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LineChart } from 'lucide-react';
 import { useAnalysisStore } from '@/stores/trading/analysis.store';
+import { useMarketStore } from '@/stores/trading/market.store';
 
 interface AnalysisHeaderProps {
   symbol: string;
@@ -22,20 +23,28 @@ export function AnalysisHeader({ symbol }: AnalysisHeaderProps) {
     setTimeframe
   } = useAnalysisStore();
 
+  const { livePrice } = useMarketStore();
+
   const indicators = getIndicators(symbol);
 
-  const handleAdd = (type: 'SMA' | 'RSI' | 'MACD') => {
+  const handleAdd = (type: 'SMA' | 'RSI' | 'MACD' | 'EMA' | 'BB') => {
     addIndicator(symbol, {
       type,
-      period: 14,
+      period: type === 'BB' ? 20 : 14,
       source: 'close',
-      color: type === 'SMA' ? '#F59E0B' : '#8B5CF6'
+      color: type === 'SMA' ? '#F59E0B' : type === 'EMA' ? '#3B82F6' : '#8B5CF6',
+      // BB Defaults logic handled in store or chart? Store is better or config here.
     });
   };
 
   return (
     <div className="flex items-center gap-4">
-      <div className="font-bold text-lg text-primary">PaperPro Analysis</div>
+      <div className="font-bold text-lg text-primary">
+        {symbol}
+        <span className={`ml-2 text-sm font-mono ${livePrice > 0 ? 'text-green-500' : 'text-red-500'}`}>
+          ₹{livePrice.toFixed(2)}
+        </span>
+      </div>
 
       <div className="h-6 w-px bg-border mx-2" />
 
@@ -51,11 +60,17 @@ export function AnalysisHeader({ symbol }: AnalysisHeaderProps) {
           <DropdownMenuItem onClick={() => handleAdd('SMA')}>
             Moving Average (SMA 14)
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleAdd('EMA')}>
+            Exp. Moving Avg (EMA 14)
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => handleAdd('RSI')}>
             RSI (14)
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => handleAdd('MACD')}>
             MACD (12, 26, 9)
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => handleAdd('BB')}>
+            Bollinger Bands (20, 2)
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

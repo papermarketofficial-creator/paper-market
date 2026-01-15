@@ -8,9 +8,10 @@ export interface Position {
   quantity: number;
   entryPrice: number;
   currentPrice: number;
+  contractValue?: number; // Total value of the position
   productType: ProductType;
   leverage: number;
-  timestamp: Date;
+  timestamp: Date | number; // Allow number for Date.now()
   instrument: InstrumentMode;
   lotSize: number;
   currentPnL: number;

@@ -43,7 +43,7 @@ export function AnalysisOverlay({ children, symbol }: AnalysisOverlayProps) {
       {/* Main Workspace */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Toolbar */}
-        <AnalysisToolbar />
+        <AnalysisToolbar symbol={symbol} />
 
         {/* Chart Canvas Area */}
         <div className="flex-1 relative bg-background/50">

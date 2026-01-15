@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { CandlestickData, HistogramData, Time } from 'lightweight-charts';
 import { useAnalysisStore } from '@/stores/trading/analysis.store';
-import { SMA, RSI, MACD } from 'technicalindicators';
+import { SMA, RSI, MACD, EMA, BollingerBands } from 'technicalindicators';
+import { useMarketStore } from '@/stores/trading/market.store';
 
 // Dynamic imports to avoid SSR issues with LWC
 const BaseChart = dynamic(() => import('./BaseChart').then(mod => mod.BaseChart), { ssr: false });
@@ -14,43 +15,7 @@ interface ChartContainerProps {
 }
 
 // Reuse the generation logic from previous file for now (Phase 1)
-// Add timeframe param
-const generateData = (count: number, timeframe: string) => {
-  const data: CandlestickData[] = [];
-  // Fixed timestamp to stop "real-time" simulation effect
-  const FIXED_TIME = 1714560000000; // May 1, 2024
 
-  // Interval multiplier (minutes)
-  const interval = timeframe === '1m' ? 1 : timeframe === '5m' ? 5 : timeframe === '15m' ? 15 : 60;
-
-  let time = Math.floor(FIXED_TIME / 1000) - count * 60 * interval;
-  let price = 100;
-
-  for (let i = 0; i < count; i++) {
-    const volatility = 0.5 * Math.sqrt(interval); // More vol for higher TF
-    const open = price;
-    const close = open + (Math.random() - 0.5) * volatility;
-    const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-    const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-
-    data.push({
-      time: time as Time,
-      open, high, low, close
-    });
-
-    price = close;
-    time += 60 * interval;
-  }
-  return data;
-};
-
-const generateVol = (data: CandlestickData[]) => {
-  return data.map(d => ({
-    time: d.time,
-    value: Math.random() * 1000,
-    color: (d.close as number) > (d.open as number) ? '#22C55E' : '#EF4444'
-  } as HistogramData));
-}
 
 export function ChartContainer({ symbol }: ChartContainerProps) {
   const {
@@ -61,21 +26,33 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
     timeframe // New
   } = useAnalysisStore();
 
+  const {
+    historicalData,
+    volumeData,
+    initializeSimulation,
+    startSimulation,
+    stopSimulation
+  } = useMarketStore();
+
   const indicators = getIndicators(symbol);
   const drawings = getDrawings(symbol);
 
-  const [data, setData] = useState<CandlestickData[]>([]);
-  const [volData, setVolData] = useState<HistogramData[]>([]);
+  // Use state from store
+  const data = historicalData;
+  const volData = volumeData;
 
-  // 1. Data Fetching (Mock)
+  // 1. Data Fetching (Simulation)
   useEffect(() => {
     // Reset interaction on symbol change
     useAnalysisStore.getState().cancelDrawing();
 
-    // Simulate fetch
-    const d = generateData(1000, timeframe); // Respect timeframe
-    setData(d);
-    setVolData(generateVol(d));
+    // Initialize Simulation
+    initializeSimulation(symbol, timeframe);
+    startSimulation();
+
+    return () => {
+      stopSimulation();
+    }
   }, [symbol, timeframe]); // Reload on timeframe change
 
   // ... (Indicators calc remains same) ...
@@ -109,6 +86,48 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
             return { time: data[dataIndex].time, value: val };
           }).filter(Boolean);
           return { config: ind, data: results };
+        }
+        else if (ind.type === 'EMA') {
+          const ema = EMA.calculate({ period, values: closes });
+          results = ema.map((val, i) => {
+            const dataIndex = i + period - 1;
+            if (!data[dataIndex]) return null;
+            return { time: data[dataIndex].time, value: val };
+          }).filter(Boolean);
+          return { config: ind, data: results };
+        }
+        else if (ind.type === 'BB') {
+          const bb = BollingerBands.calculate({ period, stdDev: 2, values: closes });
+          // BB returns { middle, upper, lower }
+          // We need to map this to 3 series or similar. For simplicity, we'll return complex data and handle in BaseChart
+          // Or simpler: just return Main Line (Middle) here? No, user wants Bands.
+          // We'll structure it like MACD (series object)
+
+          results = bb.map((val, i) => {
+            const dataIndex = i + period - 1;
+            if (!data[dataIndex]) return null;
+            return {
+              time: data[dataIndex].time,
+              middle: val.middle,
+              upper: val.upper,
+              lower: val.lower
+            };
+          }).filter(Boolean);
+
+          // Extract into separate arrays for lightweight-charts
+          const middle = results.map((r: any) => ({ time: r.time, value: r.middle }));
+          const upper = results.map((r: any) => ({ time: r.time, value: r.upper }));
+          const lower = results.map((r: any) => ({ time: r.time, value: r.lower }));
+
+          return {
+            config: ind,
+            data: middle, // Default to middle for generic renderers
+            series: {
+              middle,
+              upper,
+              lower
+            }
+          };
         }
         else if (ind.type === 'RSI') {
           const rsi = RSI.calculate({ period, values: closes });

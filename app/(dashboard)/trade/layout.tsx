@@ -1,4 +1,5 @@
 "use client";
+import { TradeEngine } from "@/components/trade/TradeEngine";
 
 export default function TradeLayout({ children }: { children: React.ReactNode }) {
   return (
@@ -10,6 +11,7 @@ export default function TradeLayout({ children }: { children: React.ReactNode })
       </div>
 
       {/* Page Content */}
+      <TradeEngine />
       <main>{children}</main>
     </div>
   );

@@ -5,6 +5,7 @@ import { stocksList } from '@/content/watchlist';
 import { futuresList } from '@/content/futures';
 import { optionsList } from '@/content/options';
 import { indicesList } from '@/content/indices';
+// import { generateNiftyData } from '@/lib/simulator/nifty.data'; // Inlined below
 
 interface MarketState {
   stocks: Stock[];
@@ -16,6 +17,17 @@ interface MarketState {
   addToWatchlist: (symbol: string) => void;
   removeFromWatchlist: (symbol: string) => void;
   updateStockPrice: (symbol: string, price: number) => void;
+  // Simulation
+  historicalData: any[]; // CandlestickData[]
+  volumeData: any[];     // HistogramData[]
+  livePrice: number;
+  simulatedSymbol: string | null;
+  intervalId: NodeJS.Timeout | null;
+
+  initializeSimulation: (symbol: string, timeframe?: string) => void;
+  startSimulation: () => void;
+  stopSimulation: () => void;
+
   // ✅ Pure function getter, requires mode to be passed
   getCurrentInstruments: (mode: InstrumentMode) => Stock[];
 }
@@ -56,7 +68,73 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     }));
   },
 
-  // ✅ Logic relies on argument, not internal state
+  // ✅ Simulation State
+  historicalData: [] as any[], // CandlestickData[]
+  volumeData: [] as any[],    // HistogramData[]
+  livePrice: 0,
+  simulatedSymbol: null as string | null,
+  intervalId: null as NodeJS.Timeout | null,
+
+  // ✅ Actions
+  initializeSimulation: (symbol, timeframe = '5m') => {
+    // Dynamic import removed in favor of top-level import to prevent runtime errors
+    const interval = timeframe === '1m' ? 1 : timeframe === '5m' ? 5 : 15;
+    const { candles, volume } = generateNiftyData(1, interval);
+
+    const lastClose = candles[candles.length - 1].close;
+
+    set({
+      historicalData: candles,
+      volumeData: volume,
+      livePrice: lastClose,
+      simulatedSymbol: symbol
+    });
+  },
+
+  startSimulation: () => {
+    const state = get();
+    if (state.intervalId) return; // Already running
+
+    const id = setInterval(() => {
+      set((state) => {
+        // Simulate a "Tick" - Just fluctuate the last candle's close for now
+        // Or add new candle every X seconds?
+        // For "Real-time" feel: Update the current Close of the last candle
+
+        const data = [...state.historicalData];
+        if (data.length === 0) return state;
+
+        const lastIndex = data.length - 1;
+        const lastCandle = { ...data[lastIndex] };
+
+        const volatility = 2; // Tick vol
+        const change = (Math.random() - 0.5) * volatility;
+
+        lastCandle.close += change;
+        lastCandle.high = Math.max(lastCandle.high, lastCandle.close);
+        lastCandle.low = Math.min(lastCandle.low, lastCandle.close);
+
+        data[lastIndex] = lastCandle;
+
+        return {
+          historicalData: data,
+          livePrice: lastCandle.close
+        };
+      });
+    }, 1000); // 1 Tick per second
+
+    set({ intervalId: id });
+  },
+
+  stopSimulation: () => {
+    const state = get();
+    if (state.intervalId) {
+      clearInterval(state.intervalId);
+      set({ intervalId: null });
+    }
+  },
+
+  // ✅ Pure function getter, requires mode to be passed
   getCurrentInstruments: (mode: InstrumentMode | 'indices') => {
     const state = get();
     switch (mode) {
@@ -73,3 +151,64 @@ export const useMarketStore = create<MarketState>((set, get) => ({
     }
   },
 }));
+
+// --- Inlined Simulation Logic (To prevent Import Errors) ---
+
+// Helper to generate random number in range
+const random = (min: number, max: number) => Math.random() * (max - min) + min;
+
+// Generate simulated intraday data for NIFTY
+function generateNiftyData(days = 1, intervalMinutes = 5) {
+  const candles: any[] = [];
+  const volume: any[] = [];
+
+  let currentPrice = 22500; // Base NIFTY Price
+
+  // Start from 'days' ago
+  const now = new Date();
+  // Reset to 9:15 AM
+  now.setHours(9, 15, 0, 0);
+
+  // Adjust start time back by 'days'
+  let timeIter = new Date(now.getTime() - (days * 24 * 60 * 60 * 1000));
+
+  // Total steps
+  const totalMinutes = days * 6 * 60 + (days * 15); // Rough Approx
+  const steps = totalMinutes / intervalMinutes;
+
+  for (let i = 0; i < steps; i++) {
+    // Trend Factor: Sine wave to simulate daily cycle + random walk
+    const trend = Math.sin(i / 20) * 10;
+    const volatility = 15; // NIFTY volatility per 5 mins
+    const noise = random(-volatility, volatility);
+
+    const open = currentPrice;
+    const close = open + trend + noise;
+    const high = Math.max(open, close) + random(0, volatility / 2);
+    const low = Math.min(open, close) - random(0, volatility / 2);
+
+    // Convert to Unix Timestamp (seconds)
+    const time = Math.floor(timeIter.getTime() / 1000);
+
+    candles.push({
+      time,
+      open,
+      high,
+      low,
+      close
+    });
+
+    volume.push({
+      time,
+      value: random(50000, 500000), // Random volume
+      color: close >= open ? '#22C55E' : '#EF4444'
+    });
+
+    currentPrice = close;
+
+    // Increment Time
+    timeIter = new Date(timeIter.getTime() + intervalMinutes * 60 * 1000);
+  }
+
+  return { candles, volume };
+}

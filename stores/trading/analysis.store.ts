@@ -15,7 +15,7 @@ export interface Point {
 }
 
 // --- Drawings ---
-export type DrawingType = 'trendline' | 'ray' | 'horizontal-line';
+export type DrawingType = 'trendline' | 'ray' | 'horizontal-line' | 'rectangle' | 'text';
 
 export interface BaseDrawing {
   id: string;
@@ -30,15 +30,21 @@ export interface HorizontalLineDrawing extends BaseDrawing {
 }
 
 export interface TwoPointDrawing extends BaseDrawing {
-  type: 'trendline' | 'ray';
+  type: 'trendline' | 'ray' | 'rectangle';
   p1: Point;
   p2: Point;
 }
 
-export type Drawing = HorizontalLineDrawing | TwoPointDrawing;
+export interface TextDrawing extends BaseDrawing {
+  type: 'text';
+  point: Point;
+  text: string;
+}
+
+export type Drawing = HorizontalLineDrawing | TwoPointDrawing | TextDrawing;
 
 // --- Indicators ---
-export type IndicatorType = 'SMA' | 'EMA' | 'RSI' | 'MACD' | 'VOL';
+export type IndicatorType = 'SMA' | 'EMA' | 'RSI' | 'MACD' | 'VOL' | 'BB';
 
 export interface IndicatorConfig {
   id: string;
@@ -59,14 +65,16 @@ export interface IndicatorConfig {
 }
 
 // --- Interaction State ---
-export type InteractionStatus = 'idle' | 'drawing';
+export type InteractionStatus = 'idle' | 'drawing' | 'dragging' | 'box-selecting';
 
-export type ToolType = 'cursor' | 'crosshair' | DrawingType;
+export type ToolType = 'cursor' | 'crosshair' | 'select' | DrawingType;
 
 export interface InteractionState {
   status: InteractionStatus;
-  dragStartPoint?: Point; // P1
-  currentPoint?: Point; // Current Mouse Pos (P2 preview)
+  dragStartPoint?: Point; // P1 (for creation) or Click Origin (for dragging)
+  currentPoint?: Point; // Current Mouse Pos
+  activeDrawingIds?: string[]; // IDs of drawing being dragged (Group)
+  originalDrawings?: Record<string, Drawing>; // Snapshots for rollback/delta calc
 }
 
 // --- Per-Symbol State ---
@@ -92,10 +100,14 @@ interface AnalysisState {
   setSelectedDrawing: (id: string | null) => void;
 
   // Global Actions (Context-agnostic or set context)
+  // Global Actions (Context-agnostic or set context)
   startDrawing: (point: Point) => void;
+  startDragging: (id: string, startPoint: Point, originalDrawing: Drawing) => void;
   updateDraft: (point: Point) => void;
   commitDrawing: (symbol: string) => void; // Requires Symbol context on commit
   cancelDrawing: () => void;
+
+  updateDrawing: (symbol: string, drawing: Drawing) => void;
 
   undoDrawing: (symbol: string) => void;
 
@@ -141,6 +153,7 @@ export const useAnalysisStore = create<AnalysisState>()(
       selectedDrawingId: null,
       setSelectedDrawing: (id) => set({ selectedDrawingId: id }),
 
+      // Interaction Actions
       startDrawing: (point) => set({
         interactionState: {
           status: 'drawing',
@@ -150,6 +163,17 @@ export const useAnalysisStore = create<AnalysisState>()(
         selectedDrawingId: null
       }),
 
+      startDragging: (id, startPoint, originalDrawing) => set({
+        interactionState: {
+          status: 'dragging',
+          activeDrawingId: id,
+          dragStartPoint: startPoint,
+          originalDrawing: originalDrawing,
+          currentPoint: startPoint
+        },
+        selectedDrawingId: id
+      }),
+
       updateDraft: (point) => set((state) => ({
         interactionState: {
           ...state.interactionState,
@@ -157,13 +181,28 @@ export const useAnalysisStore = create<AnalysisState>()(
         }
       })),
 
+      updateDrawing: (symbol, drawing) => set((state) => {
+        const current = state.symbolState[symbol];
+        if (!current) return state;
+
+        return {
+          symbolState: {
+            ...state.symbolState,
+            [symbol]: {
+              ...current,
+              drawings: current.drawings.map(d => d.id === drawing.id ? drawing : d)
+            }
+          }
+        };
+      }),
+
       commitDrawing: (symbol) => {
         const { activeTool, interactionState } = get();
         if (interactionState.status !== 'drawing' || !interactionState.dragStartPoint || !interactionState.currentPoint) return;
 
         let newDrawing: Omit<Drawing, 'id'> | null = null;
 
-        if (activeTool === 'trendline' || activeTool === 'ray') {
+        if (activeTool === 'trendline' || activeTool === 'ray' || activeTool === 'rectangle') {
           newDrawing = {
             type: activeTool,
             visible: true,

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, CandlestickData, Time, HistogramSeries, HistogramData, CrosshairMode, LineSeries, PriceScaleMode } from 'lightweight-charts';
+import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, CandlestickData, HistogramSeries, HistogramData, CrosshairMode, LineSeries } from 'lightweight-charts';
 import { IndicatorConfig } from '@/stores/trading/analysis.store';
 import { DrawingManager } from './overlays/DrawingManager';
 
@@ -11,14 +11,19 @@ interface BaseChartProps {
     config: IndicatorConfig;
     data: any[];
     series?: {
-      macd: any[];
-      signal: any[];
-      histogram: any[];
+      // MACD
+      macd?: any[];
+      signal?: any[];
+      histogram?: any[];
+      // Bollinger Bands
+      middle?: any[];
+      upper?: any[];
+      lower?: any[];
     };
   }[];
   height?: number;
   autoResize?: boolean;
-  symbol: string; // ✅ Added Symbol Prop
+  symbol: string;
 }
 
 export interface BaseChartRef {
@@ -39,6 +44,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<any>[]>>(new Map()); // Map ID to Array of Series
 
+  // State to force re-render when chart is ready
+  const [chartInstance, setChartInstance] = useState<IChartApi | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 400 });
 
   useImperativeHandle(ref, () => ({
@@ -101,6 +108,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
     chartRef.current = chart;
     candleSeriesRef.current = candlestickSeriesInstance;
+    setChartInstance(chart); // Trigger re-render to mount DrawingManager
 
     // Pass references
     if (volumeData) volumeSeriesInstance.setData(volumeData);
@@ -122,6 +130,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       indicatorSeriesRefs.current.clear();
       chartRef.current = null;
       candleSeriesRef.current = null;
+      setChartInstance(null);
     };
   }, []); // Run once on mount
 
@@ -212,20 +221,52 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
           indicatorSeriesRefs.current.set(config.id, [hist, macdLine, sigLine]);
 
           // Initial Data
-          hist.setData(series.histogram);
-          macdLine.setData(series.macd);
-          sigLine.setData(series.signal);
+          hist.setData(series.histogram || []);
+          macdLine.setData(series.macd || []);
+          sigLine.setData(series.signal || []);
 
         } else {
           // Update Data
           const [hist, macdLine, sigLine] = existing;
-          hist.setData(series.histogram);
-          macdLine.setData(series.macd);
-          sigLine.setData(series.signal);
+          hist.setData(series.histogram || []);
+          macdLine.setData(series.macd || []);
+          sigLine.setData(series.signal || []);
+        }
+      }
+      else if (config.type === 'BB' && series) {
+        if (!existing) {
+          // Create 3 lines
+          // Common PriceScaleId = right (overlay on main chart)
+          const upper = chartRef.current!.addSeries(LineSeries, {
+            color: '#2962FF',
+            lineWidth: 1,
+            title: 'BB Upper'
+          });
+          const lower = chartRef.current!.addSeries(LineSeries, {
+            color: '#2962FF',
+            lineWidth: 1,
+            title: 'BB Lower'
+          });
+          const middle = chartRef.current!.addSeries(LineSeries, {
+            color: '#FF6D00', // Orange for middle
+            lineWidth: 1,
+            title: 'BB Middle'
+          });
+
+          indicatorSeriesRefs.current.set(config.id, [upper, lower, middle]);
+
+          if (series.upper) upper.setData(series.upper || []);
+          if (series.lower) lower.setData(series.lower || []);
+          if (series.middle) middle.setData(series.middle || []);
+        } else {
+          const [upper, lower, middle] = existing;
+          if (series.upper) upper.setData(series.upper || []);
+          if (series.lower) lower.setData(series.lower || []);
+          if (series.middle) middle.setData(series.middle || []);
         }
       }
       else {
-        // Simple Indicators (SMA/RSI)
+        // Simple Indicators (SMA/RSI/EMA)
         if (!existing) {
           // ... same as before
           const s = chartRef.current!.addSeries(LineSeries, {
@@ -237,9 +278,10 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
           if (config.type === 'RSI') {
             chartRef.current!.priceScale('RSI').applyOptions({
-              scaleMargins: { top: 0.1, bottom: 0.1 }
-              // Note: RSI overlaps main if simple overlay, valid for MVP
+              scaleMargins: { top: 0.8, bottom: 0.05 }
             });
+            // And main chart needs to shrink? NO, usually overlay or resize.
+            // For now overlay is fine or just separate scale.
           }
 
           indicatorSeriesRefs.current.set(config.id, [s]);
@@ -254,9 +296,9 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
   return (
     <div ref={chartContainerRef} className="w-full rounded-lg relative">
-      {chartRef.current && candleSeriesRef.current && dimensions.width > 0 && (
+      {chartInstance && candleSeriesRef.current && dimensions.width > 0 && data && data.length > 0 && (
         <DrawingManager
-          chart={chartRef.current}
+          chart={chartInstance}
           mainSeries={candleSeriesRef.current}
           width={dimensions.width}
           height={height}

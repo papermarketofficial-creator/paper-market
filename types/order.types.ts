@@ -1,4 +1,6 @@
-import { Side, InstrumentMode, TradeStatus, ExitReason } from './general.types';
+import { Side, InstrumentMode, ExitReason } from './general.types';
+
+export type TradeStatus = 'FILLED' | 'CLOSED' | 'OPEN' | 'CANCELLED';
 
 export interface Trade {
   id: string;
@@ -20,6 +22,8 @@ export interface Trade {
   stopLoss?: number;
   target?: number;
   exitReason?: ExitReason;
+  orderType?: 'MARKET' | 'LIMIT' | 'STOP';
+  exchangeOrderId?: string;
 }
 
 export interface JournalEntry {
