@@ -70,7 +70,7 @@ export default function FuturesPage() {
                   className="gap-2 bg-background/80 backdrop-blur shadow-sm hover:bg-background border-primary/20 hover:border-primary h-8"
                 >
                   <Maximize2 className="h-3.5 w-3.5 text-primary" />
-                  <span className="text-xs font-medium text-primary">Expand Chart</span>
+                  <span className="text-xs font-medium text-primary">Analyze Chart</span>
                 </Button>
               </CardTitle>
             </CardHeader>
