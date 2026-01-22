@@ -16,7 +16,7 @@ const Logo: React.FC<LogoProps> = ({ className = "", hideText = false }) => {
         fill="none"
       >
         <rect width="256" height="256" fill="none" />
-        
+
         {/* The vertical stem of the P - Uses Primary Blue */}
         <path
           d="M64,32V224a16,16,0,0,0,32,0V176"
@@ -25,26 +25,11 @@ const Logo: React.FC<LogoProps> = ({ className = "", hideText = false }) => {
           strokeLinecap="round"
           strokeLinejoin="round"
         />
-        
+
         {/* The Curve and Upward Arrow - Gradients from Primary to Secondary */}
         <path
           d="M96,176h48c44.18,0,80-35.82,80-80s-35.82-80-80-80H96"
           className="stroke-primary"
-          strokeWidth="24"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        {/* The Accent Arrow (The "Growth" part) */}
-        <path
-          d="M144,136 l32-32 l24,24 l40-40"
-          className="stroke-secondary" 
-          strokeWidth="24"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-         <polyline
-          points="216 88 240 88 240 112"
-          className="stroke-secondary"
           strokeWidth="24"
           strokeLinecap="round"
           strokeLinejoin="round"
