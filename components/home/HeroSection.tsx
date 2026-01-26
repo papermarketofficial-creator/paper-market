@@ -40,6 +40,7 @@ const HeroSection = () => {
               text-sm font-medium text-blue-700 dark:text-white/80 backdrop-blur-sm"
             >
               <Flame className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+
               Learn Trading with Zero Risk
             </div>
           </div>
