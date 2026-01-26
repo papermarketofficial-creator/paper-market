@@ -11,6 +11,11 @@ const envSchema = z.object({
     // Authentication (NextAuth)
     AUTH_SECRET: z.string().min(1),
 
+    // OAuth Providers (Google)
+    GOOGLE_CLIENT_ID: z.string().min(1),
+    GOOGLE_CLIENT_SECRET: z.string().min(1),
+    NEXTAUTH_URL: z.string().url().default("http://localhost:3000"),
+
     // Market Data (Upstox) - Optional for now, but good to have
     UPSTOX_API_KEY: z.string().optional(),
     UPSTOX_API_SECRET: z.string().optional(),
@@ -42,6 +47,11 @@ export const config = {
     },
     auth: {
         secret: env.AUTH_SECRET,
+        url: env.NEXTAUTH_URL,
+        google: {
+            clientId: env.GOOGLE_CLIENT_ID,
+            clientSecret: env.GOOGLE_CLIENT_SECRET,
+        }
     },
     upstox: {
         baseUrl: "https://api.upstox.com/v2",

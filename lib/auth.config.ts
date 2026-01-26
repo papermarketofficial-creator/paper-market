@@ -7,8 +7,8 @@ import { config as appConfig } from "@/lib/config";
 export const authConfig = {
     providers: [
         Google({
-            clientId: process.env.GOOGLE_CLIENT_ID,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+            clientId: appConfig.auth.google.clientId,
+            clientSecret: appConfig.auth.google.clientSecret,
         }),
     ],
     // Force JWT strategy for performance and Edge compatibility
