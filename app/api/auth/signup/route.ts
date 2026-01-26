@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
             name: validated.name,
             email: validated.email,
             password: hashedPassword,
-            balance: "0", // Default balance
+            balance: "1000000.00", // ₹10L starting balance for paper trading
         }).returning();
 
         return NextResponse.json({
