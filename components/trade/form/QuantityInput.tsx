@@ -27,6 +27,10 @@ export function QuantityInput({ quantity, onQuantityChange, lotSize = 1 }: Quant
         min="1"
         value={quantity}
         onChange={(e) => onQuantityChange(e.target.value)}
+        onBlur={(e) => {
+          // Force state sync on blur to prevent stale state when clicking buttons
+          onQuantityChange(e.target.value);
+        }}
         className="bg-background border-input text-foreground font-mono"
       />
       {isLots && (

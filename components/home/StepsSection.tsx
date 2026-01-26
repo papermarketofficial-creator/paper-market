@@ -134,16 +134,7 @@ const StepsSection = () => {
                   {step.description}
                 </p>
 
-                {/* CTA */}
-                {step.highlight && (
-                  <a
-                    href="#"
-                    className="flex items-center gap-2 text-lg font-semibold text-white group"
-                  >
-                    Learn how it works
-                    <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
-                  </a>
-                )}
+
               </div>
             </div>
           ))}

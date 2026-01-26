@@ -84,17 +84,18 @@ const OrdersPage = () => {
   const totalPages = Math.ceil(filteredAndSortedTrades.length / itemsPerPage);
 
   const handleExport = () => {
-    const csv = filteredAndSortedTrades.map(trade =>
-      `${trade.symbol},${trade.side},${trade.quantity},${trade.entryPrice},${trade.exitPrice || ''},${trade.pnl},${format(trade.timestamp, 'yyyy-MM-dd HH:mm:ss')}`
-    ).join('\n');
-    const csvContent = `Symbol,Side,Quantity,Entry Price,Exit Price,P&L,Timestamp\n${csv}`;
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'trade-history.csv';
-    a.click();
-    URL.revokeObjectURL(url);
+    // const csv = filteredAndSortedTrades.map(trade =>
+    //   `${trade.symbol},${trade.side},${trade.quantity},${trade.entryPrice},${trade.exitPrice || ''},${trade.pnl},${format(trade.timestamp, 'yyyy-MM-dd HH:mm:ss')}`
+    // ).join('\n');
+    // const csvContent = `Symbol,Side,Quantity,Entry Price,Exit Price,P&L,Timestamp\n${csv}`;
+    // const blob = new Blob([csvContent], { type: 'text/csv' });
+    // const url = URL.createObjectURL(blob);
+    // const a = document.createElement('a');
+    // a.href = url;
+    // a.download = 'trade-history.csv';
+    // a.click();
+    // URL.revokeObjectURL(url);
+    console.log("Export disabled for build debugging");
   };
 
   const toggleSort = (field: 'date' | 'pnl') => {
@@ -223,7 +224,7 @@ const OrdersPage = () => {
                       <div>
                         <p className="text-muted-foreground">Exit</p>
                         <p className="font-medium text-foreground">
-                          {trade.status === 'CLOSED' ? formatCurrency(trade.exitPrice) : '-'}
+                          {trade.status === 'CLOSED' ? formatCurrency(trade.exitPrice || 0) : '-'}
                         </p>
                       </div>
                       <div>

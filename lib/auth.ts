@@ -1,27 +1,47 @@
 import NextAuth from "next-auth";
-import Google from "next-auth/providers/google";
 import { DrizzleAdapter } from "@auth/drizzle-adapter";
 import { db } from "@/lib/db";
-import { config } from "@/lib/config";
 import { users, accounts, sessions, verificationTokens } from "@/lib/db/schema";
+import { authConfig } from "./auth.config";
 
-// Force JWT strategy for performance, unless we specifically want DB sessions
-// The Drizzle adapter supports both.
+import Credentials from "next-auth/providers/credentials";
+import { compare } from "bcryptjs";
+import { eq } from "drizzle-orm";
+import { LoginSchema } from "@/lib/validation/auth";
+
+// This file handles server-side auth with database adapter
+// It is NOT Edge compatible
 export const { handlers, auth, signIn, signOut } = NextAuth({
+    ...authConfig,
+    providers: [
+        ...authConfig.providers,
+        Credentials({
+            async authorize(credentials) {
+                const validated = LoginSchema.safeParse(credentials);
+                if (!validated.success) return null;
+
+                const { email, password } = validated.data;
+
+                const [user] = await db
+                    .select()
+                    .from(users)
+                    .where(eq(users.email, email))
+                    .limit(1);
+
+                if (!user || !user.password) return null;
+
+                const passwordsMatch = await compare(password, user.password);
+                if (!passwordsMatch) return null;
+
+                return user;
+            }
+        })
+    ],
     adapter: DrizzleAdapter(db, {
         usersTable: users,
         accountsTable: accounts,
         sessionsTable: sessions,
         verificationTokensTable: verificationTokens,
     }),
-    providers: [
-        Google({
-            clientId: process.env.GOOGLE_CLIENT_ID, // Use process.env directly for optionality/laziness or config.auth
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        }),
-    ],
-    session: {
-        strategy: "jwt",
-    },
-    secret: config.auth.secret,
 });
+

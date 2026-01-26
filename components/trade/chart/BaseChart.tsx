@@ -42,6 +42,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<any>[]>>(new Map()); // Map ID to Array of Series
 
   // State to force re-render when chart is ready
@@ -108,31 +109,37 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
     chartRef.current = chart;
     candleSeriesRef.current = candlestickSeriesInstance;
+    volumeSeriesRef.current = volumeSeriesInstance;
     setChartInstance(chart); // Trigger re-render to mount DrawingManager
 
-    // Pass references
-    if (volumeData) volumeSeriesInstance.setData(volumeData);
-    candlestickSeriesInstance.setData(data);
+    // Capture refs for cleanup
+    const currentIndicatorRefs = indicatorSeriesRefs.current;
 
-    // Resize Observer
+    return () => {
+      chart.remove();
+      currentIndicatorRefs.clear();
+      chartRef.current = null;
+      candleSeriesRef.current = null;
+      volumeSeriesRef.current = null;
+      setChartInstance(null);
+    };
+  }, []); // Run once on mount, height handled by separate effect
+
+  // 1.5 Handle Resize
+  useEffect(() => {
+    if (!autoResize || !chartContainerRef.current || !chartRef.current) return;
+
     const handleResize = () => {
-      if (chartContainerRef.current && autoResize) {
+      if (chartContainerRef.current && chartRef.current) {
         const newWidth = chartContainerRef.current.clientWidth;
-        chart.applyOptions({ width: newWidth });
+        chartRef.current.applyOptions({ width: newWidth });
         setDimensions(d => ({ ...d, width: newWidth }));
       }
     };
-    window.addEventListener('resize', handleResize);
 
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      chart.remove();
-      indicatorSeriesRefs.current.clear();
-      chartRef.current = null;
-      candleSeriesRef.current = null;
-      setChartInstance(null);
-    };
-  }, []); // Run once on mount
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [autoResize, chartInstance]);
 
   // 2. Handle Height Updates Efficiently
   useEffect(() => {
@@ -147,6 +154,13 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     if (candleSeriesRef.current) candleSeriesRef.current.setData(data);
   }, [data]);
+
+  // 2.1 Update Volume Data
+  useEffect(() => {
+    if (volumeSeriesRef.current && volumeData) {
+      volumeSeriesRef.current.setData(volumeData);
+    }
+  }, [volumeData]);
 
 
   // 3. Dynamic Pane Layout

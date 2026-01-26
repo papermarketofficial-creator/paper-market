@@ -5,12 +5,13 @@ import { InstrumentLookupSchema } from "@/lib/validation/instruments";
 
 export async function GET(
     req: NextRequest,
-    { params }: { params: { symbol: string } }
+    { params }: { params: Promise<{ symbol: string }> }
 ) {
     try {
+        const { symbol } = await params;
         // Validate input
         const validated = InstrumentLookupSchema.parse({
-            tradingsymbol: params.symbol,
+            tradingsymbol: symbol,
         });
 
         // Call service

@@ -53,7 +53,7 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
     return () => {
       stopSimulation();
     }
-  }, [symbol, timeframe]); // Reload on timeframe change
+  }, [symbol, timeframe, initializeSimulation, startSimulation, stopSimulation]); // Reload on timeframe change
 
   // ... (Indicators calc remains same) ...
   // Indictor logic omitted for brevity in replace, only targeting Data Fetching block?

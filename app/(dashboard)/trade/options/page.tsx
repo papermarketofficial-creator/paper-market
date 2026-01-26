@@ -103,7 +103,24 @@ export default function OptionsPage() {
             <OptionsChain
               onStrikeSelect={(symbol) => {
                 const option = currentInstruments.find(inst => inst.symbol === symbol);
-                if (option) setSelectedStock(option);
+                if (option) {
+                  setSelectedStock(option);
+                } else {
+                  // Fallback: Create transient object from symbol if not found in pre-loaded mock list
+                  // This allows trading symbols found in the Option Chain (Real DB) but missing from mock store
+                  // We try to parse details from symbol or fetch (Fetch TODO). For now, minimal object.
+                  const dummyStock: Stock = {
+                    symbol: symbol,
+                    name: symbol,
+                    price: 0, // OptionsChain should pass this preferably, or we fetch
+                    change: 0,
+                    changePercent: 0,
+                    volume: 0,
+                    lotSize: instrumentType === 'BANKNIFTY' ? 15 : instrumentType === 'FINNIFTY' ? 25 : 50, // Best guess fallback
+                    expiryDate: new Date(), // Placeholder
+                  };
+                  setSelectedStock(dummyStock);
+                }
               }}
               instrumentType={instrumentType}
             />

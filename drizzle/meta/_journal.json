@@ -8,6 +8,13 @@
       "when": 1769090903867,
       "tag": "0000_rare_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1769160274949,
+      "tag": "0001_fast_joshua_kane",
+      "breakpoints": true
     }
   ]
 }

@@ -1,8 +1,8 @@
-"use client";
 import { cn } from '@/lib/utils';
-import { useRiskStore } from '@/stores/trading/risk.store';
+import { useWalletStore } from '@/stores/wallet.store';
 import { usePositionsStore } from '@/stores/trading/positions.store';
 import { useOrdersStore } from '@/stores/trading/orders.store';
+import { useEffect } from 'react';
 
 interface TopbarProps {
   onMobileMenuToggle?: () => void;
@@ -10,10 +10,21 @@ interface TopbarProps {
 }
 
 export function Topbar({ onMobileMenuToggle, mobileMenuOpen = false }: TopbarProps) {
-  const balance = useRiskStore((state) => state.balance);
+  // Use real wallet balance from API
+  const { balance, blockedBalance, availableBalance, fetchWallet, isLoadingBalance } = useWalletStore();
   const positions = usePositionsStore((state) => state.positions);
-
   const trades = useOrdersStore((state) => state.trades);
+
+  // Fetch wallet on mount and poll every 5 seconds
+  useEffect(() => {
+    fetchWallet(); // Initial fetch
+
+    const interval = setInterval(() => {
+      fetchWallet();
+    }, 5000); // Poll every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [fetchWallet]);
 
   const openPnL = positions.reduce((acc, pos) => {
     const pnl = pos.side === 'BUY'
@@ -64,8 +75,16 @@ export function Topbar({ onMobileMenuToggle, mobileMenuOpen = false }: TopbarPro
       <div className="flex items-center gap-4 sm:gap-6">
         <div className="hidden sm:block">
           <p className="text-xs text-muted-foreground">Available Balance</p>
-          <p className="text-base sm:text-lg font-semibold text-foreground animate-number">
-            {formatCurrency(balance)}
+          <p className={cn(
+            "text-base sm:text-lg font-semibold animate-number",
+            isLoadingBalance && "opacity-50"
+          )}>
+            {formatCurrency(availableBalance)}
+            {blockedBalance > 0 && (
+              <span className="text-xs text-muted-foreground ml-2" title={`₹${blockedBalance.toLocaleString()} blocked`}>
+                (₹{blockedBalance.toLocaleString()} blocked)
+              </span>
+            )}
           </p>
         </div>
 

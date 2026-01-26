@@ -7,10 +7,16 @@ import { useRiskStore } from '@/stores/trading/risk.store';
 import { User, Mail, Wallet, Crown, LogOut } from 'lucide-react';
 import { useSession, signOut } from "next-auth/react";
 import { toast } from 'sonner';
+import { useEffect } from 'react';
+import { useWalletStore } from '@/stores/wallet.store';
 
 const ProfilePage = () => {
   const { data: session } = useSession();
-  const balance = useRiskStore((state) => state.balance);
+  const { balance, blockedBalance, availableBalance, fetchWallet } = useWalletStore();
+
+  useEffect(() => {
+    fetchWallet();
+  }, [fetchWallet]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -75,16 +81,21 @@ const ProfilePage = () => {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-center py-4">
-              <p className="text-3xl sm:text-4xl font-bold text-foreground">
-                {formatCurrency(balance)}
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">Virtual Balance</p>
-            </div>
-            <div className="mt-4 p-3 rounded-lg bg-muted/30 text-center">
-              <p className="text-xs text-muted-foreground">
-                This is simulated money for paper trading only
-              </p>
+            <div className="space-y-3 py-2">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-muted-foreground">Total Balance:</span>
+                <span className="font-semibold">{formatCurrency(balance)}</span>
+              </div>
+              {blockedBalance > 0 && (
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-muted-foreground">Blocked Amount:</span>
+                  <span className="font-semibold text-orange-500">-{formatCurrency(blockedBalance)}</span>
+                </div>
+              )}
+              <div className="flex justify-between items-center pt-2 border-t border-border mt-2">
+                <span className="text-base font-medium">Available:</span>
+                <span className="text-xl font-bold text-success">{formatCurrency(availableBalance)}</span>
+              </div>
             </div>
           </CardContent>
         </Card>

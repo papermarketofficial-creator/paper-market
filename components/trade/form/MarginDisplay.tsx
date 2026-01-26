@@ -1,5 +1,5 @@
 "use client";
-import { Stock } from '@/content/watchlist';
+import { Stock } from '@/types/equity.types';
 import { cn } from '@/lib/utils';
 
 interface MarginDisplayProps {

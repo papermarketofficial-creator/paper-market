@@ -166,9 +166,9 @@ export const useAnalysisStore = create<AnalysisState>()(
       startDragging: (id, startPoint, originalDrawing) => set({
         interactionState: {
           status: 'dragging',
-          activeDrawingId: id,
+          activeDrawingIds: [id],
           dragStartPoint: startPoint,
-          originalDrawing: originalDrawing,
+          originalDrawings: { [id]: originalDrawing },
           currentPoint: startPoint
         },
         selectedDrawingId: id

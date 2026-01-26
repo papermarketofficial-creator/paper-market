@@ -9,7 +9,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Stock } from '@/content/watchlist';
+import { Stock } from '@/types/equity.types';
 import { cn } from '@/lib/utils';
 
 interface TradeConfirmationDialogProps {

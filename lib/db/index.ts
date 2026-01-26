@@ -1,16 +1,18 @@
-import { neon, neonConfig } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { config } from "../config";
 import * as schema from "./schema";
 import { logger } from "../logger";
 
-// Configure Neon to use fetch (standard in Next.js Edge/Serverless)
-// neonConfig.fetchConnectionCache = true; // Recommended for serverless
-
-const sql = neon(config.db.url);
+// Use standard node-postgres Pool
+// This supports transactions perfectly and works in standard Node.js environments
+const pool = new Pool({
+    connectionString: config.db.url,
+    ssl: { rejectUnauthorized: false } // Required for Neon
+});
 
 // Initialize Drizzle with the schema
-export const db = drizzle(sql, {
+export const db = drizzle(pool, {
     schema,
     logger: config.isDev // Log queries in dev mode
 });
@@ -18,8 +20,7 @@ export const db = drizzle(sql, {
 // Simple connectivity check (can be used in health checks)
 export async function checkDbConnection() {
     try {
-        // @ts-ignore - '1' is valid sql
-        await sql`SELECT 1`;
+        await pool.query('SELECT 1');
         logger.info("Database connection established successfully.");
         return true;
     } catch (error) {

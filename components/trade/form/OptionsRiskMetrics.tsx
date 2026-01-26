@@ -1,5 +1,5 @@
 "use client";
-import { Stock } from '@/content/watchlist';
+import { Stock } from '@/types/equity.types';
 import { useMarketStore } from '@/stores/trading/market.store';
 import { parseOptionSymbol, calculateOptionRiskMetrics } from '@/lib/fno-utils';
 
@@ -12,9 +12,7 @@ interface OptionsRiskMetricsProps {
 }
 
 export function OptionsRiskMetrics({ selectedStock, quantityValue, currentPrice, lotSize, side }: OptionsRiskMetricsProps) {
-  const { instrumentMode } = useMarketStore();
 
-  if (instrumentMode !== 'options') return null;
 
   const optionDetails = selectedStock ? parseOptionSymbol(selectedStock.symbol) : null;
   const riskMetrics = optionDetails

@@ -9,6 +9,7 @@ export const users = pgTable('users', {
     email: text('email').notNull().unique(),
     emailVerified: timestamp('emailVerified', { mode: 'date' }),
     image: text('image'),
+    password: text('password'), // Added for credentials auth
     balance: numeric('balance', { precision: 12, scale: 2 }).notNull().default('0'), // 12 digits, 2 decimal places
     createdAt: timestamp('createdAt').defaultNow(),
 });

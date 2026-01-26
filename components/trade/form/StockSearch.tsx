@@ -1,5 +1,6 @@
 "use client";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useMarketStore } from '@/stores/trading/market.store';
 import { Button } from '@/components/ui/button';
 import {
   Command,
@@ -41,7 +42,22 @@ export function StockSearch({
   instrumentMode,
 }: StockSearchProps) {
   const [open, setOpen] = useState(false);
-  // Removed useMarketStore hook usage for instrumentMode
+  const [query, setQuery] = useState("");
+  const { searchInstruments, searchResults, isSearching } = useMarketStore();
+
+  // Debounce Search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (query.trim().length > 1) {
+        searchInstruments(query, instrumentMode?.toUpperCase());
+      }
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [query, instrumentMode, searchInstruments]);
+
+  // Use searchResults when searching, otherwise fallback to props (if needed) or empty
+  const displayInstruments = query.trim().length > 1 ? searchResults : instruments;
 
   return (
     <div className={cn("space-y-2", className)}>
@@ -71,12 +87,21 @@ export function StockSearch({
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[300px] p-0" align="start">
-          <Command>
-            <CommandInput placeholder="Search symbol..." className="h-9" />
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder="Search symbol..."
+              className="h-9"
+              value={query}
+              onValueChange={setQuery}
+            />
             <CommandList>
               <CommandEmpty>No instrument found.</CommandEmpty>
               <CommandGroup>
-                {instruments.map((stock) => (
+                {isSearching && <CommandItem disabled>Searching...</CommandItem>}
+                {!isSearching && displayInstruments.length === 0 && (
+                  <CommandItem disabled>No instruments found.</CommandItem>
+                )}
+                {displayInstruments.map((stock) => (
                   <CommandItem
                     key={stock.symbol}
                     value={`${stock.symbol} ${stock.name}`}

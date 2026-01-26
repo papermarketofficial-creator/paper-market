@@ -3,18 +3,27 @@ import { ReactNode, useEffect, useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { useMarketSimulation } from '@/hooks/use-market-simulation';
+import { useWalletStore } from '@/stores/wallet.store';
+import { usePositionsStore } from '@/stores/trading/positions.store';
 import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
+import { useMarketStream } from '@/hooks/use-market-stream'; // New Hook
 
 export default function DashboardLayoutClient({ children }: { children: ReactNode }) {
-  // 1. Activate Market Simulation
+  // 1. Activate Market Simulation (Legacy - kept as fallback or needs removal)
   useMarketSimulation();
 
-  // 2. Check and settle expired positions on mount
-  const settleExpiredPositions = useTradeExecutionStore((state) => state.settleExpiredPositions);
+  // 2. Activate Real-Time Stream (Primary)
+  useMarketStream();
+
+  // 3. Fetch Initial Data (Wallet & Positions)
+  const fetchWallet = useWalletStore((state) => state.fetchWallet);
+  const fetchPositions = usePositionsStore((state) => state.fetchPositions);
+  // fetchOrders will be added later if needed globally, usually fetched on specific pages
 
   useEffect(() => {
-    settleExpiredPositions();
-  }, [settleExpiredPositions]);
+    fetchWallet();
+    fetchPositions();
+  }, [fetchWallet, fetchPositions]);
 
   return (
     <DashboardContentWrapper>

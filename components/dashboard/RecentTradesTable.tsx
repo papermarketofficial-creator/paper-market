@@ -82,9 +82,9 @@ export function RecentTradesTable({ trades, loading = false }: RecentTradesTable
                     <span className="text-muted-foreground">Qty: {trade.quantity}</span>
                     <span className={cn(
                       'font-medium',
-                      trade.pnl >= 0 ? 'text-profit' : 'text-loss'
+                      (trade.pnl || 0) >= 0 ? 'text-profit' : 'text-loss'
                     )}>
-                      {trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
+                      {(trade.pnl || 0) >= 0 ? '+' : ''}{formatCurrency(trade.pnl || 0)}
                     </span>
                   </div>
                 </div>
@@ -127,9 +127,9 @@ export function RecentTradesTable({ trades, loading = false }: RecentTradesTable
                       </TableCell>
                       <TableCell className={cn(
                         'text-right font-medium',
-                        trade.pnl >= 0 ? 'text-profit' : 'text-loss'
+                        (trade.pnl || 0) >= 0 ? 'text-profit' : 'text-loss'
                       )}>
-                        {trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
+                        {(trade.pnl || 0) >= 0 ? '+' : ''}{formatCurrency(trade.pnl || 0)}
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary" className="bg-muted text-muted-foreground">

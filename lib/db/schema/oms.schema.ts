@@ -1,0 +1,95 @@
+import { pgTable, text, integer, numeric, timestamp, pgEnum, uuid, index, uniqueIndex, check } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+import { type InferSelectModel, type InferInsertModel } from 'drizzle-orm';
+import { users } from './users.schema';
+
+export const OrderSide = pgEnum('order_side', ['BUY', 'SELL']);
+export const OrderType = pgEnum('order_type', ['MARKET', 'LIMIT']);
+export const OrderStatus = pgEnum('order_status', ['PENDING', 'OPEN', 'FILLED', 'CANCELLED', 'REJECTED']);
+
+export const orders = pgTable('orders', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('userId').notNull().references(() => users.id),
+    symbol: text('symbol').notNull(),
+    side: OrderSide('side').notNull(),
+    quantity: integer('quantity').notNull(),
+    orderType: OrderType('orderType').notNull(),
+    limitPrice: numeric('limitPrice', { precision: 10, scale: 2 }),
+    status: OrderStatus('status').notNull().default('PENDING'),
+    executionPrice: numeric('executionPrice', { precision: 10, scale: 2 }),
+    executedAt: timestamp('executedAt'),
+    createdAt: timestamp('createdAt').defaultNow().notNull(),
+    updatedAt: timestamp('updatedAt').defaultNow().notNull(),
+    rejectionReason: text('rejectionReason'),
+    idempotencyKey: text('idempotencyKey'),
+}, (t) => {
+    return {
+        userIdIdx: index('orders_userId_idx').on(t.userId),
+        symbolIdx: index('orders_symbol_idx').on(t.symbol),
+        statusIdx: index('orders_status_idx').on(t.status),
+        createdAtIdx: index('orders_createdAt_idx').on(t.createdAt),
+        quantityPositive: check('orders_quantity_positive', sql`${t.quantity} > 0`),
+        limitPricePositive: check('orders_limitPrice_positive', sql`${t.limitPrice} IS NULL OR ${t.limitPrice} > 0`),
+    };
+});
+
+export const trades = pgTable('trades', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    orderId: uuid('orderId').notNull().references(() => orders.id),
+    userId: text('userId').notNull().references(() => users.id),
+    symbol: text('symbol').notNull(),
+    side: OrderSide('side').notNull(),
+    quantity: integer('quantity').notNull(),
+    price: numeric('price', { precision: 10, scale: 2 }).notNull(),
+    executedAt: timestamp('executedAt').notNull(),
+    createdAt: timestamp('createdAt').defaultNow().notNull(),
+}, (t) => {
+    return {
+        userIdIdx: index('trades_userId_idx').on(t.userId),
+        symbolIdx: index('trades_symbol_idx').on(t.symbol),
+        executedAtIdx: index('trades_executedAt_idx').on(t.executedAt),
+        quantityPositive: check('trades_quantity_positive', sql`${t.quantity} > 0`),
+        pricePositive: check('trades_price_positive', sql`${t.price} > 0`),
+    };
+});
+
+export const positions = pgTable('positions', {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('userId').notNull().references(() => users.id),
+    symbol: text('symbol').notNull(),
+    quantity: integer('quantity').notNull(),
+    averagePrice: numeric('averagePrice', { precision: 10, scale: 2 }).notNull(),
+    realizedPnL: numeric('realizedPnL', { precision: 12, scale: 2 }).notNull().default('0'),
+    createdAt: timestamp('createdAt').defaultNow().notNull(),
+    updatedAt: timestamp('updatedAt').defaultNow().notNull(),
+}, (t) => {
+    return {
+        userSymbolUnique: uniqueIndex('positions_userId_symbol_unique').on(t.userId, t.symbol),
+        averagePricePositive: check('positions_averagePrice_positive', sql`${t.averagePrice} > 0`),
+    };
+});
+
+export const idempotencyKeys = pgTable('idempotency_keys', {
+    key: text('key').notNull(),
+    orderId: uuid('orderId').notNull().references(() => orders.id),
+    userId: text('userId').notNull().references(() => users.id),
+    createdAt: timestamp('createdAt').defaultNow().notNull(),
+    expiresAt: timestamp('expiresAt').notNull(),
+}, (t) => {
+    return {
+        userKeyUnique: uniqueIndex('idempotency_keys_userId_key_unique').on(t.userId, t.key),
+        expiresAfterCreated: check('idempotency_keys_expires_after_created', sql`${t.expiresAt} > ${t.createdAt}`),
+    };
+});
+
+export type Order = InferSelectModel<typeof orders>;
+export type NewOrder = InferInsertModel<typeof orders>;
+
+export type Trade = InferSelectModel<typeof trades>;
+export type NewTrade = InferInsertModel<typeof trades>;
+
+export type Position = InferSelectModel<typeof positions>;
+export type NewPosition = InferInsertModel<typeof positions>;
+
+export type IdempotencyKey = InferSelectModel<typeof idempotencyKeys>;
+export type NewIdempotencyKey = InferInsertModel<typeof idempotencyKeys>;

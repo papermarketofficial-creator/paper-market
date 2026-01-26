@@ -1,5 +1,5 @@
 "use client";
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -37,10 +37,19 @@ interface PositionsTableProps {
 }
 
 export function PositionsTable({ loading = false }: PositionsTableProps) {
-  const positions = usePositionsStore((state) => state.positions);
-  const closePosition = useTradeExecutionStore((state) => state.closePosition);
+  const { positions, fetchPositions } = usePositionsStore((state) => ({
+    positions: state.positions,
+    fetchPositions: state.fetchPositions
+  }));
+  const closePosition = useTradeExecutionStore((state) => state.closePosition); // This needs update later to be API driven too or removed
   const [closingPosition, setClosingPosition] = useState<Position | null>(null);
   const [partialClose, setPartialClose] = useState<{ position: Position, quantity: number } | null>(null);
+
+  useEffect(() => {
+    fetchPositions();
+    const interval = setInterval(fetchPositions, 1000); // Poll every second for PnL
+    return () => clearInterval(interval);
+  }, [fetchPositions]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {

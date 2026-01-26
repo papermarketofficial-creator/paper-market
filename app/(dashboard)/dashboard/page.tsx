@@ -4,6 +4,7 @@ import { Suspense } from 'react';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { RecentTradesTable } from '@/components/dashboard/RecentTradesTable';
 import { useRiskStore } from '@/stores/trading/risk.store';
+import { useWalletStore } from '@/stores/wallet.store';
 import { usePositionsStore } from '@/stores/trading/positions.store';
 import { useOrdersStore } from '@/stores/trading/orders.store';
 import { dashboardMetrics } from '@/content/dashboard';
@@ -13,7 +14,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 const EquityChart = dynamic(() => import('@/components/dashboard/EquityChart').then(mod => ({ default: mod.EquityChart })), { ssr: false });
 
 const DashboardPage = () => {
-  const balance = useRiskStore((state) => state.balance);
+  const { availableBalance } = useWalletStore();
   const positions = usePositionsStore((state) => state.positions);
   const trades = useOrdersStore((state) => state.trades);
   const equityHistory = useRiskStore((state) => state.equityHistory);
@@ -53,7 +54,7 @@ const DashboardPage = () => {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
         <StatCard
           title="Available Balance"
-          value={formatCurrency(balance)}
+          value={formatCurrency(availableBalance)}
           icon={Wallet}
           subtitle="Virtual funds"
         />

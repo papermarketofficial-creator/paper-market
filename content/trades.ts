@@ -13,7 +13,10 @@ export const dummyTrades: Trade[] = [
     status: 'CLOSED',
     entryTime: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
     exitTime: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
+    updatedAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
     instrument: 'equity',
+    filledQuantity: 20,
+
   },
   {
     id: 't2',
@@ -27,7 +30,10 @@ export const dummyTrades: Trade[] = [
     status: 'CLOSED',
     entryTime: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000),
     exitTime: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+    updatedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
     instrument: 'equity',
+    filledQuantity: 25,
+
   },
   {
     id: 't3',
@@ -41,7 +47,10 @@ export const dummyTrades: Trade[] = [
     status: 'CLOSED',
     entryTime: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
     exitTime: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+    updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
     instrument: 'equity',
+    filledQuantity: 30,
+
   },
   {
     id: 't4',
@@ -55,7 +64,10 @@ export const dummyTrades: Trade[] = [
     status: 'CLOSED',
     entryTime: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
     exitTime: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+    updatedAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
     instrument: 'equity',
+    filledQuantity: 40,
+
   },
   {
     id: 't5',
@@ -69,6 +81,9 @@ export const dummyTrades: Trade[] = [
     status: 'CLOSED',
     entryTime: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
     exitTime: new Date(),
+    updatedAt: new Date(),
     instrument: 'equity',
+    filledQuantity: 15,
+
   },
 ];

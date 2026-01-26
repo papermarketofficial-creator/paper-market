@@ -378,10 +378,11 @@ export function DrawingManager({ chart, mainSeries, width, height, data, symbol 
                         p2: { time: (twoPoint.p2.time as number) + dxTime, price: twoPoint.p2.price + dyPrice }
                     } as any;
                 } else if (original.type === 'text') {
-                    const dl = original as any;
-                    newDrawing = { ...newDrawing, point: { time: (dl.point.time as number) + dxTime, price: dl.point.price + dyPrice } };
+                    const dl = original as any; // Cast to any to bypass union checks during spread
+                    newDrawing = { ...dl, point: { time: (dl.point.time as number) + dxTime, price: dl.point.price + dyPrice } };
                 } else if (original.type === 'horizontal-line') {
-                    newDrawing = { ...newDrawing, price: (original as any).price + dyPrice };
+                    const dl = original as any;
+                    newDrawing = { ...dl, price: dl.price + dyPrice };
                 }
 
                 // We MUST update the store to visualize the move because 'drawings' map renders from store.

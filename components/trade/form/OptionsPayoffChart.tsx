@@ -10,7 +10,7 @@ import {
   Tooltip,
   ReferenceLine
 } from 'recharts';
-import { Stock } from '@/content/watchlist';
+import { Stock } from '@/types/equity.types';
 import { parseOptionSymbol } from '@/lib/fno-utils';
 import { generateCallPayoff, generatePutPayoff } from '@/lib/fno-payoff-utils';
 

@@ -15,6 +15,7 @@ const envSchema = z.object({
     UPSTOX_API_KEY: z.string().optional(),
     UPSTOX_API_SECRET: z.string().optional(),
     UPSTOX_REDIRECT_URI: z.string().optional(),
+    UPSTOX_ACCESS_TOKEN: z.string().optional(),
 
     // Market Data (TrueData)
     TRUEDATA_USER_ID: z.string().optional(),
@@ -47,6 +48,7 @@ export const config = {
         apiKey: env.UPSTOX_API_KEY,
         apiSecret: env.UPSTOX_API_SECRET,
         redirectUri: env.UPSTOX_REDIRECT_URI,
+        accessToken: env.UPSTOX_ACCESS_TOKEN,
     },
     truedata: {
         baseUrl: "https://api.truedata.in",

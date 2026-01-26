@@ -77,14 +77,7 @@ const HeroSection = () => {
               </Button>
             </Link>
 
-            <Link href="/learn/futures-options">
-              <Button
-                size="lg"
-                className="h-12 px-8 rounded-full bg-muted hover:bg-muted/80 text-foreground text-base font-medium"
-              >
-                How It Works?
-              </Button>
-            </Link>
+
           </div>
 
           {/* Disclaimer */}

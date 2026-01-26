@@ -6,16 +6,7 @@ import { usePositionsStore } from '@/stores/trading/positions.store';
 import { RefreshCw } from 'lucide-react';
 
 const PositionsPage = () => {
-  const simulatePriceUpdates = usePositionsStore((state) => state.simulatePriceUpdates);
-
-  // Simulate real-time price updates every 5 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      simulatePriceUpdates();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [simulatePriceUpdates]);
+  /* Legacy Simulation Removed - Updates handled by useMarketStream via DashboardLayout */
 
   return (
     <div className="space-y-6">
@@ -25,15 +16,6 @@ const PositionsPage = () => {
           <h1 className="text-2xl font-bold text-foreground">Positions</h1>
           <p className="text-muted-foreground">Monitor and manage your open trades</p>
         </div>
-        <Button
-          onClick={simulatePriceUpdates}
-          variant="outline"
-          size="sm"
-          className="flex items-center gap-2"
-        >
-          <RefreshCw className="h-4 w-4" />
-          Update Prices
-        </Button>
       </div>
 
       {/* Positions Table */}

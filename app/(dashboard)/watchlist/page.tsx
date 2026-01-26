@@ -52,9 +52,9 @@ const WatchlistPage = () => {
                     <div className="flex items-center gap-2">
                       <span className={cn(
                         'text-sm font-medium',
-                        stock?.change >= 0 ? 'text-green-600' : 'text-red-600'
+                        (stock?.change || 0) >= 0 ? 'text-green-600' : 'text-red-600'
                       )}>
-                        ₹{stock?.price}
+                        ₹{stock?.price || 0}
                       </span>
                       <Button 
                         variant="ghost" 

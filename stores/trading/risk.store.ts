@@ -9,11 +9,9 @@ interface EquityPoint {
 const INITIAL_BALANCE = 100000;
 
 interface RiskState {
-  balance: number;
+  // Balance is now managed by useWalletStore
   equityHistory: EquityPoint[];
   // Actions
-  deductMargin: (amount: number) => void;
-  addToBalance: (amount: number) => void;
   addEquityPoint: (time: number, value: number) => void;
   reset: () => void;
 }
@@ -21,18 +19,8 @@ interface RiskState {
 export const useRiskStore = create<RiskState>()(
   persist(
     (set) => ({
-      balance: INITIAL_BALANCE,
+      // Balance removed
       equityHistory: [{ time: Date.now(), value: INITIAL_BALANCE }],
-
-      deductMargin: (amount) =>
-        set((state) => ({
-          balance: state.balance - amount,
-        })),
-
-      addToBalance: (amount) =>
-        set((state) => ({
-          balance: state.balance + amount,
-        })),
 
       addEquityPoint: (time, value) =>
         set((state) => ({
@@ -40,7 +28,6 @@ export const useRiskStore = create<RiskState>()(
         })),
 
       reset: () => set({
-        balance: INITIAL_BALANCE,
         equityHistory: [{ time: Date.now(), value: INITIAL_BALANCE }]
       }),
     }),

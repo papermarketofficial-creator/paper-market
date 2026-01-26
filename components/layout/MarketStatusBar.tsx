@@ -17,7 +17,7 @@ export function MarketStatusBar() {
             });
         }, 2000);
         return () => clearInterval(interval);
-    }, []);
+    }, [indices, isMarketOpen, setIndices]);
 
     return (
         <div className="h-8 bg-card/60 backdrop-blur-md border-b border-border/50 flex items-center px-4 justify-between text-xs overflow-hidden">

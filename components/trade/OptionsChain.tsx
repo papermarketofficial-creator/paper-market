@@ -10,13 +10,9 @@ import {
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { InstrumentType } from './form/InstrumentSelector';
-import {
-  optionsChainData as niftyData,
-  atmStrike as niftyAtm,
-  bankNiftyChainData,
-  bankNiftyAtm
-} from '@/content/optionsChain';
 import { Badge } from '@/components/ui/badge';
+import { useMarketStore } from '@/stores/trading/market.store';
+import { useEffect } from 'react';
 
 interface OptionsChainProps {
   onStrikeSelect: (symbol: string) => void;
@@ -24,11 +20,26 @@ interface OptionsChainProps {
 }
 
 export function OptionsChain({ onStrikeSelect, instrumentType = "NIFTY" }: OptionsChainProps) {
-  // Determine which data to show
-  const isBankNifty = instrumentType === "BANKNIFTY";
-  const data = isBankNifty ? bankNiftyChainData : niftyData;
-  const atm = isBankNifty ? bankNiftyAtm : niftyAtm;
-  const title = isBankNifty ? "BANKNIFTY Options Chain" : "NIFTY Options Chain";
+  const { fetchOptionChain, optionChain, isFetchingChain } = useMarketStore();
+
+  useEffect(() => {
+    fetchOptionChain(instrumentType);
+    // Poll every 5 seconds
+    const interval = setInterval(() => {
+      fetchOptionChain(instrumentType);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [instrumentType, fetchOptionChain]);
+
+  const data = optionChain?.strikes || [];
+  const underlyingPrice = optionChain?.underlyingPrice || 0;
+
+  // Calculate Dynamic ATM (Closest Strike)
+  const atm = data.reduce((prev, curr) => {
+    return Math.abs(curr.strike - underlyingPrice) < Math.abs(prev.strike - underlyingPrice) ? curr : prev;
+  }, data[0] || { strike: 0 }).strike;
+
+  const title = `${instrumentType} Options Chain`;
 
   const formatNumber = (value: number) => {
     return value.toLocaleString('en-IN');
@@ -95,21 +106,21 @@ export function OptionsChain({ onStrikeSelect, instrumentType = "NIFTY" }: Optio
                   {/* CE Columns */}
                   <TableCell
                     className="text-center font-medium text-profit cursor-pointer hover:bg-muted/50 transition-colors p-2"
-                    onClick={() => handleStrikeClick(strikeData.ce.symbol)}
+                    onClick={() => strikeData.ce && handleStrikeClick(strikeData.ce.symbol)}
                   >
-                    {formatCurrency(strikeData.ce.ltp)}
+                    {strikeData.ce ? formatCurrency(strikeData.ce.ltp) : '-'}
                   </TableCell>
                   <TableCell
                     className="text-center cursor-pointer hover:bg-muted/50 transition-colors p-2"
-                    onClick={() => handleStrikeClick(strikeData.ce.symbol)}
+                    onClick={() => strikeData.ce && handleStrikeClick(strikeData.ce.symbol)}
                   >
-                    {formatNumber(strikeData.ce.oi)}
+                    {strikeData.ce ? formatNumber(strikeData.ce.oi) : '-'}
                   </TableCell>
                   <TableCell
                     className="text-center cursor-pointer hover:bg-muted/50 transition-colors p-2"
-                    onClick={() => handleStrikeClick(strikeData.ce.symbol)}
+                    onClick={() => strikeData.ce && handleStrikeClick(strikeData.ce.symbol)}
                   >
-                    {formatNumber(strikeData.ce.volume)}
+                    {strikeData.ce ? formatNumber(strikeData.ce.volume) : '-'}
                   </TableCell>
 
                   {/* Strike */}
@@ -126,21 +137,21 @@ export function OptionsChain({ onStrikeSelect, instrumentType = "NIFTY" }: Optio
                   {/* PE Columns */}
                   <TableCell
                     className="text-center font-medium text-loss cursor-pointer hover:bg-muted/50 transition-colors p-2"
-                    onClick={() => handleStrikeClick(strikeData.pe.symbol)}
+                    onClick={() => strikeData.pe && handleStrikeClick(strikeData.pe.symbol)}
                   >
-                    {formatCurrency(strikeData.pe.ltp)}
+                    {strikeData.pe ? formatCurrency(strikeData.pe.ltp) : '-'}
                   </TableCell>
                   <TableCell
                     className="text-center cursor-pointer hover:bg-muted/50 transition-colors p-2"
-                    onClick={() => handleStrikeClick(strikeData.pe.symbol)}
+                    onClick={() => strikeData.pe && handleStrikeClick(strikeData.pe.symbol)}
                   >
-                    {formatNumber(strikeData.pe.oi)}
+                    {strikeData.pe ? formatNumber(strikeData.pe.oi) : '-'}
                   </TableCell>
                   <TableCell
                     className="text-center cursor-pointer hover:bg-muted/50 transition-colors p-2"
-                    onClick={() => handleStrikeClick(strikeData.pe.symbol)}
+                    onClick={() => strikeData.pe && handleStrikeClick(strikeData.pe.symbol)}
                   >
-                    {formatNumber(strikeData.pe.volume)}
+                    {strikeData.pe ? formatNumber(strikeData.pe.volume) : '-'}
                   </TableCell>
                 </TableRow>
               ))}

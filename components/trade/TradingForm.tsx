@@ -4,10 +4,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
 import { useRiskStore } from '@/stores/trading/risk.store';
-import { useMarketStore } from '@/stores/trading/market.store'; // Added store import
+import { useMarketStore } from '@/stores/trading/market.store';
+import { useWalletStore } from '@/stores/wallet.store';
 import { Stock } from '@/types/equity.types';
 import { InstrumentMode } from '@/types/general.types';
 import { cn } from '@/lib/utils';
@@ -29,6 +32,7 @@ import {
   MarginDisplay,
   TradeConfirmationDialog,
 } from './form';
+import { InsufficientFundsAlert } from '@/components/wallet/InsufficientFundsAlert';
 
 interface TradingFormProps {
   selectedStock: Stock | null;
@@ -69,8 +73,11 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const executeTrade = useTradeExecutionStore((state) => state.executeTrade);
-  const balance = useRiskStore((state) => state.balance);
+  // const balance = useRiskStore((state) => state.balance); // Removed
   const { getCurrentInstruments } = useMarketStore();
+
+  // Use real wallet balance for validation
+  const { availableBalance: balance, fetchWallet } = useWalletStore(); // Aliased as balance
 
   // --- LOGIC FOR INSTRUMENT SELECTION ---
 
@@ -207,38 +214,56 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
   }
 
   const isQuantityValid = inputValue > 0;
+  // Use real wallet balance for validation
   const hasSufficientMargin = requiredMargin <= balance;
+  const balanceShortfall = requiredMargin - balance;
   const canTrade = selectedStock && isQuantityValid && hasSufficientMargin && isSlValid && isTargetValid;
 
   const handleSubmit = () => {
     if (!selectedStock || !canTrade) return;
-    setShowConfirmDialog(true);
+
+    // Force blur on any focused input to ensure state is synced
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    // Small delay to let state update complete
+    setTimeout(() => {
+      setShowConfirmDialog(true);
+    }, 50);
   };
 
   const confirmTrade = () => {
     if (!selectedStock) return;
+
+    console.log('[DEBUG TradingForm] confirmTrade called:', {
+      quantity: quantity,
+      inputValue: inputValue,
+      lotSize: lotSize,
+      totalQuantity: totalQuantity,
+      selectedStock: selectedStock.symbol
+    });
+
     executeTrade({
       symbol: selectedStock.symbol,
-      name: selectedStock.name,
       side,
       quantity: totalQuantity,
       entryPrice: currentPrice,
-      productType,
-      leverage: leverageValue,
-      timestamp: new Date(),
-      expiryDate: selectedStock.expiryDate,
-      stopLoss: hasSl ? slValue : undefined,
-      target: hasTarget ? targetValue : undefined,
     }, lotSize, instrumentMode);
 
     toast.success('Trade Sent', {
       description: `${side} ${totalQuantity} shares (${inputValue} Lots) of ${selectedStock.symbol} at market.`,
     });
 
-    setQuantity('1');
-    setStopLoss('');
-    setTarget('');
+    // Close dialog first, then reset form after a small delay
     setShowConfirmDialog(false);
+
+    // Reset form fields after dialog animation completes
+    setTimeout(() => {
+      setQuantity('1');
+      setStopLoss('');
+      setTarget('');
+    }, 300);
   };
 
   return (
@@ -403,6 +428,8 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                 <ProductTypeSelector productType={productType} onProductTypeChange={setProductType} />
                 <LeverageSelector leverage={leverage} onLeverageChange={setLeverage} />
                 <MarginDisplay selectedStock={selectedStock} currentPrice={currentPrice} requiredMargin={requiredMargin} balance={balance} />
+
+                <InsufficientFundsAlert requiredAmount={requiredMargin} />
 
                 <Button
                   onClick={handleSubmit}

@@ -4,10 +4,11 @@ import { handleError, ApiError } from "@/lib/errors";
 
 export async function GET(
     req: NextRequest,
-    { params }: { params: { symbol: string } }
+    { params }: { params: Promise<{ symbol: string }> }
 ) {
     try {
-        const quote = marketSimulation.getQuote(params.symbol);
+        const { symbol } = await params;
+        const quote = marketSimulation.getQuote(symbol);
 
         if (!quote) {
             throw new ApiError("Quote not found", 404, "NOT_FOUND");

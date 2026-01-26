@@ -29,7 +29,16 @@ interface MarketState {
   stopSimulation: () => void;
 
   // ✅ Pure function getter, requires mode to be passed
-  getCurrentInstruments: (mode: InstrumentMode) => Stock[];
+  getCurrentInstruments: (mode: InstrumentMode | 'indices') => Stock[];
+
+  // API State
+  searchResults: Stock[];
+  isSearching: boolean;
+  searchInstruments: (query: string, type?: string) => Promise<void>;
+
+  optionChain: { underlying: string; underlyingPrice?: number; expiry?: string; strikes: any[] } | null;
+  isFetchingChain: boolean;
+  fetchOptionChain: (symbol: string, expiry?: string) => Promise<void>;
 }
 
 export const useMarketStore = create<MarketState>((set, get) => ({
@@ -150,6 +159,63 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         return state.stocks;
     }
   },
+
+  // ✅ New API Integration
+  searchResults: [] as Stock[],
+  isSearching: false,
+  optionChain: null as { underlying: string; underlyingPrice?: number; expiry?: string; strikes: any[] } | null,
+  isFetchingChain: false,
+
+  searchInstruments: async (query: string, type?: string) => {
+    if (!query) {
+      set({ searchResults: [] });
+      return;
+    }
+    set({ isSearching: true });
+    try {
+      const typeParam = type ? `&type=${type}` : '';
+      const res = await fetch(`/api/v1/market/search?q=${query}${typeParam}`);
+      const data = await res.json();
+
+      if (data.success) {
+        // Map API response to Stock interface
+        const results = data.data.map((item: any) => ({
+          symbol: item.symbol,
+          name: item.name,
+          price: parseFloat(item.lastPrice),
+          change: 0, // Not available in search yet
+          changePercent: 0,
+          volume: 0,
+          lotSize: item.lotSize,
+          expiryDate: item.expiry ? new Date(item.expiry) : undefined,
+          strikePrice: item.strike ? parseFloat(item.strike) : undefined,
+          optionType: item.symbol.endsWith('CE') ? 'CE' : item.symbol.endsWith('PE') ? 'PE' : undefined
+        }));
+        set({ searchResults: results });
+      }
+    } catch (error) {
+      console.error("Search failed", error);
+    } finally {
+      set({ isSearching: false });
+    }
+  },
+
+  fetchOptionChain: async (symbol: string, expiry?: string) => {
+    set({ isFetchingChain: true });
+    try {
+      const expiryParam = expiry ? `&expiry=${expiry}` : '';
+      const res = await fetch(`/api/v1/market/option-chain?symbol=${symbol}${expiryParam}`);
+      const data = await res.json();
+
+      if (data.success) {
+        set({ optionChain: data.data });
+      }
+    } catch (error) {
+      console.error("Option Chain fetch failed", error);
+    } finally {
+      set({ isFetchingChain: false });
+    }
+  }
 }));
 
 // --- Inlined Simulation Logic (To prevent Import Errors) ---
