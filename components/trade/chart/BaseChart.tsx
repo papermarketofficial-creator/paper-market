@@ -123,7 +123,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       volumeSeriesRef.current = null;
       setChartInstance(null);
     };
-  }, []); // Run once on mount, height handled by separate effect
+  }, [height]); // Run once on mount, height handled by separate effect
 
   // 1.5 Handle Resize
   useEffect(() => {

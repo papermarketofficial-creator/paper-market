@@ -1,7 +1,7 @@
 {
   "name": "paper-market-pro",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -74,6 +74,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^9.32.0",
     "@tailwindcss/typography": "^0.5.16",
     "@types/bcryptjs": "^2.4.6",
@@ -84,6 +85,7 @@
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.21",
     "eslint": "^9.32.0",
+    "eslint-config-next": "^16.1.4",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^15.15.0",
