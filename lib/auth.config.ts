@@ -50,18 +50,6 @@ export const authConfig = {
                 return false; // Redirect to login
             }
 
-            // Redirect logged-in users away from auth pages
-            if (isOnAuth) {
-                if (isLoggedIn) {
-                    const callbackUrl = nextUrl.searchParams.get("callbackUrl");
-                    if (callbackUrl) {
-                        return Response.redirect(new URL(callbackUrl, nextUrl));
-                    }
-                    return Response.redirect(new URL("/dashboard", nextUrl));
-                }
-                return true;
-            }
-
             return true;
         },
         async session({ session, token }) {
