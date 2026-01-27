@@ -110,6 +110,97 @@
     /* Darker Red */
     --chart-neutral: 224 96% 57%;
   }
+
+  /* Terminal Theme - Dynamic Light/Dark Support */
+  [data-theme="terminal"] {
+    /* Light Mode (Default) */
+    --background: 0 0% 100%; /* Pure White */
+    --foreground: 222.2 84% 4.9%; /* Slate 950 */
+
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+
+    --primary: 221.2 83.2% 53.3%; /* Blue 600 */
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+
+    --radius: 0.5rem;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 240 4.8% 95.9%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    --chart-profit: 142 76% 36%;
+    --chart-loss: 0 72% 51%;
+    --chart-neutral: 221.2 83.2% 53.3%;
+  }
+
+  /* Dark Mode Override for Terminal */
+  .dark [data-theme="terminal"] {
+    --background: 225 21% 5%; /* Obsidian #0b0e11 */
+    --foreground: 0 0% 100%; /* Pure White */
+
+    --card: 228 14% 11%; /* Gunmetal #181a20 */
+    --card-foreground: 0 0% 100%;
+
+    --popover: 228 14% 11%;
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 224 96% 57%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 224 30% 20%;
+    --muted-foreground: 223 25% 77%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 100% 65%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 217 33% 20%;
+    --input: 224 30% 15%;
+    --ring: 224 96% 57%;
+
+    --sidebar-background: 225 21% 5%;
+    --sidebar-foreground: 0 0% 100%;
+    --sidebar-primary: 224 96% 57%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 224 30% 15%;
+    --sidebar-accent-foreground: 0 0% 100%;
+    --sidebar-border: 224 30% 15%;
+    --sidebar-ring: 224 96% 57%;
+
+    --chart-profit: 158 64% 42%;
+    --chart-loss: 0 100% 65%;
+    --chart-neutral: 224 96% 57%;
+  }
 }
 
 @layer base {

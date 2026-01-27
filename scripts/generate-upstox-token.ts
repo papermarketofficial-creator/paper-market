@@ -18,7 +18,7 @@ import { config } from "@/lib/config";
 import { logger } from "@/lib/logger";
 
 // Validate CLI argument
-const CodeSchema = z.string().min(10, "Authorization code must be at least 10 characters");
+const CodeSchema = z.string().min(1, "Authorization code is required");
 
 interface TokenResponse {
     access_token: string;
@@ -68,6 +68,10 @@ async function main(): Promise<void> {
 
     // 3. Exchange code for token
     logger.info("Exchanging Upstox authorization code...");
+    console.log("Debug Config:");
+    console.log("- Client ID:", config.upstox.apiKey);
+    console.log("- Redirect URI:", config.upstox.redirectUri);
+    console.log("- Code:", code);
 
     try {
         const tokenUrl = "https://api.upstox.com/v2/login/authorization/token";
@@ -90,10 +94,10 @@ async function main(): Promise<void> {
         });
 
         if (!response.ok) {
-            const errorData = await response.json() as ErrorResponse;
+            const errorText = await response.text();
             console.error("❌ ERROR: Token exchange failed");
             console.error(`Status: ${response.status}`);
-            console.error(`Message: ${errorData.message || errorData.error || "Unknown error"}`);
+            console.error(`Raw Response: ${errorText}`);
             process.exit(1);
         }
 

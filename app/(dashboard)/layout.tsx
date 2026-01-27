@@ -8,5 +8,9 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <DashboardLayoutClient>{children}</DashboardLayoutClient>;
+  return (
+    <div data-theme="terminal" className="bg-background min-h-screen text-foreground font-sans selection:bg-trade-buy/30">
+      <DashboardLayoutClient>{children}</DashboardLayoutClient>
+    </div>
+  );
 }

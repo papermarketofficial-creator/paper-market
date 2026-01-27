@@ -17,7 +17,7 @@ export function QuantityInput({ quantity, onQuantityChange, lotSize = 1 }: Quant
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <Label className="text-muted-foreground">{isLots ? 'Lots' : 'Quantity'}</Label>
+        <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{isLots ? 'Lots' : 'Quantity'}</Label>
         <EducationalTooltip content={isLots ? `Enter number of lots. 1 Lot = ${lotSize} shares.` : "Number of shares to trade."}>
           <Info className="h-4 w-4" />
         </EducationalTooltip>
@@ -31,7 +31,7 @@ export function QuantityInput({ quantity, onQuantityChange, lotSize = 1 }: Quant
           // Force state sync on blur to prevent stale state when clicking buttons
           onQuantityChange(e.target.value);
         }}
-        className="bg-background border-input text-foreground font-mono"
+        className="bg-input border-border text-foreground font-mono h-8 rounded-sm text-xs"
       />
       {isLots && (
         <p className="text-xs text-muted-foreground">

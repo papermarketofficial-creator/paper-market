@@ -1,7 +1,7 @@
 'use client';
 import { ReactNode, useEffect, useState } from 'react';
 import { Sidebar } from './Sidebar';
-import { Topbar } from './Topbar';
+
 import { useMarketSimulation } from '@/hooks/use-market-simulation';
 import { useWalletStore } from '@/stores/wallet.store';
 import { usePositionsStore } from '@/stores/trading/positions.store';
@@ -42,16 +42,17 @@ function DashboardContentWrapper({ children }: { children: ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <>
+
+    <div className="flex min-h-screen w-full bg-background text-foreground font-sans selection:bg-trade-buy/30 selection:text-trade-buy">
       <Sidebar mobileOpen={mobileMenuOpen} setMobileOpen={setMobileMenuOpen} />
 
       <div className="flex-1 flex flex-col md:ml-16 transition-all duration-300">
         <MarketStatusBar />
-        <Topbar mobileMenuOpen={mobileMenuOpen} onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)} />
+
         <main className="flex-1 p-4 md:p-6 overflow-x-hidden w-full max-w-full">
           {children}
         </main>
       </div>
-    </>
+    </div>
   )
 }

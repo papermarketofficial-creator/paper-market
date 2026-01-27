@@ -17,6 +17,7 @@ export default {
       fontFamily: {
         sans: ['Outfit', 'system-ui', 'sans-serif'],
       },
+
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -69,6 +70,11 @@ export default {
           profit: "hsl(var(--chart-profit))",
           loss: "hsl(var(--chart-loss))",
           neutral: "hsl(var(--chart-neutral))",
+        },
+        trade: {
+          buy: "#0ecb81",
+          sell: "#f6465d",
+          bg: "#0b0e11",
         },
       },
       borderRadius: {

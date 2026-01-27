@@ -92,6 +92,16 @@ export class OrderService {
 
                 const [createdOrder] = await tx.insert(orders).values(newOrder).returning();
 
+                // Block funds
+                // Now we have the order ID, we can safely block the funds linked to this order
+                await WalletService.blockFunds(
+                    userId,
+                    requiredMargin,
+                    createdOrder.id,
+                    tx,
+                    `Margin blocked for ${payload.side} ${payload.quantity} ${payload.symbol}`
+                );
+
                 // Store idempotency key mapping if provided
                 if (payload.idempotencyKey) {
                     const expiresAt = new Date();

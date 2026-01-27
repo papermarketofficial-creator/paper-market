@@ -197,14 +197,39 @@ export class WalletService {
         amount: number,
         tradeId: string,
         tx: any,
-        description?: string
+        description?: string,
+        orderId?: string // New param to look up exact blocked amount
     ): Promise<void> {
         const wallet = await this.getWallet(userId, tx);
+        
+        // Determine how much to unblock
+        let unblockAmount = amount; // Default to settlement amount
 
-        // CRITICAL: Validate sufficient blocked funds exist
-        if (parseFloat(wallet.blockedBalance) < amount) {
-            logger.error(
-                { userId, tradeId, blockedBalance: wallet.blockedBalance, settlementAmount: amount },
+        if (orderId) {
+            // Find original BLOCK transaction for this order
+            const [blockTx] = await tx
+                .select()
+                .from(transactions)
+                .where(and(
+                    eq(transactions.referenceId, orderId),
+                    eq(transactions.type, "BLOCK")
+                ))
+                .limit(1);
+
+            if (blockTx) {
+                unblockAmount = parseFloat(blockTx.amount);
+                logger.debug({ orderId, unblockAmount }, "Found original blocked amount for settlement");
+            } else {
+                logger.warn({ orderId }, "No BLOCK transaction found for order, using settlement amount");
+            }
+        }
+
+        // Validate blocked funds (with margin of error for floating point)
+        if (parseFloat(wallet.blockedBalance) < unblockAmount - 0.01) {
+             // If we rely on unblockAmount (from DB), this effectively means wallet is corrupted
+             // OR user had funds unblocked manually?
+             logger.error(
+                { userId, tradeId, blockedBalance: wallet.blockedBalance, unblockAmount },
                 "Settlement failed: insufficient blocked balance"
             );
             throw new ApiError(
@@ -214,9 +239,12 @@ export class WalletService {
             );
         }
 
-        // SETTLEMENT = decrease both balance AND blockedBalance
+        // SETTLEMENT = decrease balance by COST, decrease blocked by BLOCKED_AMOUNT
         const newBalance = parseFloat(wallet.balance) - amount;
-        const newBlocked = parseFloat(wallet.blockedBalance) - amount;
+        const newBlocked = parseFloat(wallet.blockedBalance) - unblockAmount;
+
+        // Ensure newBlocked doesn't go negative due to float precision
+        const finalBlocked = Math.max(0, newBlocked);
 
         // Record transaction
         try {
@@ -228,7 +256,7 @@ export class WalletService {
                 balanceBefore: wallet.balance,
                 balanceAfter: newBalance.toFixed(2),
                 blockedBefore: wallet.blockedBalance,
-                blockedAfter: newBlocked.toFixed(2),
+                blockedAfter: finalBlocked.toFixed(2),
                 referenceType: "TRADE",
                 referenceId: tradeId,
                 description: description || `Settlement for trade ${tradeId}`,
@@ -246,12 +274,12 @@ export class WalletService {
             .update(wallets)
             .set({
                 balance: newBalance.toFixed(2),
-                blockedBalance: newBlocked.toFixed(2),
+                blockedBalance: finalBlocked.toFixed(2),
                 updatedAt: new Date(),
             })
             .where(eq(wallets.id, wallet.id));
 
-        logger.info({ userId, tradeId, amount, newBalance, newBlocked }, "Trade settled");
+        logger.info({ userId, tradeId, amount, newBalance, newBlocked: finalBlocked }, "Trade settled");
     }
 
     /**

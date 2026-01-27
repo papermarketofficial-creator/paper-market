@@ -3,6 +3,7 @@ import { orders, trades, positions, instruments, type NewTrade } from "@/lib/db/
 import { logger } from "@/lib/logger";
 import { ApiError } from "@/lib/errors";
 import { marketSimulation } from "@/services/market-simulation.service";
+import { realTimeMarketService } from "@/services/realtime-market.service";
 import { PositionService } from "@/services/position.service";
 import { WalletService } from "@/services/wallet.service";
 import { MarginService } from "@/services/margin.service";
@@ -51,7 +52,13 @@ export class ExecutionService {
      */
     private static async tryExecuteOrder(order: typeof orders.$inferSelect): Promise<boolean> {
         // Get current market price
-        const quote = marketSimulation.getQuote(order.symbol);
+        // Get current market price (Priority: Real-Time > Simulation)
+        let quote = realTimeMarketService.getQuote(order.symbol);
+        
+        if (!quote) {
+            // Fallback to simulation if real-time data is unavailable
+            quote = marketSimulation.getQuote(order.symbol);
+        }
         if (!quote) {
             logger.debug({ orderId: order.id, symbol: order.symbol }, "No market price available");
             return false;
@@ -115,7 +122,8 @@ export class ExecutionService {
                         executionCost,
                         trade.id,
                         tx,
-                        `Executed BUY: ${order.quantity} ${order.symbol} @ ₹${marketPrice}`
+                        `Executed BUY: ${order.quantity} ${order.symbol} @ ₹${marketPrice}`,
+                        order.id // Pass orderId for exact unblocking
                     );
                 } else {
                     // For SELL orders: unblock the margin and credit the sale proceeds

@@ -1,10 +1,14 @@
 "use client";
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { CandlestickData, HistogramData, Time } from 'lightweight-charts';
 import { useAnalysisStore } from '@/stores/trading/analysis.store';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SMA, RSI, MACD, EMA, BollingerBands } from 'technicalindicators';
 import { useMarketStore } from '@/stores/trading/market.store';
+import { IndicatorsMenu } from './IndicatorsMenu';
+import { ChartHeader } from './ChartHeader';
+import { ChartTradingPanel } from './ChartTradingPanel';
 
 // Dynamic imports to avoid SSR issues with LWC
 const BaseChart = dynamic(() => import('./BaseChart').then(mod => mod.BaseChart), { ssr: false });
@@ -200,14 +204,102 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
     activeTool,
   };
 
+  // State for Instant Order Panel
+  const [showTradingPanel, setShowTradingPanel] = useState(false);
+  
+  // State for Chart API (for actions like screenshot)
+  const [chartApi, setChartApi] = useState<any>(null);
+
+  // Handlers
+  const handleUndo = () => useAnalysisStore.getState().undoDrawing(symbol);
+  const handleRedo = () => useAnalysisStore.getState().redoDrawing(symbol);
+  
+  const handleScreenshot = () => {
+    if (chartApi) {
+        const canvas = chartApi.takeScreenshot();
+        // Convert to image and download
+        const url = canvas.toDataURL();
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${symbol}_chart_${Date.now()}.png`;
+        a.click();
+    }
+  };
+
+  const handleMaximize = () => {
+     if (!document.fullscreenElement) {
+         document.documentElement.requestFullscreen();
+     } else {
+         document.exitFullscreen();
+     }
+  };
+
   return (
     <div className="relative w-full h-full group">
       {/* Normal View */}
       {!isAnalysisMode && (
-        <div className="relative w-full">
-          <BaseChart {...chartProps} height={400} symbol={symbol} />
+        <div className="relative w-full h-full flex flex-col">
+          {/* Top Toolbar (Upstox Style) */}
+          <ChartHeader 
+            symbol={symbol} 
+            isInstantOrderActive={showTradingPanel}
+            onToggleInstantOrder={() => setShowTradingPanel(!showTradingPanel)}
+            onUndo={handleUndo}
+            onRedo={handleRedo}
+            onScreenshot={handleScreenshot}
+            onMaximize={handleMaximize}
+          />
 
+          <div className="flex flex-1 relative min-h-0">
+             {/* Left Vertical Toolbar */}
+             <TooltipProvider delayDuration={0}>
+               <div className="w-10 bg-card border-r border-border flex flex-col items-center py-4 gap-4 z-20 shrink-0">
+                 {[
+                   { id: 'crosshair', label: 'Crosshair', icon: <><path d="M12 3v18"/><path d="M3 12h18"/></> },
+                   { id: 'cursor', label: 'Cursor', icon: <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/> },
+                   { id: 'trendline', label: 'Trendline', icon: <line x1="2" y1="2" x2="22" y2="22"/> },
+                   { id: 'ray', label: 'Ray', icon: <><circle cx="12" cy="12" r="2"/><path d="M12 12l10-6"/></> },
+                   { id: 'horizontal-line', label: 'Horizontal Line', icon: <line x1="3" y1="12" x2="21" y2="12"/> },
+                   { id: 'rectangle', label: 'Rectangle', icon: <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/> },
+                   { id: 'text', label: 'Text', icon: <><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></> }
+                 ].map((tool) => (
+                    <Tooltip key={tool.id}>
+                      <TooltipTrigger asChild>
+                         <div 
+                           onClick={() => useAnalysisStore.getState().setActiveTool(tool.id as any)}
+                           className={`p-1.5 rounded-sm cursor-pointer transition-colors ${activeTool === tool.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+                         >
+                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                             {tool.icon}
+                           </svg>
+                         </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" sideOffset={10} className="bg-popover text-popover-foreground text-xs px-2 py-1">
+                        <p>{tool.label}</p>
+                      </TooltipContent>
+                    </Tooltip>
+                 ))}
+               </div>
+             </TooltipProvider>
 
+             {/* Chart Area */}
+             <div className="relative flex-1 h-full min-w-0 bg-transparent flex flex-col">
+               {/* Trading Panel (Floating - Togglable) */}
+               {showTradingPanel && <ChartTradingPanel symbol={symbol} />}
+               
+               {/* Main Chart */}
+               <div className="flex-1 w-full min-h-0">
+                  <BaseChart 
+                    {...chartProps} 
+                    height={undefined} 
+                    symbol={symbol} 
+                    onChartReady={setChartApi}
+                  />
+               </div>
+
+              
+             </div>
+          </div>
         </div>
       )}
 

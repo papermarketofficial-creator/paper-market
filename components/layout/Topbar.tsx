@@ -15,13 +15,14 @@ export function Topbar({ onMobileMenuToggle, mobileMenuOpen = false }: TopbarPro
   const positions = usePositionsStore((state) => state.positions);
   const trades = useOrdersStore((state) => state.trades);
 
-  // Fetch wallet on mount and poll every 5 seconds
+  // Fetch wallet on mount and poll every 30 seconds
   useEffect(() => {
-    fetchWallet(); // Initial fetch
-
+    // Initial fetch is handled by DashboardLayoutClient, so we don't need to call it here immediately
+    // unless we want to ensure it's fresh for this specific component, but sharing the store state is sufficient.
+    
     const interval = setInterval(() => {
       fetchWallet();
-    }, 5000); // Poll every 5 seconds
+    }, 30000); // Poll every 30 seconds
 
     return () => clearInterval(interval);
   }, [fetchWallet]);
@@ -71,35 +72,7 @@ export function Topbar({ onMobileMenuToggle, mobileMenuOpen = false }: TopbarPro
         </div>
       </div>
 
-      {/* Balance & P&L */}
-      <div className="flex items-center gap-4 sm:gap-6">
-        <div className="hidden sm:block">
-          <p className="text-xs text-muted-foreground">Available Balance</p>
-          <p className={cn(
-            "text-base sm:text-lg font-semibold animate-number",
-            isLoadingBalance && "opacity-50"
-          )}>
-            {formatCurrency(availableBalance)}
-            {blockedBalance > 0 && (
-              <span className="text-xs text-muted-foreground ml-2" title={`₹${blockedBalance.toLocaleString()} blocked`}>
-                (₹{blockedBalance.toLocaleString()} blocked)
-              </span>
-            )}
-          </p>
-        </div>
 
-        <div className="hidden sm:block h-8 w-px bg-border" />
-
-        <div>
-          <p className="text-xs text-muted-foreground">Total P&L</p>
-          <p className={cn(
-            'text-base sm:text-lg font-semibold animate-number',
-            totalPnL >= 0 ? 'text-profit' : 'text-loss'
-          )}>
-            {totalPnL >= 0 ? '+' : ''}{formatCurrency(totalPnL)}
-          </p>
-        </div>
-      </div>
 
 
     </header>

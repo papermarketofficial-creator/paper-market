@@ -61,14 +61,14 @@ export function StockSearch({
 
   return (
     <div className={cn("space-y-2", className)}>
-      <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{label}</Label>
+      <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{label}</Label>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button
             variant="outline"
             role="combobox"
             aria-expanded={open}
-            className="w-full justify-between bg-card hover:bg-muted/50 border-input h-10 px-3 text-sm"
+            className="w-full justify-between bg-input hover:bg-accent border-border h-8 px-2 text-xs rounded-sm"
           >
             {selectedStock ? (
               <span className="flex items-center gap-2 truncate">
@@ -90,7 +90,7 @@ export function StockSearch({
           <Command shouldFilter={false}>
             <CommandInput
               placeholder="Search symbol..."
-              className="h-9"
+              className="h-8 rounded-sm"
               value={query}
               onValueChange={setQuery}
             />
@@ -109,7 +109,7 @@ export function StockSearch({
                       onStockSelect(stock);
                       setOpen(false);
                     }}
-                    className="data-[selected=true]:bg-muted cursor-pointer"
+                    className="data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground cursor-pointer"
                   >
                     <Check
                       className={cn(

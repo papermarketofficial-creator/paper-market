@@ -81,9 +81,10 @@ export interface InteractionState {
 interface SymbolAnalysisState {
   indicators: IndicatorConfig[];
   drawings: Drawing[];
+  redoStack?: Drawing[]; // Stack for storing undone drawings
 }
 
-interface AnalysisState {
+export interface AnalysisState {
   // Global View State (Shared across all symbols)
   isAnalysisMode: boolean;
   setAnalysisMode: (isOpen: boolean) => void;
@@ -110,6 +111,7 @@ interface AnalysisState {
   updateDrawing: (symbol: string, drawing: Drawing) => void;
 
   undoDrawing: (symbol: string) => void;
+  redoDrawing: (symbol: string) => void;
 
   // Per-Symbol Data Map
   symbolState: Record<string, SymbolAnalysisState>;
@@ -243,14 +245,38 @@ export const useAnalysisStore = create<AnalysisState>()(
           if (!current || current.drawings.length === 0) return state;
 
           const newDrawings = [...current.drawings];
-          newDrawings.pop(); // Remove last
+          const popped = newDrawings.pop(); // Remove last
 
           return {
             symbolState: {
               ...state.symbolState,
               [symbol]: {
                 ...current,
-                drawings: newDrawings
+                drawings: newDrawings,
+                redoStack: popped ? [...(current.redoStack || []), popped] : (current.redoStack || [])
+              }
+            }
+          };
+        });
+      },
+
+      redoDrawing: (symbol) => {
+        set((state) => {
+          const current = state.symbolState[symbol];
+          if (!current || !current.redoStack || current.redoStack.length === 0) return state;
+
+          const newRedoStack = [...current.redoStack];
+          const restored = newRedoStack.pop();
+
+          if (!restored) return state;
+
+          return {
+            symbolState: {
+              ...state.symbolState,
+              [symbol]: {
+                ...current,
+                drawings: [...current.drawings, restored],
+                redoStack: newRedoStack
               }
             }
           };
@@ -293,7 +319,7 @@ export const useAnalysisStore = create<AnalysisState>()(
 
       addIndicator: (symbol, config) => {
         set((state) => {
-          const current = state.symbolState[symbol] || { indicators: [], drawings: [] };
+          const current = state.symbolState[symbol] || { indicators: [], drawings: [], redoStack: [] };
 
           // Deduplication (especially for MACD)
           if (config.type === 'MACD' && current.indicators.some(i => i.type === 'MACD')) {
@@ -347,7 +373,7 @@ export const useAnalysisStore = create<AnalysisState>()(
 
       addDrawing: (symbol, drawing) => {
         set((state) => {
-          const current = state.symbolState[symbol] || { indicators: [], drawings: [] };
+          const current = state.symbolState[symbol] || { indicators: [], drawings: [], redoStack: [] };
           log('Add Drawing', symbol, drawing.type);
           return {
             symbolState: {
@@ -357,7 +383,8 @@ export const useAnalysisStore = create<AnalysisState>()(
                 drawings: [
                   ...current.drawings,
                   { ...drawing, id: Math.random().toString(36).substring(7) } as Drawing
-                ]
+                ],
+                redoStack: [] // Clear redo stack on new action
               }
             }
           };
@@ -389,7 +416,8 @@ export const useAnalysisStore = create<AnalysisState>()(
               ...state.symbolState,
               [symbol]: {
                 ...current,
-                drawings: []
+                drawings: [],
+                redoStack: []
               }
             }
           };

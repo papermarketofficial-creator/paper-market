@@ -20,20 +20,9 @@ export function MarketStatusBar() {
     }, [indices, isMarketOpen, setIndices]);
 
     return (
-        <div className="h-8 bg-card/60 backdrop-blur-md border-b border-border/50 flex items-center px-4 justify-between text-xs overflow-hidden">
+        <div className="h-8 bg-card/60 backdrop-blur-md border-b border-white/5 flex items-center px-4 justify-between text-xs overflow-hidden">
             {/* Left: Market Status Pulse */}
             <div className="flex items-center gap-4">
-                <div className="flex items-center gap-1.5">
-                    <span className="relative flex h-2 w-2">
-                        <span className={cn("animate-ping absolute inline-flex h-full w-full rounded-full opacity-75", isMarketOpen ? "bg-green-400" : "bg-red-400")}></span>
-                        <span className={cn("relative inline-flex rounded-full h-2 w-2", isMarketOpen ? "bg-green-500" : "bg-red-500")}></span>
-                    </span>
-                    <span className={cn("font-semibold tracking-wider", isMarketOpen ? "text-green-500" : "text-red-500")}>
-                        {isMarketOpen ? "MARKET OPEN" : "MARKET CLOSED"}
-                    </span>
-                </div>
-
-                <div className="h-4 w-[1px] bg-border" />
 
                 {/* Indices Ticker */}
                 <div className="flex items-center gap-4 text-muted-foreground font-mono">

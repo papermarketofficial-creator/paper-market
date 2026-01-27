@@ -16,9 +16,9 @@ interface ProductTypeSelectorProps {
 export function ProductTypeSelector({ productType, onProductTypeChange }: ProductTypeSelectorProps) {
   return (
     <div className="space-y-2">
-      <Label className="text-muted-foreground">Product Type</Label>
+      <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Product Type</Label>
       <Select value={productType} onValueChange={(v) => onProductTypeChange(v as 'CNC' | 'MIS')}>
-        <SelectTrigger className="bg-background border-input text-foreground">
+        <SelectTrigger className="bg-input border-border text-foreground h-8 rounded-sm text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

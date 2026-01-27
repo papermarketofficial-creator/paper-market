@@ -9,9 +9,9 @@ export default function TransactionsPage() {
     const { balance, blockedBalance, availableBalance, fetchWallet, fetchTransactions } = useWalletStore();
 
     useEffect(() => {
-        fetchWallet();
+        // fetchWallet(); // Handled by layout
         fetchTransactions({ limit: 20, page: 1 });
-    }, [fetchWallet, fetchTransactions]);
+    }, [fetchTransactions]);
 
     const formatCurrency = (value: number) => {
         return new Intl.NumberFormat('en-IN', {

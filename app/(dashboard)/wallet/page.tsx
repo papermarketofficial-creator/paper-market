@@ -20,9 +20,9 @@ export default function WalletPage() {
     const [filters, setFilters] = useState({});
 
     useEffect(() => {
-        fetchWallet();
+        // fetchWallet(); // Handled by layout
         fetchTransactions({ page: 1, limit: 20 });
-    }, [fetchWallet, fetchTransactions]);
+    }, [fetchTransactions]);
 
     const handleFilterChange = (newFilters: any) => {
         setFilters(newFilters);

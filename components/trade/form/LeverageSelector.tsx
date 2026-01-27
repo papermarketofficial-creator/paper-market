@@ -16,9 +16,9 @@ interface LeverageSelectorProps {
 export function LeverageSelector({ leverage, onLeverageChange }: LeverageSelectorProps) {
   return (
     <div className="space-y-2">
-      <Label className="text-muted-foreground">Leverage</Label>
+      <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Leverage</Label>
       <Select value={leverage} onValueChange={onLeverageChange}>
-        <SelectTrigger className="bg-background border-input text-foreground">
+        <SelectTrigger className="bg-input border-border text-foreground h-8 rounded-sm text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

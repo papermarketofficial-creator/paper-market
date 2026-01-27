@@ -24,6 +24,7 @@ interface BaseChartProps {
   height?: number;
   autoResize?: boolean;
   symbol: string;
+  onChartReady?: (api: IChartApi) => void;
 }
 
 export interface BaseChartRef {
@@ -38,6 +39,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   height = 400,
   autoResize = true,
   symbol,
+  onChartReady
 }, ref) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -64,7 +66,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
     // Initial Layout
     const width = chartContainerRef.current.clientWidth;
-    setDimensions({ width, height });
+    const initialHeight = chartContainerRef.current.clientHeight || height;
+    setDimensions({ width, height: initialHeight });
 
     const chart = createChart(chartContainerRef.current, {
       layout: {
@@ -76,7 +79,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         horzLines: { color: 'rgba(31, 41, 55, 0.5)' },
       },
       width: width,
-      height: height,
+      height: initialHeight,
       timeScale: {
         borderColor: '#1F2937',
         timeVisible: true,
@@ -98,54 +101,43 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       wickDownColor: '#EF4444',
     });
 
-    // Volume (Overlay - Always at bottom)
-    const volumeSeriesInstance = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-    });
-    volumeSeriesInstance.priceScale().applyOptions({
-      scaleMargins: { top: 0.8, bottom: 0 },
-    });
-
     chartRef.current = chart;
     candleSeriesRef.current = candlestickSeriesInstance;
-    volumeSeriesRef.current = volumeSeriesInstance;
     setChartInstance(chart); // Trigger re-render to mount DrawingManager
-
-    // Capture refs for cleanup
-    const currentIndicatorRefs = indicatorSeriesRefs.current;
+    
+    if (onChartReady) {
+        onChartReady(chart);
+    }
 
     return () => {
       chart.remove();
-      currentIndicatorRefs.clear();
       chartRef.current = null;
-      candleSeriesRef.current = null;
-      volumeSeriesRef.current = null;
-      setChartInstance(null);
     };
-  }, [height]); // Run once on mount, height handled by separate effect
+  }, [height, onChartReady]); // Run once on mount, height handled by separate effect
 
-  // 1.5 Handle Resize
+  // 1.5 Handle Resize with ResizeObserver
   useEffect(() => {
     if (!autoResize || !chartContainerRef.current || !chartRef.current) return;
 
-    const handleResize = () => {
-      if (chartContainerRef.current && chartRef.current) {
-        const newWidth = chartContainerRef.current.clientWidth;
-        chartRef.current.applyOptions({ width: newWidth });
-        setDimensions(d => ({ ...d, width: newWidth }));
-      }
-    };
+    const resizeObserver = new ResizeObserver(entries => {
+      if (entries.length === 0 || !entries[0].contentRect) return;
+      const { width, height } = entries[0].contentRect;
+      
+      chartRef.current?.applyOptions({ width, height });
+      setDimensions({ width, height });
+    });
 
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    resizeObserver.observe(chartContainerRef.current);
+
+    return () => resizeObserver.disconnect();
   }, [autoResize, chartInstance]);
 
   // 2. Handle Height Updates Efficiently
   useEffect(() => {
-    if (chartRef.current) {
-      chartRef.current.applyOptions({ height });
-      setDimensions(d => ({ ...d, height }));
+    // If height prop is provided explicitly, override
+    if (height && chartRef.current) {
+       chartRef.current.applyOptions({ height });
+       setDimensions(d => ({ ...d, height }));
     }
   }, [height]);
 
@@ -154,13 +146,6 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     if (candleSeriesRef.current) candleSeriesRef.current.setData(data);
   }, [data]);
-
-  // 2.1 Update Volume Data
-  useEffect(() => {
-    if (volumeSeriesRef.current && volumeData) {
-      volumeSeriesRef.current.setData(volumeData);
-    }
-  }, [volumeData]);
 
 
   // 3. Dynamic Pane Layout
@@ -309,15 +294,15 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   }, [indicators]);
 
   return (
-    <div ref={chartContainerRef} className="w-full rounded-lg relative">
+    <div ref={chartContainerRef} className="w-full h-full rounded-lg relative">
       {chartInstance && candleSeriesRef.current && dimensions.width > 0 && data && data.length > 0 && (
         <DrawingManager
           chart={chartInstance}
           mainSeries={candleSeriesRef.current}
           width={dimensions.width}
-          height={height}
+          height={dimensions.height}
           data={data}
-          symbol={symbol} // ✅ Pass Symbol
+          symbol={symbol} 
         />
       )}
     </div>

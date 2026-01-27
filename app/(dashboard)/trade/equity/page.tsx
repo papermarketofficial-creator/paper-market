@@ -27,60 +27,79 @@ export default function EquityPage() {
     }
   }, [currentInstruments, selectedStock]);
 
-  return (
-    <div className="grid gap-6 lg:grid-cols-3">
-      <div className="lg:col-span-1">
-        <TradingForm
-          selectedStock={selectedStock}
-          onStockSelect={setSelectedStock}
-          instruments={currentInstruments}
-          instrumentMode="equity" // ✅ Explicit Prop
-        />
-      </div>
-      <div className="lg:col-span-2">
-        <Card className="bg-card border-border h-full">
-          <CardHeader>
-            <CardTitle className="text-foreground flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <span>{selectedStock?.symbol || 'Select Stock'}</span>
-                {selectedStock && (
-                  <span className={cn(
-                    'text-sm font-normal',
-                    selectedStock.change >= 0 ? 'text-profit' : 'text-loss'
-                  )}>
-                    ₹{selectedStock.price.toLocaleString('en-IN')}
-                    <span className="ml-2">
-                      {selectedStock.change >= 0 ? '+' : ''}
-                      {selectedStock.change.toFixed(2)} ({selectedStock.changePercent.toFixed(2)}%)
-                    </span>
-                  </span>
-                )}
-              </div>
+  // State for Floating Order Form
+  const [showOrderForm, setShowOrderForm] = useState(false);
+  const [orderSide, setOrderSide] = useState<'BUY' | 'SELL'>('BUY');
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setAnalysisMode(true)}
-                className="gap-2 bg-background/80 backdrop-blur shadow-sm hover:bg-background border-primary/20 hover:border-primary h-8"
-              >
-                <Maximize2 className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-medium text-primary">Analyze Chart</span>
-              </Button>
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {selectedStock ? (
-              <Suspense fallback={<Skeleton className="h-[400px] w-full" />}>
-                <CandlestickChartComponent symbol={selectedStock.symbol} />
-              </Suspense>
-            ) : (
-              <div className="flex items-center justify-center h-[400px] text-muted-foreground">
-                Select a stock to view chart
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+  // Listen for Chart Triggers (Window Event Hack for decoupled sibling comms without Context for now)
+  useEffect(() => {
+    (window as any).triggerTrade = (side: 'BUY' | 'SELL') => {
+      setOrderSide(side);
+      setShowOrderForm(true);
+    };
+    return () => {
+      (window as any).triggerTrade = undefined;
+    }
+  }, []);
+
+  return (
+    <div className="h-[calc(100vh-3.5rem)] overflow-hidden">
+      <TradeLayout
+        watchlist={
+          <div className="h-full">
+            <WatchlistPanel 
+              instruments={currentInstruments}
+              selectedSymbol={selectedStock?.symbol}
+              onSelect={setSelectedStock}
+            />
+          </div>
+        }
+        chart={
+          <div className="h-full w-full bg-card/50">
+             {selectedStock ? (
+               <Suspense fallback={<Skeleton className="h-full w-full" />}>
+                 <div className="h-full w-full">
+                    <CandlestickChartComponent symbol={selectedStock.symbol} />
+                 </div>
+               </Suspense>
+             ) : (
+               <div className="flex items-center justify-center h-full text-muted-foreground">
+                 Select a stock to view chart
+               </div>
+             )}
+          </div>
+        }
+        orderForm={
+          showOrderForm && selectedStock && (
+             <div className="absolute top-16 right-4 w-[320px] z-50 shadow-2xl animate-in slide-in-from-right-10 fade-in duration-200">
+                <div className="relative">
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="absolute top-2 right-2 z-10 h-6 w-6 rounded-full bg-background/50 hover:bg-background"
+                    onClick={() => setShowOrderForm(false)}
+                  >
+                    <span className="sr-only">Close</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                  </Button>
+                  {/* Reuse TradingForm but wrapped */}
+                  <div className="h-auto max-h-[80vh] overflow-y-auto rounded-lg border border-border bg-card">
+                     <TradingForm
+                        selectedStock={selectedStock}
+                        onStockSelect={setSelectedStock}
+                        instruments={currentInstruments}
+                        instrumentMode="equity"
+                      />
+                  </div>
+                </div>
+             </div>
+          )
+        }
+      />
     </div>
   );
 }
+
+// Imports needed for above code
+ import { TradeLayout } from '@/components/trade/layout/TradeLayout';
+ import { WatchlistPanel } from '@/components/trade/watchlist/WatchlistPanel';

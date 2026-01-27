@@ -268,9 +268,9 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
 
   return (
     <TooltipProvider>
-      <Card className="bg-card border-border h-full">
+      <Card className="bg-card border-border h-full rounded-sm shadow-none">
         {!isEquityMode && (
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-2 p-3">
             <InstrumentSelector
               value={instrumentType}
               onChange={setInstrumentType}
@@ -279,12 +279,12 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
           </CardHeader>
         )}
 
-        <CardHeader className={cn("pt-2", !isEquityMode && "pt-0")}>
+        <CardHeader className={cn("pt-2 p-3", !isEquityMode && "pt-0")}>
           {/* TradeTypeSelector removed - derived from route */}
           {isEquityMode && <CardTitle className="text-foreground">Place Order</CardTitle>}
         </CardHeader>
 
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-4 p-3">
           {/* SEARCH ONLY FOR EQUITY OR STOCK OPTIONS */}
           {(isEquityMode || instrumentType === "STOCK OPTIONS") && (
             <StockSearch
@@ -299,12 +299,12 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
 
           {/* INDEX F&O SELECTORS */}
           {!isEquityMode && instrumentType !== "STOCK OPTIONS" && (
-            <div className="space-y-4 rounded-lg bg-muted/30 p-4 border border-border/50">
+            <div className="space-y-4 rounded-sm bg-muted/30 p-3 border border-border">
               {/* Expiry Selector */}
               <div className="space-y-2">
-                <Label className="text-xs font-semibold text-muted-foreground uppercase">Expiry</Label>
+                <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Expiry</Label>
                 <Select value={selectedExpiry} onValueChange={setSelectedExpiry}>
-                  <SelectTrigger className="bg-background">
+                  <SelectTrigger className="bg-input border-border h-8 rounded-sm text-xs">
                     <SelectValue placeholder="Select Expiry" />
                   </SelectTrigger>
                   <SelectContent>
@@ -321,9 +321,9 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
               {tradeType === 'options' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-muted-foreground uppercase">Strike Price</Label>
+                    <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Strike Price</Label>
                     <Select value={selectedStrike} onValueChange={setSelectedStrike}>
-                      <SelectTrigger className="bg-background">
+                      <SelectTrigger className="bg-input border-border h-8 rounded-sm text-xs">
                         <SelectValue placeholder="Select Strike" />
                       </SelectTrigger>
                       <SelectContent className="max-h-[200px]">
@@ -338,11 +338,11 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
 
                   <div className="space-y-2">
                     <Label className="text-xs font-semibold text-muted-foreground uppercase">Option Type</Label>
-                    <ToggleGroup type="single" value={optionType} onValueChange={(v) => v && setOptionType(v as "CE" | "PE")} className="justify-start w-full">
-                      <ToggleGroupItem value="CE" className="data-[state=on]:bg-green-100 data-[state=on]:text-green-700 flex-1">
+                    <ToggleGroup type="single" value={optionType} onValueChange={(v) => v && setOptionType(v as "CE" | "PE")} className="justify-start w-full gap-2">
+                      <ToggleGroupItem value="CE" className="flex-1 h-7 text-xs data-[state=on]:bg-green-500/15 data-[state=on]:text-green-600 dark:data-[state=on]:bg-green-500/20 dark:data-[state=on]:text-green-400 border border-border data-[state=on]:border-green-500/30 hover:bg-muted hover:text-foreground transition-all">
                         CE (Call)
                       </ToggleGroupItem>
-                      <ToggleGroupItem value="PE" className="data-[state=on]:bg-red-100 data-[state=on]:text-red-700 flex-1">
+                      <ToggleGroupItem value="PE" className="flex-1 h-7 text-xs data-[state=on]:bg-red-500/15 data-[state=on]:text-red-600 dark:data-[state=on]:bg-red-500/20 dark:data-[state=on]:text-red-400 border border-border data-[state=on]:border-red-500/30 hover:bg-muted hover:text-foreground transition-all">
                         PE (Put)
                       </ToggleGroupItem>
                     </ToggleGroup>
@@ -358,7 +358,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                 <span className="text-sm font-bold text-muted-foreground">
                   {selectedStock.symbol}
                 </span>
-                <span className={cn("text-lg font-bold", selectedStock.change >= 0 ? "text-profit" : "text-loss")}>
+                <span className={cn("text-lg font-bold font-mono", selectedStock.change >= 0 ? "text-trade-buy" : "text-trade-sell")}>
                   ₹{selectedStock.price.toLocaleString()}
                 </span>
               </div>
@@ -378,7 +378,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                     placeholder={side === 'BUY' ? '< Entry' : '> Entry'}
                     value={stopLoss}
                     onChange={(e) => setStopLoss(e.target.value)}
-                    className={cn("bg-background", hasSl && !isSlValid && "border-destructive focus-visible:ring-destructive")}
+                    className={cn("bg-input border-border h-8 rounded-sm text-xs font-mono", hasSl && !isSlValid && "border-trade-sell focus-visible:ring-trade-sell")}
                   />
                 </div>
                 <div className="space-y-2">
@@ -390,7 +390,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                     placeholder={side === 'BUY' ? '> Entry' : '< Entry'}
                     value={target}
                     onChange={(e) => setTarget(e.target.value)}
-                    className={cn("bg-background", hasTarget && !isTargetValid && "border-destructive focus-visible:ring-destructive")}
+                    className={cn("bg-input border-border h-8 rounded-sm text-xs font-mono", hasTarget && !isTargetValid && "border-trade-sell focus-visible:ring-trade-sell")}
                   />
                 </div>
               </div>
@@ -434,12 +434,12 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                 <Button
                   onClick={handleSubmit}
                   disabled={!canTrade}
-                  variant={side === 'SELL' ? 'destructive' : 'default'}
+                  variant="default"
                   className={cn(
-                    'w-full h-12 text-lg font-semibold transition-all',
+                    'w-full h-9 text-sm font-bold uppercase tracking-widest transition-all rounded-sm shadow-none',
                     side === 'BUY'
-                      ? 'bg-success hover:bg-success/90 text-success-foreground'
-                      : '' // Destructive variant handles red styles automatically
+                      ? 'bg-trade-buy hover:bg-trade-buy/90 text-white'
+                      : 'bg-trade-sell hover:bg-trade-sell/90 text-white'
                   )}
                 >
                   {side === 'BUY' ? 'BUY' : 'SELL'} {selectedStock?.symbol}

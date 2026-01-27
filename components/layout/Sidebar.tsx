@@ -12,29 +12,30 @@ import {
   CandlestickChart,
   Binary,
   LineChart,
-  Shield
+  Shield,
+  LucideIcon
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Logo from '@/components/general/Logo';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-import { useRouter } from 'next/navigation';
+
+interface NavItem {
+  to: string;
+  icon: LucideIcon;
+  label: string;
+  adminOnly?: boolean;
+  children?: { to: string; icon: LucideIcon; label: string }[];
+}
 
 // Extended navigation config to include Trade sub-items locally for this view
 // In a real app, this would come from your content/navigation.ts
-const navItems = [
+const navItems: NavItem[] = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   {
-    id: 'trade-group',
-    label: 'Trade',
-    icon: TrendingUp,
-    // Parent path for highlighting logic
     to: '/trade',
-    children: [
-      { to: '/trade/equity', label: 'Equity', icon: CandlestickChart },
-      { to: '/trade/futures', label: 'Futures', icon: LineChart },
-      { to: '/trade/options', label: 'Options', icon: Binary },
-    ]
+    icon: TrendingUp,
+    label: 'Trade'
   },
   { to: '/positions', icon: Briefcase, label: 'Positions' },
   { to: '/orders', icon: History, label: 'Orders' },
