@@ -31,12 +31,12 @@ interface NavItem {
 // Extended navigation config to include Trade sub-items locally for this view
 // In a real app, this would come from your content/navigation.ts
 const navItems: NavItem[] = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   {
     to: '/trade',
     icon: TrendingUp,
     label: 'Trade'
   },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/positions', icon: Briefcase, label: 'Positions' },
   { to: '/orders', icon: History, label: 'Orders' },
   { to: '/watchlist', icon: Eye, label: 'Watchlist' },

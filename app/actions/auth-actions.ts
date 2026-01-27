@@ -3,5 +3,5 @@
 import { signIn } from "@/lib/auth";
 
 export async function handleGoogleLogin(callbackUrl?: string) {
-    await signIn("google", { redirectTo: callbackUrl || "/dashboard" });
+    await signIn("google", { redirectTo: callbackUrl || "/trade/equity" });
 }

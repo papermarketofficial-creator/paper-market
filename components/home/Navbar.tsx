@@ -49,7 +49,7 @@ const Navbar = () => {
               </Button>
             )}
             {session ? (
-              <Link href="/dashboard">
+              <Link href="/trade/equity">
                 <Button size="sm" className="rounded-full bg-primary hover:bg-primary/90 px-5">
                   Dashboard
                 </Button>
