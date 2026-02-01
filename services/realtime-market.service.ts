@@ -10,6 +10,8 @@ interface Quote {
     symbol: string;
     price: number;
     close?: number; // Previous Close for Change Calculation
+    timestamp?: number; // Unix timestamp in milliseconds from Upstox ltt field
+    volume?: number;
     lastUpdated: Date;
 }
 
@@ -158,6 +160,11 @@ class RealTimeMarketService extends EventEmitter {
      * Handle incoming market data from WebSocket
      */
     private handleMarketUpdate(data: any): void {
+        // Guard against null/undefined data
+        if (!data || typeof data !== 'object') {
+            return;
+        }
+
         // Debug: Log first few updates to understand structure
         if (Math.random() < 0.01) { // 1% sample log
              console.log("📉 Market Data Payload:", JSON.stringify(data).slice(0, 200));
@@ -183,6 +190,7 @@ class RealTimeMarketService extends EventEmitter {
                 if (ltpc) {
                     const price = ltpc.ltp;
                     const close = ltpc.cp;
+                    const ltt = ltpc.ltt; // Last Traded Time (Unix timestamp in milliseconds)
                     // const volume = ltpc.vol; // Verify if available in V3
                     
                     // ─────────────────────────────────────────────────────────────────
@@ -199,6 +207,7 @@ class RealTimeMarketService extends EventEmitter {
                             symbol: tradingSymbol, // Send "RELIANCE" instead of "INE..."
                             price: price,
                             close: close,
+                            timestamp: ltt ? parseInt(ltt) : Date.now(), // Use actual tick time
                             // volume: volume,
                             lastUpdated: new Date()
                         };

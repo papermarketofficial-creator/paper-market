@@ -314,4 +314,44 @@ export class UpstoxService {
            return [];
        }
    }
+
+    /**
+     * Fetch Intraday Candle Data (V3 API) - For current trading day
+     * @param instrumentKey - NSE_EQ|INE...
+     * @param unit - minutes, hours, days
+     * @param interval - 1, 2, 3, ... 300 for minutes; 1-5 for hours; 1 for days
+     */
+    static async getIntraDayCandleData(
+        instrumentKey: string,
+        unit: string,
+        interval: string
+    ): Promise<any[]> {
+        const token = await this.getSystemToken();
+        if (!token) throw new Error("No token");
+
+        // V3 Intraday endpoint: /v3/historical-candle/intraday/:instrument_key/:unit/:interval
+        const encodedKey = encodeURIComponent(instrumentKey);
+        const urlV3 = `https://api.upstox.com/v3/historical-candle/intraday/${encodedKey}/${unit}/${interval}`;
+
+        try {
+            logger.info({ instrumentKey, unit, interval }, "Fetching Intraday Data from UPSTOX V3 API");
+            
+            await upstoxRateLimiter.waitForToken("history");
+            const response = await fetch(urlV3, {
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: "application/json"
+                }
+            });
+
+            const data = await response.json();
+            if (data.status === "success" && data.data && data.data.candles) {
+                return data.data.candles;
+            }
+            return [];
+        } catch (error) {
+            console.error("Intraday Data Fetch Failed", error);
+            return [];
+        }
+    }
 }

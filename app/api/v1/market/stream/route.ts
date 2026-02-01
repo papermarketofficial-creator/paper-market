@@ -18,25 +18,28 @@ export async function GET(req: NextRequest) {
     const searchParams = req.nextUrl.searchParams;
     const symbols = searchParams.get('symbols')?.split(',') || [];
 
+    console.log('📡 SSE: New connection request for symbols:', symbols);
+
     // Subscribe to these symbols in Upstox
     if (symbols.length > 0) {
         await realTimeMarketService.initialize();
         await realTimeMarketService.subscribe(symbols);
+        console.log('✅ SSE: Subscribed to symbols:', symbols);
     }
 
     const stream = new ReadableStream({
         start(controller) {
+            console.log('📡 SSE: Stream started for client');
             // Send initial connection message
             controller.enqueue(encoder.encode(`data: {"type":"connected"}\n\n`));
 
             // Listener for market ticks
             const onTick = (quote: any) => {
-                // Only send updates for symbols the user is interested in (if filtered)
-                // If no filter, send all (or handle efficiently)
-                if (symbols.length === 0 || symbols.includes(quote.symbol)) {
-                    const payload = JSON.stringify({ type: 'tick', data: quote });
-                    controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
-                }
+                // Send all ticks - the frontend will filter if needed
+                // The quote.symbol is already the trading symbol (e.g., "RELIANCE")
+                console.log('📤 SSE: Sending tick to client:', quote.symbol, quote.price);
+                const payload = JSON.stringify({ type: 'tick', data: quote });
+                controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
             };
 
             realTimeMarketService.on('tick', onTick);

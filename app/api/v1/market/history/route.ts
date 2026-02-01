@@ -147,22 +147,73 @@ export async function GET(req: NextRequest) {
         }
 
         // 3. Fetch from Upstox
-        const candles = await UpstoxService.getHistoricalCandleData(
-            instrumentKey,
-            unit,
-            interval,
-            fromDateStr,
-            toDateStr
-        );
+        // Strategy: For intraday timeframes (minutes/hours), we need TODAY's data from intraday API
+        // and historical data from the regular API
+        let candles: any[] = [];
+        
+        const today = new Date().toISOString().split('T')[0];
+        const isIntradayTimeframe = unit === 'minutes' || unit === 'hours';
+        
+        if (isIntradayTimeframe) {
+            // Fetch historical data (past days)
+            const historicalCandles = await UpstoxService.getHistoricalCandleData(
+                instrumentKey,
+                unit,
+                interval,
+                fromDateStr,
+                toDateStr
+            );
+            
+            // Fetch today's intraday data
+            const intradayCandles = await UpstoxService.getIntraDayCandleData(
+                instrumentKey,
+                unit,
+                interval
+            );
+            
+            // Combine: historical + today's intraday
+            // Note: Historical API might not include today, so we append intraday
+            candles = [...historicalCandles, ...intradayCandles];
+            
+            // Remove duplicates based on timestamp (in case there's overlap)
+            const seen = new Set();
+            candles = candles.filter((c: any[]) => {
+                const timestamp = c[0];
+                if (seen.has(timestamp)) return false;
+                seen.add(timestamp);
+                return true;
+            });
+            
+            // Sort by timestamp (oldest first)
+            candles.sort((a: any[], b: any[]) => new Date(a[0]).getTime() - new Date(b[0]).getTime());
+        } else {
+            // For daily/weekly/monthly, use historical API only
+            candles = await UpstoxService.getHistoricalCandleData(
+                instrumentKey,
+                unit,
+                interval,
+                fromDateStr,
+                toDateStr
+            );
+        }
 
         // 5. Format for Lightweight Charts
         // Upstox Response: [timestamp, open, high, low, close, volume, oi]
-        // Timestamp is ISO string (V3)
-        // LWC expects: { time: string | number, open, high, low, close }
-        // We will map it.
+        // Timestamp is ISO string (V3) with IST offset: "2026-02-01T12:30:00+05:30"
+        // LWC expects: { time: number (Unix timestamp in seconds), open, high, low, close }
+        
+        // Debug: Log first and last candle timestamps
+        if (candles.length > 0) {
+            console.log('📅 First candle timestamp:', candles[0][0]);
+            console.log('📅 Last candle timestamp:', candles[candles.length - 1][0]);
+            const firstUnix = new Date(candles[0][0]).getTime() / 1000;
+            const lastUnix = new Date(candles[candles.length - 1][0]).getTime() / 1000;
+            console.log('📅 First Unix:', firstUnix, new Date(firstUnix * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
+            console.log('📅 Last Unix:', lastUnix, new Date(lastUnix * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }));
+        }
 
         const formattedCandles = candles.map((c: any[]) => ({
-            time: new Date(c[0]).getTime() / 1000, // Unix Timestamp
+            time: new Date(c[0]).getTime() / 1000, // Unix Timestamp in seconds
             open: c[1],
             high: c[2],
             low: c[3],

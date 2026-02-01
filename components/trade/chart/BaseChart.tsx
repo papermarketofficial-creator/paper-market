@@ -86,10 +86,35 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         borderColor: '#1F2937',
         timeVisible: true,
         secondsVisible: false,
+        // Configure timezone to IST (UTC+5:30)
+        // Lightweight Charts doesn't have built-in timezone support,
+        // but we can format the display using localeString
+        tickMarkFormatter: (time: number) => {
+          const date = new Date(time * 1000);
+          return date.toLocaleTimeString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          });
+        },
       },
       rightPriceScale: {
         borderColor: '#1F2937',
         visible: true,
+      },
+      localization: {
+        timeFormatter: (time: number) => {
+          const date = new Date(time * 1000);
+          return date.toLocaleString('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+          });
+        },
       },
       crosshair: { mode: CrosshairMode.Normal }
     });
@@ -157,9 +182,52 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   }, [height]);
 
 
-  // 2. Update Data
+  // 2. Update Data - Smart Update for Real-time
+  const prevDataRef = useRef<CandlestickData[]>([]);
+  
   useEffect(() => {
-    if (candleSeriesRef.current) candleSeriesRef.current.setData(data);
+    if (!candleSeriesRef.current) {
+      console.log('📊 Chart: No series ref yet');
+      return;
+    }
+    
+    if (!data || data.length === 0) {
+      console.log('📊 Chart: No data yet, length:', data?.length);
+      return;
+    }
+
+    const prevData = prevDataRef.current;
+    
+    console.log('📊 Chart: Data update check - prev:', prevData.length, 'new:', data.length);
+    
+    // First load or complete data change
+    if (prevData.length === 0 || data.length < prevData.length) {
+      console.log('📊 Chart: Full data set (setData)', data.length, 'candles');
+      candleSeriesRef.current.setData(data);
+      prevDataRef.current = [...data]; // Clone to avoid reference issues
+      return;
+    }
+
+    // Incremental update - new candles added or last candle updated
+    if (data.length > prevData.length) {
+      // New candles added
+      const newCandles = data.slice(prevData.length);
+      console.log('📊 Chart: Adding', newCandles.length, 'new candles');
+      newCandles.forEach(candle => {
+        candleSeriesRef.current?.update(candle);
+      });
+      prevDataRef.current = [...data]; // Update reference
+    } else if (data.length === prevData.length) {
+      // Last candle might have been updated
+      const lastCandle = data[data.length - 1];
+      const prevLastCandle = prevData[prevData.length - 1];
+      
+      if (JSON.stringify(lastCandle) !== JSON.stringify(prevLastCandle)) {
+        console.log('📊 Chart: Updating last candle', lastCandle);
+        candleSeriesRef.current?.update(lastCandle);
+        prevDataRef.current = [...data]; // Update reference
+      }
+    }
   }, [data]);
 
 

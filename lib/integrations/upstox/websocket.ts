@@ -8,9 +8,10 @@ type MarketUpdateCallback = (data: unknown) => void;
 
 // ─────────────────────────────────────────────────────────────────
 // 🛠️ HACK: Pre-load .proto file synchronously for patching
-const PROTO_PATH = path.resolve(
+// Use absolute path from project root (process.cwd() points to project root in Next.js)
+const PROTO_PATH = path.join(
     process.cwd(),
-    "lib/integrations/upstox/proto/MarketDataFeedV3.proto"
+    "lib", "integrations", "upstox", "proto", "MarketDataFeedV3.proto"
 );
 
 let protobufRoot: any = null;
@@ -18,7 +19,15 @@ try {
     protobufRoot = protobuf.loadSync(PROTO_PATH);
     console.log("✅ Protobuf loaded from:", PROTO_PATH);
 } catch (e) {
-    console.error("❌ CRITICAL: Failed to load .proto sync at:", PROTO_PATH);  
+    console.error("Error loading .proto file", e);
+    // Try fallback path for development
+    try {
+        const fallbackPath = path.join(__dirname, "proto", "MarketDataFeedV3.proto");
+        protobufRoot = protobuf.loadSync(fallbackPath);
+        console.log("✅ Protobuf loaded from fallback:", fallbackPath);
+    } catch (e2) {
+        console.error("❌ CRITICAL: Failed to load .proto from both paths");
+    }
 }
 // ─────────────────────────────────────────────────────────────────
 

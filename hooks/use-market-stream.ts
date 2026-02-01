@@ -28,18 +28,21 @@ export const useMarketStream = () => {
         
         const allSymbols = [...new Set([...positionSymbols, ...watchlistSymbols, ...activeSymbol])];
 
-        if (allSymbols.length === 0) return;
+        if (allSymbols.length === 0) {
+            console.log('⚠️ SSE: No symbols to subscribe to');
+            return;
+        }
 
         // Construct SSE URL with symbols
         const url = `/api/v1/market/stream?symbols=${allSymbols.join(',')}`;
-        console.log('📡 SSE: Connecting to', url);
+        console.log('📡 SSE: Connecting to', url, 'Symbols:', allSymbols);
 
         const eventSource = new EventSource(url);
         eventSourceRef.current = eventSource;
         
         // ... (rest of the effect logic is same, just need to close correctly)
         eventSource.onopen = () => {
-             console.log("✅ Market Stream Connected");
+             console.log("✅ Market Stream Connected - SSE is LIVE");
              setIsConnected(true);
         };
 
@@ -52,6 +55,8 @@ export const useMarketStream = () => {
 
                 if (message.type === 'tick') {
                     const quote = message.data;
+                    console.log('📊 SSE Tick Received:', quote.symbol, quote.price);
+                    
                     let tradingSymbol = quote.symbol;
 
                     const matchedInstrument = allInstruments.find(i => 
@@ -67,10 +72,13 @@ export const useMarketStream = () => {
                     updateStockPrice(tradingSymbol, quote.price, quote.close);
                     
                     const { updateLiveCandle } = useMarketStore.getState();
+                    // Use actual tick timestamp (in milliseconds) from Upstox, convert to seconds
+                    const tickTime = quote.timestamp ? Math.floor(quote.timestamp / 1000) : Math.floor(Date.now() / 1000);
+                    console.log('📈 Updating live candle for:', tradingSymbol, 'Price:', quote.price, 'Time:', tickTime);
                     updateLiveCandle({
                         price: quote.price,
                         volume: quote.volume,
-                        time: Math.floor(Date.now() / 1000)
+                        time: tickTime
                     }, tradingSymbol);
                 }
             } catch (err) {

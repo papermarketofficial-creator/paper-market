@@ -360,8 +360,21 @@ export const useMarketStore = create<MarketState>((set, get) => ({
   updateLiveCandle: (tick, symbol) => {
     const { historicalData, volumeData, simulatedSymbol } = get();
     
+    // Normalize symbols for comparison (remove exchange prefix if present)
+    const normalizeSymbol = (s: string) => {
+      if (!s) return '';
+      // Remove NSE_EQ:, NSE_FO:, etc.
+      return s.replace(/^[A-Z_]+:/, '');
+    };
+    
+    const tickSymbol = normalizeSymbol(symbol);
+    const chartSymbol = normalizeSymbol(simulatedSymbol || '');
+    
     // Safety check: Only update if the tick belongs to the CURRENTLY viewed chart
-    if (simulatedSymbol !== symbol) return;
+    if (chartSymbol !== tickSymbol) {
+      console.log(`⚠️ Symbol mismatch: Chart=${chartSymbol}, Tick=${tickSymbol}`);
+      return;
+    }
 
     if (historicalData.length === 0) return;
 
@@ -405,6 +418,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
             color: '#089981' // Green on open
         } : null;
 
+        console.log('📊 NEW Candle:', newCandle, 'Total candles:', historicalData.length + 1);
         set({
             historicalData: [...historicalData, newCandle],
             volumeData: newVolume ? [...volumeData, newVolume] : volumeData,
@@ -425,6 +439,7 @@ export const useMarketStore = create<MarketState>((set, get) => ({
           color: tick.price >= (lastCandle.open as number) ? '#089981' : '#F23645'
         } : lastVolume;
 
+        console.log('📈 UPDATE Candle:', updatedCandle, 'Price:', tick.price);
         set({
           historicalData: [...historicalData.slice(0, -1), updatedCandle],
           volumeData: updatedVolume ? [...volumeData.slice(0, -1), updatedVolume] : volumeData,

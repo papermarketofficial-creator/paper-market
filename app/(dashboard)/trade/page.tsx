@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { TradingForm } from '@/components/trade/TradingForm';
 import { Stock } from '@/types/equity.types';
 import { useMarketStore } from '@/stores/trading/market.store';
+import { useMarketStream } from '@/hooks/use-market-stream';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { TradeLayout } from '@/components/trade/layout/TradeLayout';
@@ -16,6 +17,9 @@ export default function TradePage() {
   const { stocks, fetchWatchlists, initializeSimulation } = useMarketStore();
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
+
+  // Subscribe to live market data
+  useMarketStream();
 
   // Initial Load & Parallel Fetching
   useEffect(() => {
