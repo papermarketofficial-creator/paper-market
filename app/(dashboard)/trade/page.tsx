@@ -75,7 +75,7 @@ export default function TradePage() {
     };
 
     init();
-  }, [fetchWatchlists, initializeSimulation, selectedStock, stocks]); // Run on mount and when dependencies change
+  }, [fetchWatchlists, initializeSimulation]); // Run on mount only
 
   // Persist selection
   useEffect(() => {
