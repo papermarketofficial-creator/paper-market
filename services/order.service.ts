@@ -1,11 +1,13 @@
 import { db } from "@/lib/db";
-import { orders, trades, positions, idempotencyKeys, instruments, type NewOrder } from "@/lib/db/schema";
+import { orders, trades, positions, instruments, type NewOrder } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { ApiError } from "@/lib/errors";
 import { eq, and, sql, ilike } from "drizzle-orm";
 import type { PlaceOrder, OrderQuery } from "@/lib/validation/oms";
 import { WalletService } from "@/services/wallet.service";
 import { MarginService } from "@/services/margin.service";
+
+import { TRADING_UNIVERSE, isInstrumentAllowed } from "@/lib/trading-universe";
 
 export class OrderService {
     /**
@@ -14,13 +16,8 @@ export class OrderService {
     static async placeOrder(userId: string, payload: PlaceOrder) {
         try {
             // Check idempotency key if provided
-            if (payload.idempotencyKey) {
-                const existing = await this.checkIdempotencyKey(userId, payload.idempotencyKey);
-                if (existing) {
-                    logger.info({ orderId: existing.id, userId }, "Returning existing order (idempotent)");
-                    return existing;
-                }
-            }
+// Idempotency check removed for simplification
+
 
             // Validate instrument exists and is active
             logger.info({ lookupSymbol: payload.symbol }, "Looking up symbol");
@@ -37,6 +34,17 @@ export class OrderService {
             if (!instrument) {
                 throw new ApiError("Invalid symbol", 400, "INVALID_SYMBOL");
             }
+
+            // --- TRADING UNIVERSE CHECK ---
+            const universeCheck = isInstrumentAllowed(instrument);
+            if (!universeCheck.allowed) {
+                throw new ApiError(
+                    `Trading not allowed: ${universeCheck.reason}`,
+                    403,
+                    "INSTRUMENT_NOT_ALLOWED"
+                );
+            }
+            // -----------------------------
 
             // Validate quantity is multiple of lot size
             if (payload.quantity % instrument.lotSize !== 0) {
@@ -103,17 +111,7 @@ export class OrderService {
                 );
 
                 // Store idempotency key mapping if provided
-                if (payload.idempotencyKey) {
-                    const expiresAt = new Date();
-                    expiresAt.setHours(expiresAt.getHours() + 24); // 24-hour expiry
-
-                    await tx.insert(idempotencyKeys).values({
-                        key: payload.idempotencyKey,
-                        orderId: createdOrder.id,
-                        userId,
-                        expiresAt,
-                    });
-                }
+                // Idempotency storage removed for simplification
 
                 return createdOrder;
             });
@@ -241,33 +239,5 @@ export class OrderService {
             logger.error({ err: error, userId, filters }, "Failed to get orders");
             throw new ApiError("Failed to retrieve orders", 500, "ORDER_RETRIEVAL_FAILED");
         }
-    }
-
-    /**
-     * Check if idempotency key exists and is not expired.
-     */
-    private static async checkIdempotencyKey(userId: string, key: string) {
-        const [existing] = await db
-            .select({
-                orderId: idempotencyKeys.orderId,
-            })
-            .from(idempotencyKeys)
-            .where(and(
-                eq(idempotencyKeys.userId, userId),
-                eq(idempotencyKeys.key, key),
-                sql`${idempotencyKeys.expiresAt} > NOW()`
-            ))
-            .limit(1);
-
-        if (!existing) return null;
-
-        // Fetch the order
-        const [order] = await db
-            .select()
-            .from(orders)
-            .where(eq(orders.id, existing.orderId))
-            .limit(1);
-
-        return order || null;
     }
 }

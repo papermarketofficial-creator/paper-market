@@ -27,5 +27,5 @@ export const useMarketSimulation = () => {
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [positions.length, updateAllPositionsPrices]); // Re-bind when positions change to catch new symbols
+  }, [positions, updateAllPositionsPrices]); // Re-bind when positions change to catch new symbols
 };

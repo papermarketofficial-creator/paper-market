@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     // Subscribe to these symbols in Upstox
     if (symbols.length > 0) {
         await realTimeMarketService.initialize();
-        realTimeMarketService.subscribe(symbols);
+        await realTimeMarketService.subscribe(symbols);
     }
 
     const stream = new ReadableStream({

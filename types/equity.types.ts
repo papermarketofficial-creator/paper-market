@@ -12,4 +12,5 @@ export interface Stock {
   expiryType?: ExpiryType;
   strikePrice?: number;
   optionType?: 'CE' | 'PE';
+  instrumentToken?: string;
 }

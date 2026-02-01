@@ -92,6 +92,9 @@ export interface AnalysisState {
   timeframe: string; // '1m' | '5m' etc.
   setTimeframe: (tf: string) => void;
 
+  range: string; // '1d', '5d', '1mo', '3mo', '6mo', '1y', '3y', '5y'
+  setRange: (r: string) => void;
+
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
 
@@ -140,6 +143,9 @@ export const useAnalysisStore = create<AnalysisState>()(
 
       timeframe: '5m', // Default
       setTimeframe: (tf) => set({ timeframe: tf }),
+
+      range: '1d', // Default to 1 Day
+      setRange: (r) => set({ range: r }),
 
       activeTool: 'crosshair',
       setActiveTool: (tool) => {

@@ -4,3 +4,4 @@ export * from './market.schema';
 export * from './oms.schema';
 export * from './wallet.schema';
 export * from './integrations.schema';
+export * from './watchlist.schema';

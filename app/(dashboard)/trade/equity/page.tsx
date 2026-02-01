@@ -11,11 +11,15 @@ import { Button } from '@/components/ui/button';
 import { Maximize2 } from 'lucide-react';
 import { useAnalysisStore } from '@/stores/trading/analysis.store';
 
+import { GlobalSearchModal } from '@/components/trade/search/GlobalSearchModal';
+
 const CandlestickChartComponent = dynamic(() => import('@/components/trade/CandlestickChart').then(mod => ({ default: mod.CandlestickChart })));
 
 export default function EquityPage() {
   const { getCurrentInstruments } = useMarketStore();
   const { setAnalysisMode } = useAnalysisStore();
+  
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
 
   // ✅ Explicitly fetch equity instruments
   const currentInstruments = getCurrentInstruments('equity');
@@ -43,6 +47,15 @@ export default function EquityPage() {
   }, []);
 
   return (
+    <>
+    <GlobalSearchModal 
+        open={searchModalOpen} 
+        onOpenChange={setSearchModalOpen}
+        onSelectStock={(stock) => {
+          setSelectedStock(stock);
+          setSearchModalOpen(false);
+        }}
+    />
     <div className="h-[calc(100vh-3.5rem)] overflow-hidden">
       <TradeLayout
         watchlist={
@@ -51,7 +64,9 @@ export default function EquityPage() {
               instruments={currentInstruments}
               selectedSymbol={selectedStock?.symbol}
               onSelect={setSelectedStock}
+              onOpenSearch={() => setSearchModalOpen(true)}
             />
+            
           </div>
         }
         chart={
@@ -97,6 +112,7 @@ export default function EquityPage() {
         }
       />
     </div>
+    </>
   );
 }
 

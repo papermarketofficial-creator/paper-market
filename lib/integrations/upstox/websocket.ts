@@ -1,239 +1,194 @@
-/**
- * Upstox WebSocket Client
- * 
- * Connects to Upstox real-time market data feed.
- * Uses UpstoxTokenProvider for authentication.
- */
-
-import { WebSocket } from 'ws';
-import { UpstoxTokenProvider } from './token-provider';
+import { ApiClient, MarketDataStreamerV3 } from "upstox-js-sdk";
+import { UpstoxService } from "@/services/upstox.service";
 import { logger } from "@/lib/logger";
+import path from "path";
+import protobuf from "protobufjs";
 
 type MarketUpdateCallback = (data: unknown) => void;
 
-// Reconnection constants
-const MAX_RECONNECT_ATTEMPTS = 10;
-const BASE_RECONNECT_DELAY_MS = 1000;
-const MAX_RECONNECT_DELAY_MS = 30000;
+// ─────────────────────────────────────────────────────────────────
+// 🛠️ HACK: Pre-load .proto file synchronously for patching
+const PROTO_PATH = path.resolve(
+    process.cwd(),
+    "lib/integrations/upstox/proto/MarketDataFeedV3.proto"
+);
+
+let protobufRoot: any = null;
+try {
+    protobufRoot = protobuf.loadSync(PROTO_PATH);
+    console.log("✅ Protobuf loaded from:", PROTO_PATH);
+} catch (e) {
+    console.error("❌ CRITICAL: Failed to load .proto sync at:", PROTO_PATH);  
+}
+// ─────────────────────────────────────────────────────────────────
 
 export class UpstoxWebSocket {
-    private ws: WebSocket | null = null;
-    private tokenProvider: UpstoxTokenProvider;
-    private subscriptions: Set<string> = new Set();
+    private streamer: any = null; // SDK Streamer instance
     private onUpdate: MarketUpdateCallback | null = null;
-    private reconnectTimer: NodeJS.Timeout | null = null;
-    private reconnectAttempts: number = 0;
+    private subscriptions: Set<string> = new Set();
     private isConnected: boolean = false;
-    private isConnecting: boolean = false;
 
-    constructor() {
-        this.tokenProvider = new UpstoxTokenProvider();
-    }
+    constructor() {}
 
     /**
-     * Connect to Upstox WebSocket
-     * @param onUpdate Callback for market data updates
+     * Connect to Upstox WebSocket using SDK
      */
     async connect(onUpdate: MarketUpdateCallback): Promise<void> {
-        // Prevent multiple simultaneous connection attempts
-        if (this.isConnecting) {
-            logger.debug("Connection already in progress");
-            return;
-        }
-
-        if (this.isConnected && this.ws) {
-            logger.debug("Already connected to Upstox WebSocket");
+        if (this.isConnected) {
+            console.log("⚠️ UpstoxWebSocket: Already connected or connecting");
             return;
         }
 
         this.onUpdate = onUpdate;
-        this.isConnecting = true;
 
         try {
-            // Get token from provider
-            const token = await this.tokenProvider.getToken();
+            console.log("STEP 1: trying to fetch token");
+            const token = await UpstoxService.getSystemToken();
+            if (!token) {
+                console.log("❌ STEP 1 FAIL: No token found");
+                throw new Error("No active Upstox token found");
+            }
+            console.log("STEP 2: token received");
 
-            const url = "wss://api.upstox.com/v2/feed/market-data-feed";
+            console.log("STEP 3: setting ApiClient");
+            // Configure API Client using singleton instance
+            const defaultClient = ApiClient.instance;
+            const OAUTH2 = defaultClient.authentications["OAUTH2"];
+            OAUTH2.accessToken = token;
 
-            logger.info("Connecting to Upstox WebSocket...");
+            console.log("STEP 4: creating streamer");
+            // Initialize Streamer WITH initial subscriptions (required by SDK)
+            // Convert pending subscriptions to array
+            const initialKeys = Array.from(this.subscriptions);
+            const initialMode = "ltpc"; // Start with lightweight mode
+            
+            console.log(`📡 Initializing streamer with ${initialKeys.length} symbols:`, initialKeys);
+            this.streamer = new MarketDataStreamerV3(
+                initialKeys.length > 0 ? initialKeys : ["NSE_EQ|INE002A01018"], // Fallback to dummy symbol if empty
+                initialMode
+            );
 
-            this.ws = new WebSocket(url, {
-                headers: {
-                    "Authorization": `Bearer ${token}`
-                }
-            });
+            console.log("STEP 5: attaching events");
+            // Setup Event Handlers
+            this.streamer.on("open", this.handleOpen.bind(this));
+            this.streamer.on("message", this.handleMessage.bind(this));
+            this.streamer.on("error", this.handleError.bind(this));
+            this.streamer.on("close", this.handleClose.bind(this));
+            
+            // TEMPORARY: Disable Auto Reconnect until token is stable
+            this.streamer.autoReconnect(false);
 
-            this.ws.on('open', this.handleOpen.bind(this));
-            this.ws.on('message', this.handleMessage.bind(this));
-            this.ws.on('error', this.handleError.bind(this));
-            this.ws.on('close', this.handleClose.bind(this));
+            console.log("STEP 6: calling connect()");
+            logger.info("Starting Upstox SDK Streamer V3...");
+            this.streamer.connect();
 
-        } catch (error) {
-            this.isConnecting = false;
-            logger.error({ err: error }, "Failed to initiate WebSocket connection");
-            this.scheduleReconnect();
+        } catch (error: any) {
+            console.log("❌ STEP FAIL:", error.message);
+            logger.error({ err: error.message }, "Failed to start Upstox Streamer");
         }
     }
 
     /**
      * Subscribe to instruments
-     * @param instrumentKeys Array of instrument keys (e.g., "NSE_EQ|RELIANCE")
      */
     subscribe(instrumentKeys: string[]): void {
         instrumentKeys.forEach(key => this.subscriptions.add(key));
 
-        if (this.isConnected && this.ws) {
-            this.sendSubscription(instrumentKeys);
+        if (this.isConnected && this.streamer) {
+            console.log(`📡 SUB: Subscribing to ${instrumentKeys.join(', ')} (ltpc)`);
+            this.streamer.subscribe(instrumentKeys, "ltpc");
+            logger.info({ count: instrumentKeys.length }, "Subscribed via SDK");
         }
     }
 
     /**
-     * Unsubscribe from instruments
+     * Unsubscribe
      */
     unsubscribe(instrumentKeys: string[]): void {
         instrumentKeys.forEach(key => this.subscriptions.delete(key));
 
-        if (this.isConnected && this.ws) {
-            const payload = {
-                guid: this.generateGuid(),
-                method: "unsub",
-                data: {
-                    instrumentKeys: instrumentKeys
-                }
-            };
-            this.ws.send(JSON.stringify(payload));
-            logger.info({ count: instrumentKeys.length }, "Unsubscribed from instruments");
+        if (this.isConnected && this.streamer) {
+            console.log(`📡 UNSUB: Unsubscribing from ${instrumentKeys.join(', ')}`);
+            this.streamer.unsubscribe(instrumentKeys);
         }
     }
 
     /**
-     * Gracefully disconnect
+     * Disconnect
      */
     disconnect(): void {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = null;
+        if (this.streamer) {
+            console.log("🔴 DISCONNECT CALLED");
+            this.streamer.disconnect();
+            this.streamer = null;
         }
-
-        if (this.ws) {
-            this.ws.close();
-            this.ws = null;
-        }
-
         this.isConnected = false;
-        this.isConnecting = false;
-        this.reconnectAttempts = 0;
-        logger.info("Upstox WebSocket disconnected");
-    }
-
-    /**
-     * Check if connected
-     */
-    get connected(): boolean {
-        return this.isConnected;
+        logger.info("Upstox Streamer stopped");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Private Methods
+    // Event Handlers
     // ─────────────────────────────────────────────────────────────────────────
 
     private handleOpen(): void {
         this.isConnected = true;
-        this.isConnecting = false;
-        this.reconnectAttempts = 0;
-        logger.info("Upstox WebSocket connected");
+        console.log("🟢 WS OPEN EVENT FIRED");
 
-        // Resubscribe to existing subscriptions
-        if (this.subscriptions.size > 0) {
-            this.sendSubscription(Array.from(this.subscriptions));
+        // ─────────────────────────────────────────────────────────────────
+        // 🛠️ HACK: Inject pre-loaded Protobuf root into SDK feeder
+        // The internal feeder is only available AFTER connect(), so we patch here.
+        // ─────────────────────────────────────────────────────────────────
+        const feeder = (this.streamer as any)?.streamer;
+        if (feeder && protobufRoot) {
+            feeder.protobufRoot = protobufRoot;
+            console.log("✅ HACK: Protobuf root injected into SDK feeder.");
+        } else {
+            console.error("❌ HACK FAIL: Could not inject protobufRoot. Feeder:", !!feeder, "Root:", !!protobufRoot);
         }
+        // ─────────────────────────────────────────────────────────────────
+        
+        logger.info("Upstox SDK Streamer Connected");
+
+        // Note: Symbols passed to constructor are auto-subscribed on connect
+        // Only subscribe to additional symbols added after connection
+        // For now, we pass all symbols to constructor, so no need to resubscribe here
     }
 
-    private handleMessage(data: Buffer): void {
+    private handleMessage(data: any): void {
+        let decoded: any = null;
+
         try {
-            // Upstox sends binary Protobuf or JSON
-            // Assuming JSON for this implementation
-            const message = JSON.parse(data.toString());
+            // Case 1: Native Buffer
+            if (Buffer.isBuffer(data)) {
+                decoded = JSON.parse(data.toString("utf-8"));
+            }
+            // Case 2: { type: "Buffer", data: [...] } (Serialized Buffer)
+            else if (data?.type === "Buffer" && Array.isArray(data.data)) {
+                decoded = JSON.parse(Buffer.from(data.data).toString("utf-8"));
+            }
+            // Already decoded object
+            else {
+                decoded = data;
+            }
+
+            console.log("📩 TICK:", JSON.stringify(decoded, null, 2));
 
             if (this.onUpdate) {
-                this.onUpdate(message);
+                this.onUpdate(decoded);
             }
-        } catch {
-            // Binary data or invalid JSON - ignore silently in production
-            // Could be protobuf which needs special handling
+        } catch (err) {
+            console.error("❌ Decode failed:", err, "Data:", JSON.stringify(data).slice(0, 100));
         }
     }
 
-    private handleError(error: Error): void {
-        logger.error({ err: error }, "Upstox WebSocket error");
+    private handleError(error: any): void {
+        console.log("❌ ERROR:", JSON.stringify(error));
+        logger.error({ err: error }, "Upstox Streamer Error");
     }
 
-    private handleClose(code: number, reason: Buffer): void {
+    private handleClose(): void {
         this.isConnected = false;
-        this.isConnecting = false;
-        logger.warn({ code, reason: reason.toString() }, "Upstox WebSocket disconnected");
-        this.scheduleReconnect();
-    }
-
-    /**
-     * Schedule reconnection with exponential backoff
-     */
-    private scheduleReconnect(): void {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-        }
-
-        if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            logger.error(
-                { attempts: this.reconnectAttempts },
-                "Max reconnection attempts reached. Giving up."
-            );
-            return;
-        }
-
-        // Exponential backoff with jitter
-        const delay = Math.min(
-            BASE_RECONNECT_DELAY_MS * Math.pow(2, this.reconnectAttempts) + Math.random() * 1000,
-            MAX_RECONNECT_DELAY_MS
-        );
-
-        this.reconnectAttempts++;
-
-        logger.info(
-            { delay: Math.round(delay), attempt: this.reconnectAttempts },
-            "Scheduling WebSocket reconnect"
-        );
-
-        this.reconnectTimer = setTimeout(() => {
-            if (this.onUpdate) {
-                this.connect(this.onUpdate);
-            }
-        }, delay);
-    }
-
-    /**
-     * Send subscription request to WebSocket
-     */
-    private sendSubscription(instrumentKeys: string[]): void {
-        if (!this.ws || !this.isConnected) return;
-
-        const payload = {
-            guid: this.generateGuid(),
-            method: "sub",
-            data: {
-                mode: "full",
-                instrumentKeys: instrumentKeys
-            }
-        };
-
-        this.ws.send(JSON.stringify(payload));
-        logger.info({ count: instrumentKeys.length }, "Subscribed to instruments");
-    }
-
-    /**
-     * Generate a unique GUID for requests
-     */
-    private generateGuid(): string {
-        return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+        console.log("🔴 CLOSE");
+        logger.info("Upstox Streamer Disconnected");
     }
 }

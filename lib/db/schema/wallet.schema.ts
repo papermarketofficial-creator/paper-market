@@ -15,7 +15,7 @@ export const transactionTypeEnum = pgEnum('transaction_type', [
 // Invariant: wallets.balance MUST always equal SUM(transactions) for that wallet
 export const wallets = pgTable('wallets', {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('userId').notNull().references(() => users.id, { onDelete: 'cascade' }).unique(),
+    userId: text('userId').notNull().references(() => users.id, { onDelete: 'cascade' }).unique(),
     balance: decimal('balance', { precision: 15, scale: 2 }).notNull().default('1000000.00'), // ₹10L starting balance
     blockedBalance: decimal('blockedBalance', { precision: 15, scale: 2 }).notNull().default('0.00'),
     currency: varchar('currency', { length: 3 }).notNull().default('INR'),
@@ -28,7 +28,7 @@ export const wallets = pgTable('wallets', {
 // Design: Append-only ledger. Never update or delete. Balance is derived from this.
 export const transactions = pgTable('transactions', {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('userId').notNull().references(() => users.id),
+    userId: text('userId').notNull().references(() => users.id),
     walletId: uuid('walletId').notNull().references(() => wallets.id),
     type: transactionTypeEnum('type').notNull(),
     amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),

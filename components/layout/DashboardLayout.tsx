@@ -38,7 +38,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
       <div className={cn('flex flex-col min-h-screen', 'lg:pl-64')}>
         <Topbar onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)} />
         
-        <main className="flex-1 p-4 lg:p-6">
+        <main className="flex-1">
           {children}
         </main>
 

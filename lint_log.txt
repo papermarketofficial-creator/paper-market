@@ -1,0 +1,90 @@
+
+> paper-market-pro@1.0.0 lint
+> eslint .
+
+
+C:\Users\Legion\Desktop\Paper-pro-market\components\trade\search\GlobalSearchModal.tsx
+  192:0  error  Parsing error: ')' expected
+
+C:\Users\Legion\Desktop\Paper-pro-market\hooks\use-market-simulation.ts
+  30:6  warning  React Hook useEffect has a missing dependency: 'positions'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Legion\Desktop\Paper-pro-market\hooks\use-market-stream.ts
+  101:8   warning  React Hook useEffect has missing dependencies: 'positions' and 'stocks'. Either include them or remove the dependency array               react-hooks/exhaustive-deps
+  101:86  warning  React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked  react-hooks/exhaustive-deps
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\_trash\find-config-export.cjs
+   1:13  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+   1:13  error  'require' is not defined                 no-undef
+   4:1   error  'console' is not defined                 no-undef
+   6:1   error  'console' is not defined                 no-undef
+   8:3   error  'console' is not defined                 no-undef
+  17:3   error  'console' is not defined                 no-undef
+  19:3   error  'console' is not defined                 no-undef
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\_trash\find-reconnect-method.cjs
+   1:13  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+   1:13  error  'require' is not defined                 no-undef
+   4:3   error  'console' is not defined                 no-undef
+   5:3   error  'console' is not defined                 no-undef
+  11:3   error  'console' is not defined                 no-undef
+  13:3   error  'console' is not defined                 no-undef
+  14:3   error  'console' is not defined                 no-undef
+  16:3   error  'console' is not defined                 no-undef
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\_trash\inspect-sdk-2.cjs
+  1:13  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  1:13  error  'require' is not defined                 no-undef
+  2:1   error  'console' is not defined                 no-undef
+  3:1   error  'console' is not defined                 no-undef
+  4:1   error  'console' is not defined                 no-undef
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\_trash\inspect-sdk.cjs
+  1:13  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  1:13  error  'require' is not defined                 no-undef
+  2:1   error  'console' is not defined                 no-undef
+  3:1   error  'console' is not defined                 no-undef
+  4:1   error  'console' is not defined                 no-undef
+  5:1   error  'console' is not defined                 no-undef
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\_trash\test-instance.cjs
+  1:13  error  A `require()` style import is forbidden        @typescript-eslint/no-require-imports
+  1:13  error  'require' is not defined                       no-undef
+  2:1   error  'console' is not defined                       no-undef
+  4:9   error  'streamer' is assigned a value but never used  @typescript-eslint/no-unused-vars
+  5:3   error  'console' is not defined                       no-undef
+  7:3   error  'console' is not defined                       no-undef
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\_trash\verify-pnl.ts
+  52:9  error  'instrument' is never reassigned. Use 'const' instead  prefer-const
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\_trash\verify-token-api.cjs
+   1:27  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+   1:27  error  'require' is not defined                 no-undef
+   2:15  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+   2:15  error  'require' is not defined                 no-undef
+   5:3   error  'console' is not defined                 no-undef
+   9:5   error  'console' is not defined                 no-undef
+  10:5   error  'process' is not defined                 no-undef
+  13:3   error  'console' is not defined                 no-undef
+  23:7   error  'console' is not defined                 no-undef
+  24:7   error  'console' is not defined                 no-undef
+  25:7   error  'console' is not defined                 no-undef
+  27:7   error  'console' is not defined                 no-undef
+  28:7   error  'console' is not defined                 no-undef
+  32:7   error  'console' is not defined                 no-undef
+  35:7   error  'console' is not defined                 no-undef
+  37:7   error  'console' is not defined                 no-undef
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\_trash\verify-trading-core.ts
+  84:9  error  'instrument' is never reassigned. Use 'const' instead  prefer-const
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\export-db-dump.ts
+  17:7  error  Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free  @typescript-eslint/ban-ts-comment
+
+C:\Users\Legion\Desktop\Paper-pro-market\scripts\export-db-json.ts
+  38:7  error  Use "@ts-expect-error" instead of "@ts-ignore", as "@ts-ignore" will do nothing if the following line is error-free  @typescript-eslint/ban-ts-comment
+
+✖ 56 problems (53 errors, 3 warnings)
+  2 errors and 0 warnings potentially fixable with the `--fix` option.
+

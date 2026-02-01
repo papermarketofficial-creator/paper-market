@@ -1,9 +1,4 @@
-import { config } from 'dotenv';
-import path from 'path';
-
-// Load env files from root directory
-config({ path: path.resolve(process.cwd(), '.env') });
-config({ path: path.resolve(process.cwd(), '.env.local') });
+import 'dotenv/config';
 
 import { db } from "@/lib/db";
 import { wallets } from "@/lib/db/schema";

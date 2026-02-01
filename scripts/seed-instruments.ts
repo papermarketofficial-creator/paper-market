@@ -3,33 +3,93 @@ import dotenv from "dotenv";
 dotenv.config({ path: ".env.local" });
 
 import { InstrumentService } from "@/services/instrument.service";
+import { UpstoxService } from "@/services/upstox.service";
 import { logger } from "@/lib/logger";
 import type { NewInstrument } from "@/lib/db/schema";
+import { TRADING_UNIVERSE } from "@/lib/trading-universe";
 
 /**
- * Seed instruments from Upstox master instruments file.
+ * Seed instruments from Trading Universe configuration.
  * 
- * Upstox provides a daily updated CSV file with all instruments.
- * URL: https://assets.upstox.com/market-quote/instruments/exchange/complete.csv.gz
- * 
- * For this demo, we'll create mock instruments for testing.
- * In production, you would download and parse the actual CSV.
+ * This script:
+ * 1. Reads symbols from TRADING_UNIVERSE
+ * 2. Fetches instrument details from Upstox API
+ * 3. Inserts them into the database
  */
 
 async function seedInstruments() {
     try {
-        logger.info("Starting instruments seeding...");
+        logger.info("Starting instruments seeding from Trading Universe...");
 
-        // Mock instruments for testing
-        // In production, download from: https://assets.upstox.com/market-quote/instruments/exchange/complete.csv.gz
-        const mockInstruments: NewInstrument[] = [
-            // NIFTY Index
+        const instruments: NewInstrument[] = [];
+        const allSymbols = [...TRADING_UNIVERSE.equities];
+        
+        logger.info({ count: allSymbols.length }, "Symbols to fetch from Trading Universe");
+
+        // Fetch instrument details from Upstox for each symbol
+        // Note: This requires a valid Upstox token
+        for (const symbol of allSymbols) {
+            try {
+                logger.info({ symbol }, "Fetching instrument details...");
+                
+                // Search for the instrument using Upstox API
+                const searchResults = await UpstoxService.searchInstruments(symbol, "equity");
+                
+                if (searchResults.length === 0) {
+                    logger.warn({ symbol }, "No instrument found, skipping");
+                    continue;
+                }
+
+                // Find exact match (prefer NSE_EQ)
+                const match = searchResults.find(
+                    (r: any) => 
+                        r.tradingsymbol === symbol && 
+                        r.exchange === "NSE" && 
+                        r.segment === "NSE_EQ"
+                ) || searchResults[0];
+
+                if (!match) {
+                    logger.warn({ symbol }, "No NSE_EQ match found, skipping");
+                    continue;
+                }
+
+                // Create instrument record
+                const instrument: NewInstrument = {
+                    instrumentToken: match.instrument_key || `NSE_EQ|${symbol}`,
+                    exchangeToken: match.exchange_token || symbol,
+                    tradingsymbol: symbol,
+                    name: match.name || symbol,
+                    lastPrice: "0",
+                    expiry: null,
+                    strike: null,
+                    tickSize: "0.05",
+                    lotSize: match.lot_size || 1,
+                    instrumentType: "EQUITY",
+                    segment: "NSE_EQ",
+                    exchange: "NSE",
+                    isActive: true,
+                };
+
+                instruments.push(instrument);
+                logger.info({ symbol, instrumentToken: instrument.instrumentToken }, "✓ Instrument prepared");
+
+                // Rate limiting: wait 100ms between API calls
+                await new Promise(resolve => setTimeout(resolve, 100));
+            } catch (error) {
+                logger.error({ err: error, symbol }, "Failed to fetch instrument, skipping");
+                continue;
+            }
+        }
+
+        // Also add indices
+        logger.info("Adding indices...");
+        const indexInstruments: NewInstrument[] = [
             {
                 instrumentToken: "NSE_INDEX|Nifty 50",
                 exchangeToken: "Nifty 50",
-                tradingsymbol: "NIFTY",
+                tradingsymbol: "NIFTY 50",
                 name: "NIFTY 50",
-                lastPrice: "21500.00",
+                lastPrice: "0",
                 expiry: null,
                 strike: null,
                 tickSize: "0.05",
@@ -39,158 +99,49 @@ async function seedInstruments() {
                 exchange: "NSE",
                 isActive: true,
             },
-            // NIFTY Futures
             {
-                instrumentToken: "NSE_FO|NIFTY24FEB",
-                exchangeToken: "NIFTY24FEB",
-                tradingsymbol: "NIFTY24FEB",
-                name: "NIFTY FEB 2024 FUT",
-                lastPrice: "21550.00",
-                expiry: new Date("2024-02-29"),
-                strike: null,
-                tickSize: "0.05",
-                lotSize: 50,
-                instrumentType: "FUTURE",
-                segment: "NSE_FO",
-                exchange: "NSE",
-                isActive: true,
-            },
-            // NIFTY Call Options
-            {
-                instrumentToken: "NSE_FO|NIFTY24FEB21500CE",
-                exchangeToken: "NIFTY24FEB21500CE",
-                tradingsymbol: "NIFTY24FEB21500CE",
-                name: "NIFTY FEB 21500 CE",
-                lastPrice: "120.50",
-                expiry: new Date("2024-02-29"),
-                strike: "21500.00",
-                tickSize: "0.05",
-                lotSize: 50,
-                instrumentType: "OPTION",
-                segment: "NSE_FO",
-                exchange: "NSE",
-                isActive: true,
-            },
-            {
-                instrumentToken: "NSE_FO|NIFTY24FEB21600CE",
-                exchangeToken: "NIFTY24FEB21600CE",
-                tradingsymbol: "NIFTY24FEB21600CE",
-                name: "NIFTY FEB 21600 CE",
-                lastPrice: "85.25",
-                expiry: new Date("2024-02-29"),
-                strike: "21600.00",
-                tickSize: "0.05",
-                lotSize: 50,
-                instrumentType: "OPTION",
-                segment: "NSE_FO",
-                exchange: "NSE",
-                isActive: true,
-            },
-            // NIFTY Put Options
-            {
-                instrumentToken: "NSE_FO|NIFTY24FEB21500PE",
-                exchangeToken: "NIFTY24FEB21500PE",
-                tradingsymbol: "NIFTY24FEB21500PE",
-                name: "NIFTY FEB 21500 PE",
-                lastPrice: "98.75",
-                expiry: new Date("2024-02-29"),
-                strike: "21500.00",
-                tickSize: "0.05",
-                lotSize: 50,
-                instrumentType: "OPTION",
-                segment: "NSE_FO",
-                exchange: "NSE",
-                isActive: true,
-            },
-            {
-                instrumentToken: "NSE_FO|NIFTY24FEB21400PE",
-                exchangeToken: "NIFTY24FEB21400PE",
-                tradingsymbol: "NIFTY24FEB21400PE",
-                name: "NIFTY FEB 21400 PE",
-                lastPrice: "65.50",
-                expiry: new Date("2024-02-29"),
-                strike: "21400.00",
-                tickSize: "0.05",
-                lotSize: 50,
-                instrumentType: "OPTION",
-                segment: "NSE_FO",
-                exchange: "NSE",
-                isActive: true,
-            },
-            // Equity stocks
-            {
-                instrumentToken: "NSE_EQ|RELIANCE",
-                exchangeToken: "RELIANCE",
-                tradingsymbol: "RELIANCE",
-                name: "Reliance Industries Ltd",
-                lastPrice: "2456.30",
+                instrumentToken: "NSE_INDEX|Nifty Bank",
+                exchangeToken: "Nifty Bank",
+                tradingsymbol: "NIFTY BANK",
+                name: "NIFTY BANK",
+                lastPrice: "0",
                 expiry: null,
                 strike: null,
                 tickSize: "0.05",
-                lotSize: 1,
-                instrumentType: "EQUITY",
+                lotSize: 25,
+                instrumentType: "INDEX",
                 segment: "NSE_EQ",
                 exchange: "NSE",
                 isActive: true,
             },
             {
-                instrumentToken: "NSE_EQ|TCS",
-                exchangeToken: "TCS",
-                tradingsymbol: "TCS",
-                name: "Tata Consultancy Services Ltd",
-                lastPrice: "3678.90",
+                instrumentToken: "NSE_INDEX|Nifty Fin Service",
+                exchangeToken: "Nifty Fin Service",
+                tradingsymbol: "NIFTY FIN SERVICE",
+                name: "NIFTY FIN SERVICE",
+                lastPrice: "0",
                 expiry: null,
                 strike: null,
                 tickSize: "0.05",
-                lotSize: 1,
-                instrumentType: "EQUITY",
-                segment: "NSE_EQ",
-                exchange: "NSE",
-                isActive: true,
-            },
-            {
-                instrumentToken: "NSE_EQ|INFY",
-                exchangeToken: "INFY",
-                tradingsymbol: "INFY",
-                name: "Infosys Ltd",
-                lastPrice: "1543.25",
-                expiry: null,
-                strike: null,
-                tickSize: "0.05",
-                lotSize: 1,
-                instrumentType: "EQUITY",
-                segment: "NSE_EQ",
-                exchange: "NSE",
-                isActive: true,
-            },
-            {
-                instrumentToken: "NSE_EQ|HDFCBANK",
-                exchangeToken: "HDFCBANK",
-                tradingsymbol: "HDFCBANK",
-                name: "HDFC Bank Ltd",
-                lastPrice: "1632.45",
-                expiry: null,
-                strike: null,
-                tickSize: "0.05",
-                lotSize: 1,
-                instrumentType: "EQUITY",
+                lotSize: 40,
+                instrumentType: "INDEX",
                 segment: "NSE_EQ",
                 exchange: "NSE",
                 isActive: true,
             },
         ];
 
-        logger.info({ count: mockInstruments.length }, "Inserting instruments...");
+        instruments.push(...indexInstruments);
+
+        logger.info({ count: instruments.length }, "Inserting instruments into database...");
 
         // Use InstrumentService to bulk insert
-        const result = await InstrumentService.bulkUpsert(mockInstruments);
+        const result = await InstrumentService.bulkUpsert(instruments);
 
         logger.info({ count: result.count }, "✓ Instruments seeded successfully!");
+        logger.info({ total: instruments.length, success: result.count }, "Seeding summary");
 
-        logger.info("Seeding complete. You can now:");
-        logger.info("1. Start the jobs: npx tsx --env-file=.env.local scripts/start-jobs.ts");
-        logger.info("2. Place orders via API");
-        logger.info("3. Watch orders execute automatically");
+        logger.info("Seeding complete. The RealTimeMarketService will now load these instruments dynamically.");
 
         process.exit(0);
     } catch (error) {

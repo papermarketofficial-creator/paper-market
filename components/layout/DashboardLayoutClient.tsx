@@ -49,7 +49,7 @@ function DashboardContentWrapper({ children }: { children: ReactNode }) {
       <div className="flex-1 flex flex-col md:ml-16 transition-all duration-300">
         <MarketStatusBar />
 
-        <main className="flex-1 p-4 md:p-6 overflow-x-hidden w-full max-w-full">
+        <main className="flex-1  overflow-x-hidden w-full max-w-full">
           {children}
         </main>
       </div>

@@ -55,6 +55,7 @@
     "framer-motion": "^12.23.26",
     "input-otp": "^1.4.2",
     "lightweight-charts": "^5.1.0",
+    "lru-cache": "^11.2.5",
     "lucide-react": "^0.462.0",
     "next-auth": "^5.0.0-beta.30",
     "next-themes": "^0.3.0",
@@ -70,6 +71,7 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "technicalindicators": "^3.1.0",
+    "upstox-js-sdk": "^2.21.0",
     "uuid": "^13.0.0",
     "vaul": "^0.9.9",
     "zod": "^3.25.76",
@@ -86,6 +88,7 @@
     "@types/react-dom": "^18.3.7",
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.21",
+    "bufferutil": "^4.1.0",
     "eslint": "^9.32.0",
     "eslint-config-next": "^16.1.4",
     "eslint-plugin-react-hooks": "^5.2.0",
@@ -98,6 +101,7 @@
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
+    "utf-8-validate": "^6.0.6",
     "ws": "^8.19.0"
   }
 }

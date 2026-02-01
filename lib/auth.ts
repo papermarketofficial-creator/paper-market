@@ -7,7 +7,7 @@ import { LoginSchema } from "@/lib/validation/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+const { handlers, auth: nextAuth, signIn, signOut } = NextAuth({
     ...authConfig,
     providers: [
         ...authConfig.providers,
@@ -64,5 +64,38 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             }
             return true;
         },
+        async jwt({ token, user, trigger, session }) {
+            // console.log("🔒 JWT Callback Triggered. Email:", token.email);
+            if (token.email) {
+                const [dbUser] = await db
+                    .select()
+                    .from(users)
+                    .where(eq(users.email, token.email))
+                    .limit(1);
+                
+                if (dbUser) {
+                    // console.log("✅ Found DB User for JWT. ID:", dbUser.id);
+                    token.sub = dbUser.id;
+                } else {
+                    console.log("❌ No DB User found for email:", token.email);
+                }
+            }
+            return token;
+        },
     },
 });
+
+export const auth = async () => {
+    // 🧪 Test Mode Bypass
+    if (process.env.TEST_MODE === "true" && process.env.NODE_ENV !== "production") {
+        return {
+            user: {
+                id: process.env.TEST_USER_ID || "mock-user-id",
+                email: "test@example.com",
+            }
+        };
+    }
+    return nextAuth();
+};
+
+export { handlers, signIn, signOut };

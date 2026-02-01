@@ -1,19 +1,24 @@
 import { db } from "@/lib/db";
 import { instruments, InstrumentType } from "@/lib/db/schema";
-import { ilike, or, and, eq, desc } from "drizzle-orm";
+import { ilike, or, and, eq, desc, inArray } from "drizzle-orm";
 import { InstrumentSearchInput } from "@/lib/validation/search";
+import { TRADING_UNIVERSE } from "@/lib/trading-universe";
 
 export class SearchService {
     static async searchInstruments(input: InstrumentSearchInput) {
         const { q, type, limit } = input;
         const searchTerm = `%${q}%`;
 
+        // Combine all allowed names
+        const allowedNames = [...TRADING_UNIVERSE.indices, ...TRADING_UNIVERSE.equities];
+
         const whereConditions = [
             or(
                 ilike(instruments.tradingsymbol, searchTerm),
                 ilike(instruments.name, searchTerm)
             ),
-            eq(instruments.isActive, true)
+            eq(instruments.isActive, true),
+            inArray(instruments.name, allowedNames) // Enforce Universe
         ];
 
         if (type) {

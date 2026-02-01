@@ -25,6 +25,7 @@ interface BaseChartProps {
   autoResize?: boolean;
   symbol: string;
   onChartReady?: (api: IChartApi) => void;
+  onLoadMore?: () => void; // ✅ New Prop
 }
 
 export interface BaseChartRef {
@@ -39,13 +40,15 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   height = 400,
   autoResize = true,
   symbol,
-  onChartReady
+  onChartReady,
+  onLoadMore 
 }, ref) => {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<any>[]>>(new Map()); // Map ID to Array of Series
+  const isFetchingRef = useRef(false); // Throttle
 
   // State to force re-render when chart is ready
   const [chartInstance, setChartInstance] = useState<IChartApi | null>(null);
@@ -59,7 +62,6 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   // Helper: Detect if pane needed
   const hasMacd = indicators.some(i => i.config.type === 'MACD');
 
-  // 1. Initialize Chart
   // 1. Initialize Chart (Mount Only)
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -75,8 +77,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         textColor: '#9CA3AF',
       },
       grid: {
-        vertLines: { color: 'rgba(31, 41, 55, 0.5)' },
-        horzLines: { color: 'rgba(31, 41, 55, 0.5)' },
+        vertLines: { color: 'rgba(31, 41, 55, 0.5)', style: 2 }, // Dashed
+        horzLines: { color: 'rgba(31, 41, 55, 0.5)', style: 2 },
       },
       width: width,
       height: initialHeight,
@@ -93,12 +95,24 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     });
 
     const candlestickSeriesInstance = chart.addSeries(CandlestickSeries, {
-      upColor: '#22C55E',
-      downColor: '#EF4444',
-      borderUpColor: '#22C55E',
-      borderDownColor: '#EF4444',
-      wickUpColor: '#22C55E',
-      wickDownColor: '#EF4444',
+      upColor: '#089981',   // ✅ Matte Green
+      downColor: '#F23645', // ✅ Matte Red
+      borderUpColor: '#089981',
+      borderDownColor: '#F23645',
+      wickUpColor: '#089981',
+      wickDownColor: '#F23645',
+    });
+
+    // Infinite Scroll Monitor
+    chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+        if (range && range.from < 5 && !isFetchingRef.current) {
+             if (onLoadMore) {
+                 // Throttle locally to prevent spam
+                 isFetchingRef.current = true;
+                 onLoadMore();
+                 setTimeout(() => isFetchingRef.current = false, 2000); // 2s cooldown
+             }
+        }
     });
 
     chartRef.current = chart;
@@ -113,7 +127,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       chart.remove();
       chartRef.current = null;
     };
-  }, [height, onChartReady]); // Run once on mount, height handled by separate effect
+  }, [height, onChartReady, onLoadMore]);
+ // Run once on mount, height handled by separate effect
 
   // 1.5 Handle Resize with ResizeObserver
   useEffect(() => {

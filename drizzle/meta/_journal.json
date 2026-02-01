@@ -15,6 +15,13 @@
       "when": 1769160274949,
       "tag": "0001_fast_joshua_kane",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1769769889354,
+      "tag": "0002_spooky_dragon_lord",
+      "breakpoints": true
     }
   ]
 }

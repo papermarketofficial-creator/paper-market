@@ -7,6 +7,7 @@
  * Usage: npx tsx scripts/verify-trading-core.ts
  */
 
+import 'dotenv/config';
 import { db } from "@/lib/db";
 import { users, wallets, orders, trades, positions, instruments } from "@/lib/db/schema";
 import { OrderService } from "@/services/order.service";
@@ -65,8 +66,8 @@ async function main() {
     console.log("✅ Wallet reset to 10,00,000");
 
     // Clear previous test data
-    await db.delete(orders).where(eq(orders.userId, userId));
     await db.delete(trades).where(eq(trades.userId, userId));
+    await db.delete(orders).where(eq(orders.userId, userId));
     await db.delete(positions).where(eq(positions.userId, userId));
     console.log("✅ Previous test data cleared");
 

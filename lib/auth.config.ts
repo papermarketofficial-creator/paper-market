@@ -58,10 +58,22 @@ export const authConfig = {
             }
             return session;
         },
-        async jwt({ token, user }) {
+        async jwt({ token, user, profile }) {
+            // Initial sign in
             if (user) {
-                token.sub = user.id;
+                // If we have a user object, it might come from the 'authorize' credential flow
+                // OR it might be the initial Google object. 
+                // We need to ensure we have the DB ID.
+                token.sub = user.id; 
             }
+            
+            // For subsequent requests, or if user.id was the Google ID, we should ensure we have the DB ID.
+            // But we can't easily access DB here in edge-compatible auth.config.ts?
+            // Wait, auth.config.ts is for edge, but we are running Node.js.
+            // Actually, we must allow DB access here or we have a problem.
+            // 
+            // Better approach: In `auth.ts` (which is node-only), we can override the jwt callback?
+            // No, `auth.ts` spreads `...authConfig`.
             return token;
         },
     },

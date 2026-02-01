@@ -11,8 +11,10 @@ export async function POST(req: NextRequest) {
     try {
         const session = await auth();
         if (!session?.user?.id) {
+            console.warn("⚠️ Order Route: No Session ID found");
             throw new ApiError("Unauthorized", 401, "UNAUTHORIZED");
         }
+        console.log("📝 Order Request from UserID:", session.user.id);
 
         const body = await req.json();
         const validated = PlaceOrderSchema.parse(body);

@@ -7,7 +7,6 @@ import {
     MarketIntegrationError
 } from "./types";
 import { UpstoxProvider } from "./upstox/provider";
-import { TrueDataProvider } from "./truedata/provider";
 
 /**
  * MarketGateway
@@ -17,11 +16,11 @@ import { TrueDataProvider } from "./truedata/provider";
 class MarketGatewayImpl implements IMarketDataSource {
     private static instance: MarketGatewayImpl;
     private upstox: UpstoxProvider;
-    private truedata: TrueDataProvider;
+  
 
     private constructor() {
         this.upstox = new UpstoxProvider();
-        this.truedata = new TrueDataProvider();
+        
     }
 
     public static getInstance(): MarketGatewayImpl {
@@ -63,7 +62,7 @@ class MarketGatewayImpl implements IMarketDataSource {
      */
     public async getOptionChain(symbol: string, expiry: Date): Promise<OptionChain> {
         try {
-            return await this.truedata.getOptionChain(symbol, expiry);
+            return await this.upstox.getOptionChain(symbol, expiry);
         } catch (error) {
             this.handleError(error);
         }

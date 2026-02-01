@@ -7,7 +7,7 @@ import { users } from "./users.schema";
  */
 export const upstoxTokens = pgTable("upstox_tokens", {
     id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
+    userId: text("userId").notNull().references(() => users.id, { onDelete: "cascade" }),
     accessToken: text("accessToken").notNull(),
     // Upstox v2 API does not provide refresh tokens - tokens are valid for 1 day
     // User must re-authenticate daily for live market data

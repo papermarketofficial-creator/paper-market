@@ -1,7 +1,6 @@
 
 // Must define this BEFORE importing anything that uses process.env
-import * as dotenv from "dotenv";
-dotenv.config({ path: ".env.local" });
+import 'dotenv/config';
 // Mock AUTH_SECRET to bypass config validation
 if (!process.env.AUTH_SECRET) process.env.AUTH_SECRET = "mock_secret_for_reset_only";
 

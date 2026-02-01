@@ -69,19 +69,6 @@ export const positions = pgTable('positions', {
     };
 });
 
-export const idempotencyKeys = pgTable('idempotency_keys', {
-    key: text('key').notNull(),
-    orderId: uuid('orderId').notNull().references(() => orders.id),
-    userId: text('userId').notNull().references(() => users.id),
-    createdAt: timestamp('createdAt').defaultNow().notNull(),
-    expiresAt: timestamp('expiresAt').notNull(),
-}, (t) => {
-    return {
-        userKeyUnique: uniqueIndex('idempotency_keys_userId_key_unique').on(t.userId, t.key),
-        expiresAfterCreated: check('idempotency_keys_expires_after_created', sql`${t.expiresAt} > ${t.createdAt}`),
-    };
-});
-
 export type Order = InferSelectModel<typeof orders>;
 export type NewOrder = InferInsertModel<typeof orders>;
 
@@ -91,5 +78,4 @@ export type NewTrade = InferInsertModel<typeof trades>;
 export type Position = InferSelectModel<typeof positions>;
 export type NewPosition = InferInsertModel<typeof positions>;
 
-export type IdempotencyKey = InferSelectModel<typeof idempotencyKeys>;
-export type NewIdempotencyKey = InferInsertModel<typeof idempotencyKeys>;
+

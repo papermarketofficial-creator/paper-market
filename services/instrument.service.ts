@@ -2,8 +2,9 @@ import { db } from "@/lib/db";
 import { instruments, type NewInstrument } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { ApiError } from "@/lib/errors";
-import { eq, ilike, and, gte, lte, or, sql } from "drizzle-orm";
+import { eq, ilike, and, gte, lte, or, sql, inArray } from "drizzle-orm";
 import type { InstrumentFilter } from "@/lib/validation/instruments";
+import { TRADING_UNIVERSE } from "@/lib/trading-universe";
 
 export class InstrumentService {
     /**
@@ -15,14 +16,18 @@ export class InstrumentService {
             if (!query || query.trim().length === 0) return [];
 
             const searchTerm = `%${query.trim()}%`;
+            const allowedNames = [...TRADING_UNIVERSE.indices, ...TRADING_UNIVERSE.equities];
 
             const results = await db
                 .select()
                 .from(instruments)
                 .where(
-                    or(
-                        ilike(instruments.tradingsymbol, searchTerm),
-                        ilike(instruments.name, searchTerm)
+                    and(
+                        or(
+                            ilike(instruments.tradingsymbol, searchTerm),
+                            ilike(instruments.name, searchTerm)
+                        ),
+                        inArray(instruments.tradingsymbol, allowedNames) // Enforce Universe (Fixed: use tradingsymbol)
                     )
                 )
                 .limit(20)
@@ -32,6 +37,30 @@ export class InstrumentService {
         } catch (error) {
             logger.error({ err: error, query }, "InstrumentService.search failed");
             throw new ApiError("Failed to search instruments", 500, "SEARCH_FAILED");
+        }
+    }
+
+    /**
+     * Get all active instruments (for watchlist UI)
+     * Returns only EQUITY instruments for development
+     */
+    static async getAll() {
+        try {
+            const results = await db
+                .select()
+                .from(instruments)
+                .where(
+                    and(
+                        eq(instruments.isActive, true),
+                        eq(instruments.instrumentType, 'EQUITY')
+                    )
+                )
+                .orderBy(instruments.tradingsymbol);
+
+            return results;
+        } catch (error) {
+            logger.error({ err: error }, "InstrumentService.getAll failed");
+            throw new ApiError("Failed to fetch instruments", 500, "FETCH_FAILED");
         }
     }
 

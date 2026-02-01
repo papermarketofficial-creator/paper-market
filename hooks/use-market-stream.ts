@@ -1,43 +1,77 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { usePositionsStore } from '@/stores/trading/positions.store';
+import { useMarketStore } from '@/stores/trading/market.store';
 import { toast } from 'sonner';
 
 export const useMarketStream = () => {
     const { updateAllPositionsPrices, positions } = usePositionsStore();
+    const { stocks, updateStockPrice } = useMarketStore();
     const eventSourceRef = useRef<EventSource | null>(null);
     const [isConnected, setIsConnected] = useState(false);
 
-    useEffect(() => {
-        // Collect symbols to subscribe to
-        // For now, we subscribe to everything in our positions list
-        // In real app, we might also include Watchlist symbols
-        const symbols = positions.map(p => p.symbol);
+    const positionSymbolsStr = positions.map(p => p.symbol).sort().join(',');
+    const watchlistSymbolsStr = stocks.map(s => s.symbol).sort().join(',');
+    const simulatedSymbol = useMarketStore.getState().simulatedSymbol;
 
-        if (symbols.length === 0) return;
+    useEffect(() => {
+        // ... previous logic using internal values ...
+        // Note: inside useEffect we should re-derive valid symbols if needed
+        // But here we rely on the effect re-running when the strings change.
+        
+        const { simulatedSymbol: currentSimulatedSymbol, instruments: allInstruments } = useMarketStore.getState();
+
+        // Collect symbols to subscribe to:
+        const positionSymbols = positions.map(p => p.symbol);
+        const watchlistSymbols = stocks.map(s => s.symbol);
+        const activeSymbol = currentSimulatedSymbol ? [currentSimulatedSymbol] : [];
+        
+        const allSymbols = [...new Set([...positionSymbols, ...watchlistSymbols, ...activeSymbol])];
+
+        if (allSymbols.length === 0) return;
 
         // Construct SSE URL with symbols
-        // Example: /api/v1/market/stream?symbols=RELIANCE,INFY
-        const url = `/api/v1/market/stream?symbols=${symbols.join(',')}`;
+        const url = `/api/v1/market/stream?symbols=${allSymbols.join(',')}`;
+        console.log('📡 SSE: Connecting to', url);
 
         const eventSource = new EventSource(url);
         eventSourceRef.current = eventSource;
-
+        
+        // ... (rest of the effect logic is same, just need to close correctly)
         eventSource.onopen = () => {
-            console.log("Market Stream Connected");
-            setIsConnected(true);
+             console.log("✅ Market Stream Connected");
+             setIsConnected(true);
         };
 
         eventSource.onmessage = (event) => {
-            try {
-                // If it's a keep-alive or initial message without JSON
+             // ... existing message handler ...
+             try {
                 if (event.data.startsWith(':')) return;
-
                 const message = JSON.parse(event.data);
+                if (message.type === 'connected') return;
 
                 if (message.type === 'tick') {
                     const quote = message.data;
-                    updateAllPositionsPrices({ [quote.symbol]: quote.price });
+                    let tradingSymbol = quote.symbol;
+
+                    const matchedInstrument = allInstruments.find(i => 
+                        i.instrumentToken === quote.symbol || 
+                        i.instrumentToken?.includes(quote.symbol)
+                    );
+
+                    if (matchedInstrument) {
+                        tradingSymbol = matchedInstrument.tradingsymbol;
+                    }
+
+                    updateAllPositionsPrices({ [tradingSymbol]: quote.price });
+                    updateStockPrice(tradingSymbol, quote.price, quote.close);
+                    
+                    const { updateLiveCandle } = useMarketStore.getState();
+                    updateLiveCandle({
+                        price: quote.price,
+                        volume: quote.volume,
+                        time: Math.floor(Date.now() / 1000)
+                    }, tradingSymbol);
                 }
             } catch (err) {
                 console.error("Failed to parse SSE message", err);
@@ -45,18 +79,22 @@ export const useMarketStream = () => {
         };
 
         eventSource.onerror = (err) => {
-            console.error("Market Stream Error", err);
+            console.error("❌ Market Stream Error", err);
             setIsConnected(false);
             eventSource.close();
-
-            // Basic Reconnect logic (EventSource does generic reconnects, but we might want custom backoff)
         };
 
         return () => {
-            console.log("Closing Market Stream");
+            console.log("🔴 Closing Market Stream");
             eventSource.close();
         };
-    }, [positions.length, updateAllPositionsPrices]); // Re-connect if symbol list changes
+    }, [
+        positionSymbolsStr, 
+        watchlistSymbolsStr, 
+        simulatedSymbol, 
+        updateAllPositionsPrices, 
+        updateStockPrice 
+    ]);
 
     return { isConnected };
 };

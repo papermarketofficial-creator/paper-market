@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
 import dynamic from 'next/dynamic';
 import { CandlestickData, HistogramData, Time } from 'lightweight-charts';
 import { useAnalysisStore } from '@/stores/trading/analysis.store';
@@ -8,7 +8,9 @@ import { SMA, RSI, MACD, EMA, BollingerBands } from 'technicalindicators';
 import { useMarketStore } from '@/stores/trading/market.store';
 import { IndicatorsMenu } from './IndicatorsMenu';
 import { ChartHeader } from './ChartHeader';
+import { ChartOverlayLegend } from './ChartOverlayLegend';
 import { ChartTradingPanel } from './ChartTradingPanel';
+import { ChartLoadingIndicator } from './ChartLoadingIndicator';
 
 // Dynamic imports to avoid SSR issues with LWC
 const BaseChart = dynamic(() => import('./BaseChart').then(mod => mod.BaseChart), { ssr: false });
@@ -16,18 +18,20 @@ const AnalysisOverlay = dynamic(() => import('../analysis/AnalysisOverlay').then
 
 interface ChartContainerProps {
   symbol: string;
+  onSearchClick?: () => void;
 }
 
 // Reuse the generation logic from previous file for now (Phase 1)
 
 
-export function ChartContainer({ symbol }: ChartContainerProps) {
+export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   const {
     isAnalysisMode,
     activeTool,
     getIndicators,
     getDrawings,
-    timeframe // New
+    timeframe, // New
+    range // ✅ Read Range
   } = useAnalysisStore();
 
   const {
@@ -35,7 +39,10 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
     volumeData,
     initializeSimulation,
     startSimulation,
-    stopSimulation
+    stopSimulation,
+    isFetchingHistory, // ✅ Extract
+    fetchMoreHistory,   // ✅ Extract
+    updateLiveCandle    // ✅ Extract for live updates
   } = useMarketStore();
 
   const indicators = getIndicators(symbol);
@@ -45,19 +52,28 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
   const data = historicalData;
   const volData = volumeData;
 
-  // 1. Data Fetching (Simulation)
+  // 1. Data Fetching (Simulation / History)
   useEffect(() => {
     // Reset interaction on symbol change
     useAnalysisStore.getState().cancelDrawing();
-
-    // Initialize Simulation
-    initializeSimulation(symbol, timeframe);
+    stopSimulation();
+    
+    // Fetch History with Range
+    initializeSimulation(symbol, undefined, range); // Pass range
+    
+    // Start Live Updates (No fake simulated ticks, just listening)
     startSimulation();
 
-    return () => {
-      stopSimulation();
-    }
-  }, [symbol, timeframe, initializeSimulation, startSimulation, stopSimulation]); // Reload on timeframe change
+    return () => stopSimulation();
+  }, [symbol, timeframe, range, initializeSimulation, startSimulation, stopSimulation]); // Added range to deps
+
+  // 2. Live Candle Updates (via SSE)
+  // The existing SSE stream (use-market-stream.ts) now calls updateLiveCandle
+  // on each tick, mutating the last candle in real-time (Upstox Pro pattern)
+  useEffect(() => {
+    // No action needed here - SSE hook handles it automatically
+  }, [symbol, updateLiveCandle]);
+ // Reload on timeframe change
 
   // ... (Indicators calc remains same) ...
   // Indictor logic omitted for brevity in replace, only targeting Data Fetching block?
@@ -234,6 +250,14 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
      }
   };
 
+  // Infinite Scroll Handler (Memoized to prevent BaseChart re-creation loop)
+  const handleLoadMore = useCallback(() => {
+    if (historicalData.length === 0) return;
+    const firstCandle = historicalData[0];
+    // Use current range (default 1d)
+    fetchMoreHistory(symbol, range || '1d', firstCandle.time as number);
+  }, [historicalData, symbol, range, fetchMoreHistory]);
+ 
   return (
     <div className="relative w-full h-full group">
       {/* Normal View */}
@@ -248,6 +272,8 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
             onRedo={handleRedo}
             onScreenshot={handleScreenshot}
             onMaximize={handleMaximize}
+            onSearchClick={onSearchClick}
+            isLoading={historicalData.length === 0 || isFetchingHistory}
           />
 
           <div className="flex flex-1 relative min-h-0">
@@ -287,13 +313,29 @@ export function ChartContainer({ symbol }: ChartContainerProps) {
                {/* Trading Panel (Floating - Togglable) */}
                {showTradingPanel && <ChartTradingPanel symbol={symbol} />}
                
+
                {/* Main Chart */}
-               <div className="flex-1 w-full min-h-0">
+               <div className="flex-1 w-full min-h-0 relative">
+                  {/* Loading Overlay */}
+                  {isFetchingHistory && (
+                      <div className="absolute inset-0 z-50 bg-background/50 flex items-center justify-center">
+                          <ChartLoadingIndicator />
+                      </div>
+                  )}
+
+                  {/* Empty State */}
+                  {!isFetchingHistory && historicalData.length === 0 && (
+                      <div className="absolute inset-0 z-40 flex items-center justify-center text-muted-foreground bg-background/50">
+                          No historical data available for {symbol}
+                      </div>
+                  )}
+
                   <BaseChart 
                     {...chartProps} 
                     height={undefined} 
                     symbol={symbol} 
                     onChartReady={setChartApi}
+                    onLoadMore={handleLoadMore} // ✅ Pass Handler
                   />
                </div>
 

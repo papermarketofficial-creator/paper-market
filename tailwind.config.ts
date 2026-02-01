@@ -72,7 +72,7 @@ export default {
           neutral: "hsl(var(--chart-neutral))",
         },
         trade: {
-          buy: "#0ecb81",
+          buy: "#059669", 
           sell: "#f6465d",
           bg: "#0b0e11",
         },

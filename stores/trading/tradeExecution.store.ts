@@ -74,6 +74,11 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
       const data = await res.json();
 
       if (!data.success) {
+        console.error("❌ Place Order API Failed:", data);
+        console.error("❌ Error Details:", data.error);
+        if (data.error?.message) {
+            alert(`Order Failed: ${data.error.message}`); // Temporary alert to force visibility
+        }
         throw new Error(data.error?.message || "Order placement failed");
       }
 
@@ -81,7 +86,8 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
       get().fetchOrders();
 
     } catch (error: any) {
-      console.error("Place Order Error:", error);
+      console.error("🔥 STOCK STORE ERROR:", error);
+      // alert(`Exception: ${error.message}`); // Temporary alert
       throw error;
     }
   },
