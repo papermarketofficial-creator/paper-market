@@ -15,18 +15,15 @@ export async function GET(req: NextRequest) {
 
     const encoder = new TextEncoder();
 
-    // Get requested symbols from query params
-    const searchParams = req.nextUrl.searchParams;
-    const symbols = searchParams.get('symbols')?.split(',') || [];
+    console.log('📡 SSE: New connection request (symbol-agnostic stream)');
 
-    console.log('📡 SSE: New connection request for symbols:', symbols);
-
-    // Subscribe to these symbols in Upstox
-    if (symbols.length > 0) {
-        await realTimeMarketService.initialize();
-        await realTimeMarketService.subscribe(symbols);
-        console.log('✅ SSE: Subscribed to symbols:', symbols);
-    }
+    // 🔥 CRITICAL INSTITUTIONAL RULE: SSE NEVER depends on symbols
+    // Stream is permanent. Symbols are dynamic in supervisor.
+    // Subscriptions happen server-side via:
+    // - watchlist loader
+    // - chart loader  
+    // - positions loader
+    await realTimeMarketService.initialize();
 
     const stream = new ReadableStream({
         start(controller) {
@@ -58,10 +55,10 @@ export async function GET(req: NextRequest) {
             // Subscribe to unified TickBus (receives ticks from all sources)
             tickBus.on('tick', onTick);
 
-            // Keep-alive heartbeat
+            // 🔥 CRITICAL: Send heartbeat for tab sleep detection
             const heartbeat = setInterval(() => {
-                controller.enqueue(encoder.encode(`: keep-alive\n\n`));
-            }, 15000);
+                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`));
+            }, 10000); // Every 10s
 
             // Cleanup on close
             req.signal.addEventListener('abort', () => {

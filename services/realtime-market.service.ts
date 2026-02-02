@@ -8,6 +8,7 @@ import { eq } from "drizzle-orm";
 import { tickBus } from "@/lib/trading/tick-bus";
 import { UpstoxAdapter } from "@/lib/integrations/upstox/upstox-adapter";
 import "@/lib/trading/init-realtime"; // Auto-wire TickBus subscriptions
+import { marketFeedSupervisor } from "@/lib/trading/market-feed-supervisor";
 
 // ═══════════════════════════════════════════════════════════
 // 🛠️ SINGLETON PATTERN: Global declaration for Next.js hot reload
@@ -102,9 +103,21 @@ class RealTimeMarketService extends EventEmitter {
             this.adapter = new UpstoxAdapter(this.reverseIsinMap);
             console.log("✅ UpstoxAdapter initialized with", this.reverseIsinMap.size, "symbols");
             
-            await this.ws.connect(this.handleMarketUpdate.bind(this));
+            // ═══════════════════════════════════════════════════════════
+            // 🔥 CRITICAL: Use MarketFeedSupervisor (institutional-grade)
+            // ═══════════════════════════════════════════════════════════
+            console.log("🔌 Wiring MarketFeedSupervisor to TickBus...");
+            
+            // Wire supervisor ticks to our TickBus
+            marketFeedSupervisor.on('tick', (data: any) => {
+                this.handleMarketUpdate(data);
+            });
+            
+            // Initialize the feed
+            await marketFeedSupervisor.initialize();
+            
             this.initialized = true;
-            logger.info("RealTimeMarketService initialized");
+            logger.info("RealTimeMarketService initialized with MarketFeedSupervisor");
         } catch (error) {
             logger.error({ err: error }, "Failed to initialize RealTimeMarketService");
             throw error;
@@ -128,14 +141,9 @@ class RealTimeMarketService extends EventEmitter {
             const pureSymbol = s.includes("|") ? s.split("|")[1] : s;
             const fullSymbolKey = s.includes("|") ? s : `${this.instrumentPrefix}${s}`;
             
-            // Resolve to ISIN if possible, otherwise use as is
-            // Map keys are like "RELIANCE" -> "INE..." (pure)
-            // or "NSE_EQ|RELIANCE" -> "NSE_EQ|INE..." (full)
-            // Ideally we map pure symbol to full ISIN key
-
-            // Try to find mapped ISIN key
+            // Resolve to ISIN if possible
             const isinKey = this.isinMap.get(pureSymbol) || this.isinMap.get(fullSymbolKey);
-            const finalKey = isinKey || fullSymbolKey; // Fallback to original if no map found (e.g. MCX)
+            const finalKey = isinKey || fullSymbolKey;
 
             if (!this.subscribers.has(finalKey)) {
                 this.subscribers.add(finalKey);
@@ -144,24 +152,17 @@ class RealTimeMarketService extends EventEmitter {
         });
 
         if (keysToSubscribe.length > 0) {
-            console.log(`📡 RealTimeMarketService: Subscribing to ${keysToSubscribe.length} symbols:`, keysToSubscribe);
+            console.log(`📡 RealTimeMarketService: Subscribing to ${keysToSubscribe.length} symbols via MarketFeedSupervisor`);
             
-            // 1. Add to WebSocket subscription queue
-            this.ws.subscribe(keysToSubscribe);
-            logger.info({ count: keysToSubscribe.length, keys: keysToSubscribe }, "Subscribed to new symbols");
-
-            // 2. If WebSocket not connected yet, connect now
-            // This handles the case where initialize() was called with no symbols
-            if (!this.ws['isConnected']) {
-                console.log("🔌 WebSocket not connected - initiating connection now");
-                await this.ws.connect(this.handleMarketUpdate.bind(this));
-            }
-
-            // 3. Seed cache with snapshot (industry-standard pattern)
-            // V3 WebSocket is delta-only, so we need initial prices from REST API
-            this.seedSnapshotPrices(keysToSubscribe);
+            // 🔥 CRITICAL: Delegate to MarketFeedSupervisor
+            // It handles ref-counting, batching, and health monitoring
+            marketFeedSupervisor.subscribe(keysToSubscribe);
         }
     }
+
+    /**
+     * Unsubscribe from instruments
+     */
 
     /**
      * Fetch snapshot prices via REST API and seed the cache

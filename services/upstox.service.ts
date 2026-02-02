@@ -260,15 +260,20 @@ export class UpstoxService {
                 const candles = data.data.candles;
                 
                 // 3. Store in Cache
-                // TTL Logic:
-                // - 1m candles: 1 minute (high churn)
-                // - 30m+ candles: 15 minutes
-                // - Day candles: 1 hour
-                let ttl = 1000 * 60; // Default 1 min
-                if (interval === "day" || interval === "week" || interval === "month") {
-                    ttl = 1000 * 60 * 60; // 1 hour for daily+
-                } else if (parseInt(interval) >= 30) {
-                     ttl = 1000 * 60 * 15; // 15 mins for 30m+
+                // 🔥 INSTITUTIONAL RULE: Historical candles DON'T change
+                // TTL Strategy:
+                // - 1m candles: 5 minutes (balance freshness + reduce API calls)
+                // - 5m-30m: 15 minutes  
+                // - 1h+: 30 minutes
+                // - Daily+: 24 hours (candles are final)
+                let ttl = 1000 * 60 * 5; // Default 5 min for 1m
+                
+if (interval === "day" || interval === "week" || interval === "month") {
+                    ttl = 1000 * 60 * 60 * 24; // 24 hours for daily+ (candles don't change!)
+                } else if (parseInt(interval) >= 60) {
+                    ttl = 1000 * 60 * 30; // 30 mins for hourly
+                } else if (parseInt(interval) >= 5) {
+                      ttl = 1000 * 60 * 15; // 15 mins for 5m-30m
                 }
 
                 cache.set(cacheKey, candles, { ttl } as any);

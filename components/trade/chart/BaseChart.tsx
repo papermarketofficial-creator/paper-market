@@ -194,7 +194,19 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       chartControllerRef.current = null;
       console.log(`🗑️ ChartController destroyed for ${symbol}`);
     };
-  }, [symbol, data]); // Include data to trigger initial load
+  }, [symbol]); // 🔥 CRITICAL FIX: Only depend on symbol, NOT data!
+  // Controller mounts once per symbol, never rebuilds
+  
+  // ═══════════════════════════════════════════════════════════
+  // 🔥 SEPARATE EFFECT: Handle data updates without remounting
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!chartControllerRef.current || !data || data.length === 0) return;
+    
+    // Update chart data via controller (no remount!)
+    chartControllerRef.current.setData(data);
+    console.log(`📊 Chart data updated: ${data.length} candles for ${symbol}`);
+  }, [data, symbol]); // Listen to data changes, update via controller
 
   // 1.5 Handle Resize with ResizeObserver
   useEffect(() => {

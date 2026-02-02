@@ -58,13 +58,30 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     useAnalysisStore.getState().cancelDrawing();
     stopSimulation();
     
+    // 🔥 INSTITUTIONAL PATTERN: Server-side subscription
+    // Subscribe to symbol via API (supervisor manages ref-counting)
+    fetch('/api/v1/market/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols: [symbol] })
+    }).catch(err => console.error('Failed to subscribe:', err));
+    
     // Fetch History with Range
     initializeSimulation(symbol, undefined, range); // Pass range
     
     // Start Live Updates (No fake simulated ticks, just listening)
     startSimulation();
 
-    return () => stopSimulation();
+    return () => {
+      stopSimulation();
+      
+      // 🔥 Unsubscribe on unmount (ref-counted - won't disconnect if others using it)
+      fetch('/api/v1/market/subscribe', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: [symbol] })
+      }).catch(err => console.error('Failed to unsubscribe:', err));
+    };
   }, [symbol, timeframe, range, initializeSimulation, startSimulation, stopSimulation]); // Added range to deps
 
   // 2. Live Candle Updates (via SSE)

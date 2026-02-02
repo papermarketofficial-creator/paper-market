@@ -69,8 +69,17 @@ class TickBus {
 
     /**
      * Emit a normalized tick to all subscribers
-     * Uses queueMicrotask for non-blocking execution and fault isolation
+     * 🔥 CRITICAL: Batched dispatch with backpressure
+     * Keeps only latest tick per symbol to prevent memory spikes
      */
+    private latestTicks = new Map<string, NormalizedTick>();
+    private processing = false;
+    
+    // 🔥 CRITICAL: Cross-runtime defer (works in both Node.js AND browser)
+    private defer = typeof setImmediate !== 'undefined'
+        ? setImmediate
+        : (fn: () => void) => setTimeout(fn, 0);
+    
     emitTick(tick: NormalizedTick) {
         this.tickCount++;
         
@@ -78,16 +87,32 @@ class TickBus {
         const count = this.symbolCounts.get(tick.symbol) || 0;
         this.symbolCounts.set(tick.symbol, count + 1);
 
-        // Emit to all subscribers safely
-        this.listeners.forEach(handler => {
-            queueMicrotask(() => {
-                try {
-                    handler(tick);
-                } catch (error) {
-                    // Log error but don't crash other listeners
-                    console.error('❌ TickBus listener error:', error);
-                }
+        // 🔥 BACKPRESSURE: Keep only latest tick per symbol
+        // During volatility spikes (20x tick rate), this prevents memory explosion
+        this.latestTicks.set(tick.symbol, tick);
+
+        if (this.processing) return; // Drop old ticks, only emit latest
+
+        this.processing = true;
+
+        // 🔥 CRITICAL FIX: Runtime-agnostic defer (Node.js or Browser)
+        // setImmediate is NOT available in browsers!
+        this.defer(() => {
+            const ticks = Array.from(this.latestTicks.values());
+            this.latestTicks.clear();
+
+            // Emit batched ticks synchronously
+            ticks.forEach(t => {
+                this.listeners.forEach(handler => {
+                    try {
+                        handler(t);
+                    } catch (error) {
+                        console.error('❌ TickBus listener error:', error);
+                    }
+                });
             });
+
+            this.processing = false;
         });
 
         // Sample logging (1% of ticks to avoid spam)
