@@ -3,52 +3,101 @@ import { UpstoxService } from "@/services/upstox.service";
 import { logger } from "@/lib/logger";
 import path from "path";
 import protobuf from "protobufjs";
+import fs from "fs";
+
+// ═══════════════════════════════════════════════════════════
+// 🛠️ SINGLETON PATTERN: Global declaration for Next.js hot reload
+// ═══════════════════════════════════════════════════════════
+declare global {
+    var __upstoxWebSocketInstance: UpstoxWebSocket | undefined;
+}
 
 type MarketUpdateCallback = (data: unknown) => void;
 
-// ─────────────────────────────────────────────────────────────────
-// 🛠️ HACK: Pre-load .proto file synchronously for patching
-// Use absolute path from project root (process.cwd() points to project root in Next.js)
+// ═══════════════════════════════════════════════════════════
+// 🛠️ PROTOBUF PATH RESOLUTION: Use absolute path from project root
+// ═══════════════════════════════════════════════════════════
 const PROTO_PATH = path.join(
-    process.cwd(),
+    process.cwd(), // Points to project root in Next.js
     "lib", "integrations", "upstox", "proto", "MarketDataFeedV3.proto"
 );
 
 let protobufRoot: any = null;
-try {
-    protobufRoot = protobuf.loadSync(PROTO_PATH);
-    console.log("✅ Protobuf loaded from:", PROTO_PATH);
-} catch (e) {
-    console.error("Error loading .proto file", e);
-    // Try fallback path for development
+
+function loadProtobuf() {
+    console.log("📂 Attempting to load proto from:", PROTO_PATH);
+
+    if (!fs.existsSync(PROTO_PATH)) {
+        console.error("❌ CRITICAL: Proto file not found at:", PROTO_PATH);
+        throw new Error(`Proto file missing: ${PROTO_PATH}`);
+    }
+
     try {
-        const fallbackPath = path.join(__dirname, "proto", "MarketDataFeedV3.proto");
-        protobufRoot = protobuf.loadSync(fallbackPath);
-        console.log("✅ Protobuf loaded from fallback:", fallbackPath);
-    } catch (e2) {
-        console.error("❌ CRITICAL: Failed to load .proto from both paths");
+        protobufRoot = protobuf.loadSync(PROTO_PATH);
+        console.log("✅ Protobuf loaded successfully");
+        return true;
+    } catch (error) {
+        console.error("❌ Failed to parse proto file:", error);
+        throw error;
     }
 }
-// ─────────────────────────────────────────────────────────────────
+
+// Load immediately on module init
+loadProtobuf();
 
 export class UpstoxWebSocket {
+    private static instance: UpstoxWebSocket | null = null;
+    
     private streamer: any = null; // SDK Streamer instance
     private onUpdate: MarketUpdateCallback | null = null;
     private subscriptions: Set<string> = new Set();
     private isConnected: boolean = false;
+    private reconnectAttempts: number = 0;
 
-    constructor() {}
+    private readonly RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000]; // Exponential backoff
+
+    // ═══════════════════════════════════════════════════════════
+    // 🛠️ PRIVATE CONSTRUCTOR: Prevent direct instantiation
+    // ═══════════════════════════════════════════════════════════
+    private constructor() {}
+
+    // ═══════════════════════════════════════════════════════════
+    // 🛠️ SINGLETON ACCESSOR: Get or create instance
+    // ═══════════════════════════════════════════════════════════
+    public static getInstance(): UpstoxWebSocket {
+        if (!global.__upstoxWebSocketInstance) {
+            console.log("🆕 Creating UpstoxWebSocket singleton");
+            global.__upstoxWebSocketInstance = new UpstoxWebSocket();
+        } else {
+            console.log("♻️ Reusing UpstoxWebSocket singleton");
+        }
+        return global.__upstoxWebSocketInstance;
+    }
 
     /**
      * Connect to Upstox WebSocket using SDK
      */
     async connect(onUpdate: MarketUpdateCallback): Promise<void> {
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ GUARD: Already connected
+        // ═══════════════════════════════════════════════════════════
         if (this.isConnected) {
-            console.log("⚠️ UpstoxWebSocket: Already connected or connecting");
+            console.log("⚠️ UpstoxWebSocket: Already connected");
+            this.onUpdate = onUpdate; // Update callback
             return;
         }
 
         this.onUpdate = onUpdate;
+
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ GUARD: Never connect with 0 symbols
+        // ═══════════════════════════════════════════════════════════
+        const initialKeys = Array.from(this.subscriptions);
+        if (initialKeys.length === 0) {
+            console.log("⚠️ No symbols queued - skipping WS connect");
+            // Store callback for later when symbols are added
+            return;
+        }
 
         try {
             console.log("STEP 1: trying to fetch token");
@@ -67,13 +116,11 @@ export class UpstoxWebSocket {
 
             console.log("STEP 4: creating streamer");
             // Initialize Streamer WITH initial subscriptions (required by SDK)
-            // Convert pending subscriptions to array
-            const initialKeys = Array.from(this.subscriptions);
             const initialMode = "ltpc"; // Start with lightweight mode
             
             console.log(`📡 Initializing streamer with ${initialKeys.length} symbols:`, initialKeys);
             this.streamer = new MarketDataStreamerV3(
-                initialKeys.length > 0 ? initialKeys : ["NSE_EQ|INE002A01018"], // Fallback to dummy symbol if empty
+                initialKeys, // Use actual symbols only (no fallback)
                 initialMode
             );
 
@@ -84,7 +131,7 @@ export class UpstoxWebSocket {
             this.streamer.on("error", this.handleError.bind(this));
             this.streamer.on("close", this.handleClose.bind(this));
             
-            // TEMPORARY: Disable Auto Reconnect until token is stable
+            // Disable Auto Reconnect - we handle it manually with exponential backoff
             this.streamer.autoReconnect(false);
 
             console.log("STEP 6: calling connect()");
@@ -94,6 +141,21 @@ export class UpstoxWebSocket {
         } catch (error: any) {
             console.log("❌ STEP FAIL:", error.message);
             logger.error({ err: error.message }, "Failed to start Upstox Streamer");
+            
+            // ═══════════════════════════════════════════════════════════
+            // 🛠️ EXPONENTIAL BACKOFF: Retry with increasing delays
+            // ═══════════════════════════════════════════════════════════
+            // ═══════════════════════════════════════════════════════════
+            // 🛠️ INFINITE RECONNECT: Exponential backoff (capped at 30s)
+            // ═══════════════════════════════════════════════════════════
+            const delay = this.RECONNECT_DELAYS[Math.min(this.reconnectAttempts, this.RECONNECT_DELAYS.length - 1)] || 30000;
+            this.reconnectAttempts++;
+            
+            console.log(`🔄 Reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
+            
+            setTimeout(() => {
+                this.connect(onUpdate);
+            }, delay);
         }
     }
 
@@ -101,9 +163,21 @@ export class UpstoxWebSocket {
      * Subscribe to instruments
      */
     subscribe(instrumentKeys: string[]): void {
+        const wasEmpty = this.subscriptions.size === 0;
+        
         instrumentKeys.forEach(key => this.subscriptions.add(key));
 
-        if (this.isConnected && this.streamer) {
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ TRIGGER CONNECTION: If this is the first subscription
+        // ═══════════════════════════════════════════════════════════
+        if (wasEmpty && instrumentKeys.length > 0 && !this.isConnected) {
+            console.log("🔌 First subscription - initiating connection");
+            if (this.onUpdate) {
+                this.connect(this.onUpdate);
+            }
+        }
+        // If already connected, subscribe normally
+        else if (this.isConnected && this.streamer) {
             console.log(`📡 SUB: Subscribing to ${instrumentKeys.join(', ')} (ltpc)`);
             this.streamer.subscribe(instrumentKeys, "ltpc");
             logger.info({ count: instrumentKeys.length }, "Subscribed via SDK");
@@ -141,6 +215,7 @@ export class UpstoxWebSocket {
 
     private handleOpen(): void {
         this.isConnected = true;
+        this.reconnectAttempts = 0; // Reset on successful connection
         console.log("🟢 WS OPEN EVENT FIRED");
 
         // ─────────────────────────────────────────────────────────────────
@@ -150,13 +225,13 @@ export class UpstoxWebSocket {
         const feeder = (this.streamer as any)?.streamer;
         if (feeder && protobufRoot) {
             feeder.protobufRoot = protobufRoot;
-            console.log("✅ HACK: Protobuf root injected into SDK feeder.");
+            console.log("✅ Protobuf injected into SDK feeder");
         } else {
             console.error("❌ HACK FAIL: Could not inject protobufRoot. Feeder:", !!feeder, "Root:", !!protobufRoot);
         }
         // ─────────────────────────────────────────────────────────────────
         
-        logger.info("Upstox SDK Streamer Connected");
+        logger.info("Upstox WebSocket Connected");
 
         // Note: Symbols passed to constructor are auto-subscribed on connect
         // Only subscribe to additional symbols added after connection
@@ -180,7 +255,9 @@ export class UpstoxWebSocket {
                 decoded = data;
             }
 
-            console.log("📩 TICK:", JSON.stringify(decoded, null, 2));
+            if (process.env.DEBUG_MARKET === 'true') {
+                console.log("📩 TICK:", JSON.stringify(decoded, null, 2));
+            }
 
             if (this.onUpdate) {
                 this.onUpdate(decoded);

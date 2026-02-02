@@ -195,7 +195,7 @@ export class UpstoxService {
                  quotes[key] = value.last_price;
              }
           }
-          
+           
           logger.info({ count: Object.keys(quotes).length }, "Fetched snapshot quotes");
           return quotes;
 

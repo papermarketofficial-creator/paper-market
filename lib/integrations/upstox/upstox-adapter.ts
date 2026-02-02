@@ -1,0 +1,91 @@
+import { NormalizedTick } from '@/lib/trading/tick-bus';
+
+// ═══════════════════════════════════════════════════════════
+// 🔌 UPSTOX ADAPTER: Normalize Upstox-specific data format
+// ═══════════════════════════════════════════════════════════
+/**
+ * UpstoxAdapter converts Upstox WebSocket feed format to NormalizedTick.
+ * 
+ * Why: Enables broker-agnostic core engine. Easy to add Zerodha, Angel One, etc.
+ * 
+ * Upstox Format:
+ * ```json
+ * {
+ *   "feeds": {
+ *     "NSE_EQ|INE002A01018": {
+ *       "ltpc": {
+ *         "ltp": 2500,
+ *         "ltt": "1769935964834",
+ *         "ltq": 100,
+ *         "cp": 2480,
+ *         "vol": 1000
+ *       }
+ *     }
+ *   }
+ * }
+ * ```
+ */
+export class UpstoxAdapter {
+    private isinMap: Map<string, string>; // ISIN → Trading Symbol
+    
+    constructor(isinMap: Map<string, string>) {
+        this.isinMap = isinMap;
+    }
+
+    /**
+     * Normalize Upstox feed data to NormalizedTick
+     */
+    normalize(upstoxData: any): NormalizedTick[] {
+        const ticks: NormalizedTick[] = [];
+        
+        // Guard against invalid data
+        if (!upstoxData || typeof upstoxData !== 'object') {
+            return ticks;
+        }
+
+        const feeds = upstoxData.feeds || {};
+        
+        for (const key of Object.keys(feeds)) {
+            const feed = feeds[key];
+            const ltpc = feed.ltpc;
+            
+            if (!ltpc || !ltpc.ltp) continue;
+            
+            // ═══════════════════════════════════════════════════════════
+            // 🛠️ SYMBOL RESOLUTION: ISIN → Trading Symbol
+            // ═══════════════════════════════════════════════════════════
+            // key format: "NSE_EQ|INE002A01018"
+            const parts = key.split('|');
+            const exchange = parts[0] || 'NSE';
+            const isin = parts[1] || key;
+            
+            // Resolve ISIN to trading symbol (e.g., INE002A01018 → RELIANCE)
+            const symbol = this.isinMap.get(isin) || isin;
+            
+            // ═══════════════════════════════════════════════════════════
+            // 🛠️ TIMESTAMP NORMALIZATION: Milliseconds → Seconds
+            // ═══════════════════════════════════════════════════════════
+            let timestamp = Date.now() / 1000; // Default to now
+            if (ltpc.ltt) {
+                const ltt = parseInt(ltpc.ltt);
+                // If timestamp is in milliseconds (13 digits), convert to seconds
+                timestamp = ltt.toString().length === 13 
+                    ? Math.floor(ltt / 1000) 
+                    : ltt;
+            }
+            
+            const tick: NormalizedTick = {
+                symbol,
+                price: ltpc.ltp,
+                volume: ltpc.vol || 0,
+                timestamp,
+                exchange,
+                close: ltpc.cp
+            };
+            
+            ticks.push(tick);
+        }
+        
+        return ticks;
+    }
+}

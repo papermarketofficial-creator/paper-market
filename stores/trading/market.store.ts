@@ -153,15 +153,33 @@ export const useMarketStore = create<MarketState>((set, get) => ({
       const stocks: Stock[] = data.instruments.map((inst: WatchlistInstrument) => ({
         symbol: inst.tradingsymbol,
         name: inst.name,
-        price: parseFloat(inst.lastPrice) || 0,
+        price: parseFloat(inst.lastPrice) || 0, // ✅ From DB (updated daily via EOD service)
         change: 0,
         changePercent: 0,
         volume: 0,
         lotSize: inst.lotSize,
-        instrumentToken: inst.instrumentToken, // Fix: Ensure token is passed
+        instrumentToken: inst.instrumentToken,
       }));
       
       set({ stocks });
+      console.log('✅ Watchlist loaded with DB prices');
+
+      // ═══════════════════════════════════════════════════════════
+      // 🔄 OPTIONAL: Refresh live prices if market is open
+      // ═══════════════════════════════════════════════════════════
+      const now = new Date();
+      const hour = now.getHours();
+      const minute = now.getMinutes();
+      const isMarketHours = (hour === 9 && minute >= 15) || (hour > 9 && hour < 15) || (hour === 15 && minute <= 30);
+
+      if (isMarketHours && stocks.length > 0) {
+        console.log('📊 Market open - live prices will update via SSE stream');
+        // Live prices will be updated automatically via the SSE stream
+        // No need to fetch here - the stream is already running
+      } else {
+        console.log('🌙 Market closed - using EOD prices from database');
+      }
+
     } catch (error) {
       console.error('Failed to fetch watchlist instruments:', error);
     } finally {
@@ -243,9 +261,35 @@ export const useMarketStore = create<MarketState>((set, get) => ({
          .catch(err => console.error('Prefetch failed', err));
   },
 
+
   setActiveWatchlist: (watchlistId: string) => {
     set({ activeWatchlistId: watchlistId });
     get().fetchWatchlistInstruments(watchlistId);
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // 🛠️ UPDATE STOCK PRICE: Merge live prices into stocks array
+  // ═══════════════════════════════════════════════════════════
+  updateStockPrice: (symbol: string, price: number, close?: number) => {
+    const { stocks } = get();
+    
+    const updatedStocks = stocks.map(stock => {
+      if (stock.symbol === symbol) {
+        const previousClose = close ?? stock.price; // Use provided close or current price as fallback
+        const change = price - previousClose;
+        const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+        
+        return {
+          ...stock,
+          price,
+          change,
+          changePercent,
+        };
+      }
+      return stock;
+    });
+    
+    set({ stocks: updatedStocks });
   },
 
 
@@ -440,11 +484,24 @@ export const useMarketStore = create<MarketState>((set, get) => ({
         } : lastVolume;
 
         console.log('📈 UPDATE Candle:', updatedCandle, 'Price:', tick.price);
-        set({
-          historicalData: [...historicalData.slice(0, -1), updatedCandle],
-          volumeData: updatedVolume ? [...volumeData.slice(0, -1), updatedVolume] : volumeData,
-          livePrice: tick.price
-        });
+        
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ FINAL FIX: Bypass Zustand to prevent re-render
+        // ═══════════════════════════════════════════════════════════
+        // Mutate arrays in place WITHOUT calling set()
+        // This prevents Zustand from notifying subscribers
+        historicalData[historicalData.length - 1] = updatedCandle;
+        if (updatedVolume) {
+          volumeData[volumeData.length - 1] = updatedVolume;
+        }
+        
+        // Update livePrice directly on state object
+        const state = get();
+        state.livePrice = tick.price;
+        
+        // Trigger chart update via ChartController (bypasses React)
+        // The ChartController will call series.update() directly
+        // This is the high-performance path used by professional trading platforms
     }
   },
 

@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+  <head>
+    <title>SSE Test</title>
+  </head>
+  <body>
+    <h1>SSE Connection Test</h1>
+    <div id="status">Connecting...</div>
+    <div id="messages"></div>
+
+    <script>
+      const statusDiv = document.getElementById("status");
+      const messagesDiv = document.getElementById("messages");
+
+      const es = new EventSource("/api/v1/market/stream?symbols=RELIANCE");
+
+      es.onopen = () => {
+        statusDiv.textContent = "✅ Connected";
+        statusDiv.style.color = "green";
+        console.log("✅ SSE Connected");
+      };
+
+      es.onmessage = (event) => {
+        console.log("📨 RAW SSE Event:", event.data);
+
+        if (event.data.startsWith(":")) {
+          console.log("Heartbeat");
+          return;
+        }
+
+        try {
+          const message = JSON.parse(event.data);
+          console.log("📦 Parsed Message:", message);
+
+          if (message.type === "tick") {
+            const div = document.createElement("div");
+            div.textContent = `🕒 ${new Date().toLocaleTimeString()} - ${message.data.symbol} @ ${message.data.price}`;
+            messagesDiv.insertBefore(div, messagesDiv.firstChild);
+
+            // Keep only last 20 messages
+            while (messagesDiv.children.length > 20) {
+              messagesDiv.removeChild(messagesDiv.lastChild);
+            }
+          }
+        } catch (e) {
+          console.error("Parse error:", e);
+        }
+      };
+
+      es.onerror = (err) => {
+        statusDiv.textContent = "❌ Error";
+        statusDiv.style.color = "red";
+        console.error("❌ SSE Error:", err);
+      };
+    </script>
+  </body>
+</html>

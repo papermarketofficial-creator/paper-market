@@ -5,6 +5,16 @@ import { EventEmitter } from "events";
 import { db } from "@/lib/db";
 import { instruments } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import { tickBus } from "@/lib/trading/tick-bus";
+import { UpstoxAdapter } from "@/lib/integrations/upstox/upstox-adapter";
+import "@/lib/trading/init-realtime"; // Auto-wire TickBus subscriptions
+
+// ═══════════════════════════════════════════════════════════
+// 🛠️ SINGLETON PATTERN: Global declaration for Next.js hot reload
+// ═══════════════════════════════════════════════════════════
+declare global {
+    var __realTimeMarketServiceInstance: RealTimeMarketService | undefined;
+}
 
 interface Quote {
     symbol: string;
@@ -16,39 +26,90 @@ interface Quote {
 }
 
 class RealTimeMarketService extends EventEmitter {
+    private static instance: RealTimeMarketService | null = null;
+    
     private ws: UpstoxWebSocket;
     private prices: Map<string, Quote> = new Map();
     private subscribers: Set<string> = new Set();
     private initialized: boolean = false;
+    private isInitializing: boolean = false; // Guard against concurrent initialization
     private instrumentPrefix = "NSE_EQ|";
     
     private isinMap: Map<string, string> = new Map(); // Trading Symbol -> ISIN
     private reverseIsinMap: Map<string, string> = new Map(); // ISIN -> Trading Symbol
+    private adapter: UpstoxAdapter | null = null; // Broker adapter
 
-
-
-    public constructor() {
+    // ═══════════════════════════════════════════════════════════
+    // 🛠️ PRIVATE CONSTRUCTOR: Prevent direct instantiation
+    // ═══════════════════════════════════════════════════════════
+    private constructor() {
         super();
-        this.ws = new UpstoxWebSocket();
+        this.ws = UpstoxWebSocket.getInstance();
         this.prices = new Map();
-        
-        // Initialize Setup
-        this.initialize();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // 🛠️ SINGLETON ACCESSOR: Get or create instance
+    // ═══════════════════════════════════════════════════════════
+    public static getInstance(): RealTimeMarketService {
+        // Use Node.js global for true singleton across module reloads
+        if (!global.__realTimeMarketServiceInstance) {
+            console.log("🆕 Creating RealTimeMarketService singleton");
+            global.__realTimeMarketServiceInstance = new RealTimeMarketService();
+        } else {
+            console.log("♻️ Reusing RealTimeMarketService singleton");
+        }
+        return global.__realTimeMarketServiceInstance;
     }
 
     /**
      * Initialize the Real-Time Service
      */
     async initialize(): Promise<void> {
-        if (this.initialized) return;
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ GUARD: Already initialized
+        // ═══════════════════════════════════════════════════════════
+        if (this.initialized) {
+            console.log("✅ RealTimeMarketService already initialized");
+            return;
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ GUARD: Initialization in progress
+        // ═══════════════════════════════════════════════════════════
+        if (this.isInitializing) {
+            console.log("⏳ Initialization in progress, waiting...");
+            // Wait for initialization to complete
+            await new Promise<void>(resolve => {
+                const interval = setInterval(() => {
+                    if (this.initialized || !this.isInitializing) {
+                        clearInterval(interval);
+                        resolve();
+                    }
+                }, 100);
+            });
+            return;
+        }
+
+        this.isInitializing = true;
 
         try {
             await this.loadInstruments();
+            
+            // ═══════════════════════════════════════════════════════════
+            // 🛠️ INITIALIZE ADAPTER: Create broker adapter with ISIN map
+            // ═══════════════════════════════════════════════════════════
+            this.adapter = new UpstoxAdapter(this.reverseIsinMap);
+            console.log("✅ UpstoxAdapter initialized with", this.reverseIsinMap.size, "symbols");
+            
             await this.ws.connect(this.handleMarketUpdate.bind(this));
             this.initialized = true;
             logger.info("RealTimeMarketService initialized");
         } catch (error) {
             logger.error({ err: error }, "Failed to initialize RealTimeMarketService");
+            throw error;
+        } finally {
+            this.isInitializing = false;
         }
     }
 
@@ -83,12 +144,18 @@ class RealTimeMarketService extends EventEmitter {
         });
 
         if (keysToSubscribe.length > 0) {
-            // 1. Add to WebSocket subscription queue BEFORE connecting
+            console.log(`📡 RealTimeMarketService: Subscribing to ${keysToSubscribe.length} symbols:`, keysToSubscribe);
+            
+            // 1. Add to WebSocket subscription queue
             this.ws.subscribe(keysToSubscribe);
             logger.info({ count: keysToSubscribe.length, keys: keysToSubscribe }, "Subscribed to new symbols");
 
-            // 2. Initialize connection if not already done
-            if (!this.initialized) await this.initialize();
+            // 2. If WebSocket not connected yet, connect now
+            // This handles the case where initialize() was called with no symbols
+            if (!this.ws['isConnected']) {
+                console.log("🔌 WebSocket not connected - initiating connection now");
+                await this.ws.connect(this.handleMarketUpdate.bind(this));
+            }
 
             // 3. Seed cache with snapshot (industry-standard pattern)
             // V3 WebSocket is delta-only, so we need initial prices from REST API
@@ -160,67 +227,57 @@ class RealTimeMarketService extends EventEmitter {
      * Handle incoming market data from WebSocket
      */
     private handleMarketUpdate(data: any): void {
-        // Guard against null/undefined data
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ GUARD: Validate data
+        // ═══════════════════════════════════════════════════════════
         if (!data || typeof data !== 'object') {
             return;
         }
 
-        // Debug: Log first few updates to understand structure
-        if (Math.random() < 0.01) { // 1% sample log
-             console.log("📉 Market Data Payload:", JSON.stringify(data).slice(0, 200));
-        }
-
-        // Handle non-feed messages (market_info, etc.)
-        if (data.type === "market_info") {
-            // Market status update - log but don't process as quote
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ ADAPTER NORMALIZATION: Upstox → NormalizedTick
+        // ═══════════════════════════════════════════════════════════
+        if (!this.adapter) {
+            console.error("❌ Adapter not initialized");
             return;
         }
 
-        // Upstox V3 ltpc mode structure:
-        // { "feeds": { "NSE_EQ|RELIANCE": { "ltpc": { "ltp": 2500, "ltt": "...", "ltq": 100, "cp": 2480 } } } }
-        const feeds = data.feeds || {};
+        const ticks = this.adapter.normalize(data);
+        
+        if (ticks.length === 0) {
+            // Sample logging for non-feed messages
+            if (data.type === "market_info" && Math.random() < 0.1) {
+                console.log("ℹ️ Market info message received");
+            }
+            return;
+        }
 
-            // 2. Process Feeds
-            Object.keys(feeds).forEach(key => {
-                const feed = feeds[key];
-                
-                // Extract LTP (Last Traded Price)
-                const ltpc = feed.ltpc;
-                
-                if (ltpc) {
-                    const price = ltpc.ltp;
-                    const close = ltpc.cp;
-                    const ltt = ltpc.ltt; // Last Traded Time (Unix timestamp in milliseconds)
-                    // const volume = ltpc.vol; // Verify if available in V3
-                    
-                    // ─────────────────────────────────────────────────────────────────
-                    // 🛠️ FIX: Map ISIN (e.g. INE002A01018) -> Trading Symbol (RELIANCE)
-                    // The feed key is likely "NSE_EQ|INE002A01018"
-                    // ─────────────────────────────────────────────────────────────────
-                    const pureKey = key.split("|")[1] || key;
-                    // Resolve pure ISIN (INE...) to Trading Symbol (RELIANCE)
-                    const tradingSymbol = this.reverseIsinMap.get(pureKey) || pureKey;
+        // ═══════════════════════════════════════════════════════════
+        // 🚌 TICK BUS EMISSION: Distribute to all subscribers
+        // ═══════════════════════════════════════════════════════════
+        for (const tick of ticks) {
+            // Update local cache for legacy compatibility
+            const quote: Quote = {
+                symbol: tick.symbol,
+                price: tick.price,
+                close: tick.close,
+                timestamp: tick.timestamp * 1000, // Convert back to ms for Quote interface
+                volume: tick.volume,
+                lastUpdated: new Date()
+            };
+            this.prices.set(tick.symbol, quote);
 
-                    // Only emit if we have a valid price
-                    if (price !== undefined) {
-                        const quote: Quote = {
-                            symbol: tradingSymbol, // Send "RELIANCE" instead of "INE..."
-                            price: price,
-                            close: close,
-                            timestamp: ltt ? parseInt(ltt) : Date.now(), // Use actual tick time
-                            // volume: volume,
-                            lastUpdated: new Date()
-                        };
+            // Emit to TickBus (new architecture)
+            tickBus.emitTick(tick);
 
-                        // Store
-                        this.prices.set(tradingSymbol, quote);
-                        this.prices.set(key, quote); // Also store by original key
+            // Legacy event emission (for backward compatibility)
+            this.emit("tick", quote);
 
-                        // Emit 'tick' event
-                        this.emit('tick', quote);
-                    }
-                }
-            });
+            // Sample logging (1% of ticks)
+            if (process.env.DEBUG_MARKET === 'true' && Math.random() < 0.01) {
+                console.log(`📩 TICK: ${tick.symbol} @ ${tick.price} (${new Date(tick.timestamp * 1000).toISOString()})`);
+            }
+        }
     }
 
     /**
@@ -256,8 +313,16 @@ class RealTimeMarketService extends EventEmitter {
      * Load all instruments from database to build ISIN maps.
      */
     private async loadInstruments(): Promise<void> {
+        // ═══════════════════════════════════════════════════════════
+        // 🛠️ GUARD: Only load once
+        // ═══════════════════════════════════════════════════════════
+        if (this.isinMap.size > 0) {
+            console.log("✅ Instruments already loaded, count:", this.isinMap.size);
+            return;
+        }
+
         try {
-            logger.info("Loading instruments for dynamic mapping...");
+            console.log("📂 Loading instruments for dynamic mapping...");
             const allInstruments = await db
                 .select({
                     instrumentToken: instruments.instrumentToken, // "NSE_EQ|INE..."
@@ -293,4 +358,7 @@ class RealTimeMarketService extends EventEmitter {
     }
 }
 
-export const realTimeMarketService = new RealTimeMarketService();
+// ═══════════════════════════════════════════════════════════
+// 🛠️ EXPORT SINGLETON INSTANCE (not class)
+// ═══════════════════════════════════════════════════════════
+export const realTimeMarketService = RealTimeMarketService.getInstance();

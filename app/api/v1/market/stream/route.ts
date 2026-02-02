@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { realTimeMarketService } from "@/services/realtime-market.service";
 import { auth } from "@/lib/auth";
+import { tickBus } from "@/lib/trading/tick-bus";
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // Required for EventEmitter and long-running connections
@@ -33,16 +34,29 @@ export async function GET(req: NextRequest) {
             // Send initial connection message
             controller.enqueue(encoder.encode(`data: {"type":"connected"}\n\n`));
 
-            // Listener for market ticks
-            const onTick = (quote: any) => {
-                // Send all ticks - the frontend will filter if needed
-                // The quote.symbol is already the trading symbol (e.g., "RELIANCE")
-                console.log('📤 SSE: Sending tick to client:', quote.symbol, quote.price);
+            // Listener for market ticks from unified TickBus
+            const onTick = (tick: any) => {
+                // TickBus emits NormalizedTick { symbol, price, timestamp (seconds), volume, exchange, close }
+                // Convert to format expected by frontend
+                const quote = {
+                    symbol: tick.symbol,
+                    price: tick.price,
+                    timestamp: tick.timestamp * 1000, // Convert seconds to milliseconds
+                    volume: tick.volume,
+                    close: tick.close
+                };
+                
+                // Log every 20th tick to avoid console spam
+                if (Math.random() < 0.05) {
+                    console.log('📤 SSE: Streaming tick:', tick.symbol, '@', tick.price);
+                }
+                
                 const payload = JSON.stringify({ type: 'tick', data: quote });
                 controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
             };
 
-            realTimeMarketService.on('tick', onTick);
+            // Subscribe to unified TickBus (receives ticks from all sources)
+            tickBus.on('tick', onTick);
 
             // Keep-alive heartbeat
             const heartbeat = setInterval(() => {
@@ -52,8 +66,9 @@ export async function GET(req: NextRequest) {
             // Cleanup on close
             req.signal.addEventListener('abort', () => {
                 clearInterval(heartbeat);
-                realTimeMarketService.off('tick', onTick);
+                tickBus.off('tick', onTick);
                 controller.close();
+                console.log('🔴 SSE: Client disconnected, cleaned up TickBus subscription');
             });
         }
     });

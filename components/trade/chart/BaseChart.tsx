@@ -3,6 +3,8 @@ import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 're
 import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, CandlestickData, HistogramSeries, HistogramData, CrosshairMode, LineSeries } from 'lightweight-charts';
 import { IndicatorConfig } from '@/stores/trading/analysis.store';
 import { DrawingManager } from './overlays/DrawingManager';
+import { ChartController } from '@/lib/trading/chart-controller';
+import { chartRegistry } from '@/lib/trading/chart-registry';
 
 interface BaseChartProps {
   data: CandlestickData[];
@@ -49,6 +51,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<any>[]>>(new Map()); // Map ID to Array of Series
   const isFetchingRef = useRef(false); // Throttle
+  const chartControllerRef = useRef<ChartController | null>(null); // Chart controller for direct updates
 
   // State to force re-render when chart is ready
   const [chartInstance, setChartInstance] = useState<IChartApi | null>(null);
@@ -155,6 +158,44 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   }, [height, onChartReady, onLoadMore]);
  // Run once on mount, height handled by separate effect
 
+  // ═══════════════════════════════════════════════════════════
+  // 🛠️ CHART CONTROLLER INTEGRATION: Direct updates via RAF batching
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (!candleSeriesRef.current || !symbol) return;
+
+    // Create instance-based controller for this chart
+    const controller = new ChartController(`chart-${symbol}`);
+    controller.setSeries(candleSeriesRef.current);
+    chartControllerRef.current = controller;
+
+    // ═══════════════════════════════════════════════════════════
+    // 🛠️ REGISTER WITH CHART REGISTRY (STEP 5 - Single Writer)
+    // ═══════════════════════════════════════════════════════════
+    // This enables CandleEngine → ChartRegistry → ChartController
+    // Direct updates bypass React/Zustand entirely
+    chartRegistry.register(symbol, controller);
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔥 ELITE PATTERN: Load data DIRECTLY into controller
+    // ═══════════════════════════════════════════════════════════
+    // Do NOT wait for React/Zustand - inject immediately
+    if (data && data.length > 0) {
+      controller.setData(data);
+      console.log(`🔥 ChartController: Loaded ${data.length} candles directly`);
+    }
+
+    console.log(`✅ ChartController initialized and registered for ${symbol}`);
+
+    // Cleanup
+    return () => {
+      chartRegistry.unregister(symbol);
+      controller.destroy();
+      chartControllerRef.current = null;
+      console.log(`🗑️ ChartController destroyed for ${symbol}`);
+    };
+  }, [symbol, data]); // Include data to trigger initial load
+
   // 1.5 Handle Resize with ResizeObserver
   useEffect(() => {
     if (!autoResize || !chartContainerRef.current || !chartRef.current) return;
@@ -182,53 +223,9 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   }, [height]);
 
 
-  // 2. Update Data - Smart Update for Real-time
-  const prevDataRef = useRef<CandlestickData[]>([]);
-  
-  useEffect(() => {
-    if (!candleSeriesRef.current) {
-      console.log('📊 Chart: No series ref yet');
-      return;
-    }
-    
-    if (!data || data.length === 0) {
-      console.log('📊 Chart: No data yet, length:', data?.length);
-      return;
-    }
-
-    const prevData = prevDataRef.current;
-    
-    console.log('📊 Chart: Data update check - prev:', prevData.length, 'new:', data.length);
-    
-    // First load or complete data change
-    if (prevData.length === 0 || data.length < prevData.length) {
-      console.log('📊 Chart: Full data set (setData)', data.length, 'candles');
-      candleSeriesRef.current.setData(data);
-      prevDataRef.current = [...data]; // Clone to avoid reference issues
-      return;
-    }
-
-    // Incremental update - new candles added or last candle updated
-    if (data.length > prevData.length) {
-      // New candles added
-      const newCandles = data.slice(prevData.length);
-      console.log('📊 Chart: Adding', newCandles.length, 'new candles');
-      newCandles.forEach(candle => {
-        candleSeriesRef.current?.update(candle);
-      });
-      prevDataRef.current = [...data]; // Update reference
-    } else if (data.length === prevData.length) {
-      // Last candle might have been updated
-      const lastCandle = data[data.length - 1];
-      const prevLastCandle = prevData[prevData.length - 1];
-      
-      if (JSON.stringify(lastCandle) !== JSON.stringify(prevLastCandle)) {
-        console.log('📊 Chart: Updating last candle', lastCandle);
-        candleSeriesRef.current?.update(lastCandle);
-        prevDataRef.current = [...data]; // Update reference
-      }
-    }
-  }, [data]);
+  // 2. Data Loading - REMOVED
+  // ChartController loads data directly on creation (see above)
+  // This prevents React from touching the chart after initial load
 
 
   // 3. Dynamic Pane Layout
