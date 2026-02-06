@@ -25,9 +25,13 @@ export class MarketFeedSupervisor extends EventEmitter {
     private ws: UpstoxWebSocket;
     private supervisor: SymbolSupervisor;
     
-    // 🔥 CRITICAL FIX #3: Heartbeat symbol tracking
-    private heartbeatSymbol = 'RELIANCE'; // High liquidity stock
-    private lastHeartbeatTime = Date.now();
+    // ═══════════════════════════════════════════════════════════
+    // 🚨 PHASE 1: Transport-Level Health (NOT heartbeat symbol)
+    // ═══════════════════════════════════════════════════════════
+    // Track ANY tick, not a specific symbol
+    // Heartbeat symbols can pause during market hours (normal)
+    // Feed health = transport health, not symbol-specific
+    private lastAnyTick = Date.now();
     private tickCount = 0;
     
     // 🔥 CRITICAL: Circuit Breaker (Prevent reconnect storms)
@@ -55,8 +59,8 @@ export class MarketFeedSupervisor extends EventEmitter {
         
         // 🔥 ELITE PATTERN: Prewarm feed with core symbols
         // This ensures instant ticks for first user (no cold start delay)
-        // Core symbols are always subscribed (high liquidity, heartbeat monitoring)
-        const coreSymbols = [this.heartbeatSymbol, 'NIFTY']; // RELIANCE + NIFTY
+        // Core symbols are always subscribed (high liquidity)
+        const coreSymbols = ['RELIANCE', 'NIFTY']; // High liquidity symbols
         console.log(`🔥 Prewarming feed with core symbols:`, coreSymbols);
         coreSymbols.forEach(sym => this.supervisor.add(sym));
         
@@ -150,28 +154,36 @@ export class MarketFeedSupervisor extends EventEmitter {
     
     /**
      * Check feed health
-     * 🔥 CRITICAL: Context-aware, NOT blindly reconnecting
+     * 🚨 PHASE 1: Transport-level health check (NOT symbol-specific)
+     * 
+     * WHY: Heartbeat symbols can pause during market hours (normal).
+     * Feed health = transport health, not any single symbol.
+     * 
+     * Professional systems bias toward patience (60s threshold).
+     * False reconnect storms kill infra faster than real outages.
      */
     private checkHealth() {
-        const timeSinceHeartbeat = Date.now() - this.lastHeartbeatTime;
+        const silence = Date.now() - this.lastAnyTick;
         const tickRate = this.tickCount / 15; // tps
         
         // Update session state based on market hours
         if (!this.shouldExpectTicks()) {
             this.sessionState = 'EXPECTED_SILENCE';
-            console.log(`� Market closed (${tickRate.toFixed(1)} tps, heartbeat ${(timeSinceHeartbeat/1000).toFixed(0)}s ago) - Status: IDLE`);
+            console.log(`� Market closed (${tickRate.toFixed(1)} tps, last tick ${(silence/1000).toFixed(0)}s ago) - Status: IDLE`);
             this.tickCount = 0;
             return; // 🔥 Don't reconnect during expected silence
         }
         
         // During market hours
         this.sessionState = 'NORMAL';
-        console.log(`📊 Health: ${tickRate.toFixed(1)} tps, heartbeat ${(timeSinceHeartbeat/1000).toFixed(0)}s ago`);
+        console.log(`📊 Health: ${tickRate.toFixed(1)} tps, last tick ${(silence/1000).toFixed(0)}s ago`);
         
-        // 🔥 CRITICAL: Only reconnect if we EXPECT ticks but aren't getting them
-        if (timeSinceHeartbeat > 30000 && this.isConnected) {
+        // 🚨 PHASE 1: Transport-level silence detection (60s threshold)
+        // Only reconnect if feed is COMPLETELY silent (no ticks from ANY symbol)
+        // 60 seconds = professional patience threshold
+        if (silence > 60000 && this.isConnected) {
             this.sessionState = 'SUSPECT_OUTAGE';
-            console.warn(`⚠️ Heartbeat symbol (${this.heartbeatSymbol}) frozen > 30s during market hours - Status: SUSPECT_OUTAGE`);
+            console.error(`🚨 FEED SILENT ${(silence/1000).toFixed(0)}s — reconnecting`);
             this.reconnect();
         }
         
@@ -246,15 +258,15 @@ export class MarketFeedSupervisor extends EventEmitter {
     
     /**
      * Handle incoming tick
+     * 🚨 PHASE 1: Update transport-level health on EVERY tick
      */
     private handleTick(data: any) {
         this.tickCount++;
         
-        // Track heartbeat symbol separately
-        const symbol = this.extractSymbol(data);
-        if (symbol === this.heartbeatSymbol) {
-            this.lastHeartbeatTime = Date.now();
-        }
+        // ═══════════════════════════════════════════════════════════
+        // 🚨 PHASE 1: Update on ANY tick (transport-level health)
+        // ═══════════════════════════════════════════════════════════
+        this.lastAnyTick = Date.now();
         
         // Emit to SSE clients
         this.emit('tick', data);
@@ -318,8 +330,8 @@ export class MarketFeedSupervisor extends EventEmitter {
     getHealthMetrics() {
         return {
             sessionState: this.sessionState,
-            lastHeartbeat: this.lastHeartbeatTime,
-            timeSinceHeartbeatMs: Date.now() - this.lastHeartbeatTime,
+            lastAnyTick: this.lastAnyTick,
+            timeSinceLastTickMs: Date.now() - this.lastAnyTick,
             isConnected: this.isConnected,
             reconnectFailures: this.reconnectFailures,
             circuitBreakerOpen: this.circuitBreakerOpen,

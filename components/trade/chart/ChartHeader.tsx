@@ -42,7 +42,7 @@ export function ChartHeader({
 }: ChartHeaderProps) {
   const { range, setRange } = useAnalysisStore();
 
-  const ranges = ['5y', '3y', '1y', '6mo', '1mo', '5d', '1d'];
+  const ranges = ['5Y', '1Y', '6M', '3M', '1M', '5D', '1D'];
 
   return (
     <div className="flex items-center justify-between p-1.5 border-b border-border bg-card z-30 shrink-0 h-11">
@@ -89,7 +89,7 @@ export function ChartHeader({
 
         <Separator orientation="vertical" className="h-4 bg-border/50 mx-1" />
 
-        {/* Range Selector (Mapped to Intervals automatically) */}
+        {/* Range Selector (Upstox-style) */}
         <div className="flex items-center">
             {ranges.map((r) => (
                 <button
@@ -104,7 +104,6 @@ export function ChartHeader({
                     {r}
                 </button>
             ))}
-
         </div>
 
         <Separator orientation="vertical" className="h-4 bg-border/50 mx-1" />

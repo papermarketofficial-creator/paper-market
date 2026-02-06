@@ -46,11 +46,16 @@ export const viewport = {
   maximumScale: 1,
 };
 
+// 🔥 REMOVED: MarketStreamProvider was here but ALSO in dashboard layout
+// This caused duplicate SSE connections. Keep only in dashboard layout.
+
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          {children}
+        </Providers>
       </body>
     </html>
   );

@@ -39,7 +39,22 @@ function initializeCandleEngineSubscription() {
 // ═══════════════════════════════════════════════════════════
 // 🚀 AUTO-INITIALIZE ON MODULE LOAD
 // ═══════════════════════════════════════════════════════════
-initializeCandleEngineSubscription();
+// ═══════════════════════════════════════════════════════════
+// 🚀 AUTO-INITIALIZE ON MODULE LOAD
+// ═══════════════════════════════════════════════════════════
+declare global {
+    var __candleEngineInitialized: boolean | undefined;
+}
+
+if (!globalThis.__candleEngineInitialized) {
+    globalThis.__candleEngineInitialized = true;
+    initializeCandleEngineSubscription();
+    
+    // 📊 METRICS LOCK: Monitor listener count (Target: 1)
+    console.log("📊 TickBus 'tick' listeners:", tickBus.listenerCount('tick'));
+} else {
+    console.log("♻️ CandleEngine already subscribed (Skipping re-init)");
+}
 
 // Export for manual control if needed
 export { initializeCandleEngineSubscription };

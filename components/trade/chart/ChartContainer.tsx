@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { CandlestickData, HistogramData, Time } from 'lightweight-charts';
 import { useAnalysisStore } from '@/stores/trading/analysis.store';
@@ -11,6 +11,7 @@ import { ChartHeader } from './ChartHeader';
 import { ChartOverlayLegend } from './ChartOverlayLegend';
 import { ChartTradingPanel } from './ChartTradingPanel';
 import { ChartLoadingIndicator } from './ChartLoadingIndicator';
+import { debounce } from '@/lib/utils/debounce';
 
 // Dynamic imports to avoid SSR issues with LWC
 const BaseChart = dynamic(() => import('./BaseChart').then(mod => mod.BaseChart), { ssr: false });
@@ -30,7 +31,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     activeTool,
     getIndicators,
     getDrawings,
-    timeframe, // New
+    timeframe,
     range // ✅ Read Range
   } = useAnalysisStore();
 
@@ -52,22 +53,40 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   const data = historicalData;
   const volData = volumeData;
 
+  // ═══════════════════════════════════════════════════════════
+  // 🛡️ PHASE 5: Debounced Subscribe/Unsubscribe (Rate Limit Protection)
+  // ═══════════════════════════════════════════════════════════
+  const debouncedInitRef = useRef(
+    debounce((sym: string, tf: string | undefined, rng: string | undefined) => {
+      initializeSimulation(sym, tf, rng);
+    }, 300) // 300ms debounce
+  );
+
+  // Debounced subscribe to prevent rapid sub/unsub cycles
+  const debouncedSubscribeRef = useRef(
+    debounce((sym: string) => {
+      fetch('/api/v1/market/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: [sym] })
+      }).catch(err => console.error('Failed to subscribe:', err));
+    }, 250) // 250ms debounce
+  );
+
   // 1. Data Fetching (Simulation / History)
   useEffect(() => {
     // Reset interaction on symbol change
     useAnalysisStore.getState().cancelDrawing();
     stopSimulation();
     
-    // 🔥 INSTITUTIONAL PATTERN: Server-side subscription
-    // Subscribe to symbol via API (supervisor manages ref-counting)
-    fetch('/api/v1/market/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbols: [symbol] })
-    }).catch(err => console.error('Failed to subscribe:', err));
+    // 🛡️ DEBOUNCED Subscribe (250ms protection)
+    // Rapid symbol switching: RELIANCE → INFY → TCS → HDFC
+    // Without debounce: 4 subscribe calls in 1s
+    // With debounce: Only HDFC fires (last symbol)
+    debouncedSubscribeRef.current(symbol);
     
-    // Fetch History with Range
-    initializeSimulation(symbol, undefined, range); // Pass range
+    // 🛡️ DEBOUNCED Fetch History with Range (300ms protection)
+    debouncedInitRef.current(symbol, timeframe, range);
     
     // Start Live Updates (No fake simulated ticks, just listening)
     startSimulation();
@@ -76,13 +95,14 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
       stopSimulation();
       
       // 🔥 Unsubscribe on unmount (ref-counted - won't disconnect if others using it)
+      // Note: Not debounced because cleanup should be immediate
       fetch('/api/v1/market/subscribe', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbols: [symbol] })
       }).catch(err => console.error('Failed to unsubscribe:', err));
     };
-  }, [symbol, timeframe, range, initializeSimulation, startSimulation, stopSimulation]); // Added range to deps
+  }, [symbol, timeframe, range, startSimulation, stopSimulation]); // 🔥 FIX: Store actions are stable, don't re-run effect
 
   // 2. Live Candle Updates (via SSE)
   // The existing SSE stream (use-market-stream.ts) now calls updateLiveCandle
@@ -269,11 +289,16 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
 
   // Infinite Scroll Handler (Memoized to prevent BaseChart re-creation loop)
   const handleLoadMore = useCallback(() => {
-    if (historicalData.length === 0) return;
+    // Prevent if already fetching or no data
+    if (isFetchingHistory || historicalData.length === 0) return;
+    
     const firstCandle = historicalData[0];
-    // Use current range (default 1d)
-    fetchMoreHistory(symbol, range || '1d', firstCandle.time as number);
-  }, [historicalData, symbol, range, fetchMoreHistory]);
+    const currentRange = range || '1d';
+    
+    console.log(`🔄 Loading more data before ${new Date((firstCandle.time as number) * 1000).toISOString()}`);
+    
+    fetchMoreHistory(symbol, currentRange, firstCandle.time as number);
+  }, [historicalData, symbol, range, fetchMoreHistory, isFetchingHistory]);
  
   return (
     <div className="relative w-full h-full group">
@@ -347,13 +372,15 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
                       </div>
                   )}
 
-                  <BaseChart 
-                    {...chartProps} 
-                    height={undefined} 
-                    symbol={symbol} 
-                    onChartReady={setChartApi}
-                    onLoadMore={handleLoadMore} // ✅ Pass Handler
-                  />
+                  {historicalData.length > 0 && (
+                   <BaseChart 
+                     {...chartProps} 
+                     height={500}
+                     symbol={symbol} 
+                     onChartReady={setChartApi}
+                     onLoadMore={handleLoadMore}
+                   />
+                   )}
                </div>
 
               

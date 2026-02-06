@@ -163,6 +163,22 @@ class RealTimeMarketService extends EventEmitter {
     /**
      * Unsubscribe from instruments
      */
+    async unsubscribe(symbols: string[]): Promise<void> {
+        if (!this.initialized) return;
+
+        console.log(`📡 RealTimeMarketService: Unsubscribing from ${symbols.length} symbols`);
+        
+        // Delegate to MarketFeedSupervisor (which handles ref-counting)
+        marketFeedSupervisor.unsubscribe(symbols);
+
+        // Update local set
+        symbols.forEach(s => {
+            // We don't remove from this.subscribers immediately because 
+            // supervisor might still have other subscribers for these symbols.
+            // But we should probably keep local state in sync if we want strict tracking.
+            // For now, let's trust supervisor.
+        });
+    }
 
     /**
      * Fetch snapshot prices via REST API and seed the cache

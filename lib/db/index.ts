@@ -7,8 +7,9 @@ import { logger } from "../logger";
 // Use standard node-postgres Pool
 // This supports transactions perfectly and works in standard Node.js environments
 const pool = new Pool({
-    connectionString: config.db.url,
-    ssl: { rejectUnauthorized: false } // Required for Neon
+    connectionString: config.db.url + "?sslmode=require", // Enforce SSL
+    // Note: We deliberately rely on the connection string or system certs
+    // Never use rejectUnauthorized: false in production
 });
 
 // Initialize Drizzle with the schema

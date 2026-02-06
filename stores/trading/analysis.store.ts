@@ -89,10 +89,10 @@ export interface AnalysisState {
   isAnalysisMode: boolean;
   setAnalysisMode: (isOpen: boolean) => void;
 
-  timeframe: string; // '1m' | '5m' etc.
+  timeframe: string; // '1m' | '5m' etc. (DEPRECATED - use interval)
   setTimeframe: (tf: string) => void;
 
-  range: string; // '1d', '5d', '1mo', '3mo', '6mo', '1y', '3y', '5y'
+  range: string; // '1D', '5D', '1M', '3M', '6M', '1Y', '5Y'
   setRange: (r: string) => void;
 
   activeTool: ToolType;
@@ -141,10 +141,10 @@ export const useAnalysisStore = create<AnalysisState>()(
       isAnalysisMode: false,
       setAnalysisMode: (isOpen) => set({ isAnalysisMode: isOpen }),
 
-      timeframe: '5m', // Default
+      timeframe: '5m', // Default (DEPRECATED)
       setTimeframe: (tf) => set({ timeframe: tf }),
 
-      range: '1d', // Default to 1 Day
+      range: '1D', // Default to 1 Day
       setRange: (r) => set({ range: r }),
 
       activeTool: 'crosshair',
@@ -433,7 +433,7 @@ export const useAnalysisStore = create<AnalysisState>()(
     {
       name: 'analysis-storage', // Keep same key? Might want to migrate or reset if structure changed.
       // Ideally new key to avoid conflicts with old flat structure
-      version: 2,
+      version: 3, // Incremented for interval state
       partialize: (state) => ({
         symbolState: state.symbolState, // Only persist data
         // activeTool: state.activeTool // Optional: persist tool selection? User requested "defaults" so maybe not.

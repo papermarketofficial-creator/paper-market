@@ -1,4 +1,4 @@
-import { CandlestickData } from 'lightweight-charts';
+import { CandlestickData, Time } from 'lightweight-charts';
 import { NormalizedTick } from './tick-bus';
 import { EventEmitter } from 'events';
 
@@ -142,7 +142,7 @@ export class CandleEngine extends EventEmitter {
             // 🆕 NEW CANDLE
             // ═══════════════════════════════════════════════════════════
             const newCandle: CandlestickData = {
-                time: alignedTime,
+                time: alignedTime as Time,
                 open: tick.price,
                 high: tick.price,
                 low: tick.price,

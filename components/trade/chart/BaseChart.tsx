@@ -89,22 +89,34 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         borderColor: '#1F2937',
         timeVisible: true,
         secondsVisible: false,
+        rightOffset: 12, // ✅ Add space on right
         // Configure timezone to IST (UTC+5:30)
-        // Lightweight Charts doesn't have built-in timezone support,
-        // but we can format the display using localeString
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000);
-          return date.toLocaleTimeString('en-IN', {
-            timeZone: 'Asia/Kolkata',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
+          // Efficiently check for midnight in IST
+          const timeStr = date.toLocaleTimeString('en-IN', { 
+            timeZone: 'Asia/Kolkata', 
+            hour12: false, 
+            hour: '2-digit', 
+            minute: '2-digit' 
           });
+          
+          // If midnight (Daily/Weekly candles) OR 24:00 edge case -> Show Date
+          if (timeStr === '00:00' || timeStr === '24:00') {
+              return date.toLocaleDateString('en-IN', { 
+                timeZone: 'Asia/Kolkata', 
+                day: 'numeric', 
+                month: 'short' 
+              });
+          }
+          // Intraday -> Show Time
+          return timeStr;
         },
       },
       rightPriceScale: {
         borderColor: '#1F2937',
         visible: true,
+        autoScale: true, // ✅ Ensure auto-scaling
       },
       localization: {
         timeFormatter: (time: number) => {
@@ -122,6 +134,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       crosshair: { mode: CrosshairMode.Normal }
     });
 
+    // 1. Candlestick Series
     const candlestickSeriesInstance = chart.addSeries(CandlestickSeries, {
       upColor: '#089981',   // ✅ Matte Green
       downColor: '#F23645', // ✅ Matte Red
@@ -131,20 +144,48 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       wickDownColor: '#F23645',
     });
 
+    // Set candlestick scale margins (top 75% of chart)
+    candlestickSeriesInstance.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.05,    // 5% padding from top
+        bottom: 0.25, // Leave 25% for volume + gap
+      },
+    });
+
+    // 2. Volume Series (Overlay)
+    const volumeSeriesInstance = chart.addSeries(HistogramSeries, {
+      color: '#26a69a',
+      priceFormat: {
+        type: 'volume',
+      },
+      priceScaleId: '', // Overlay on same scale (but we use margins to separate)
+    });
+    
+    // Position Volume at bottom 20%
+    volumeSeriesInstance.priceScale().applyOptions({
+      scaleMargins: {
+        top: 0.80, // Start at 80% down (5% gap from candles)
+        bottom: 0,
+      },
+    });
+
     // Infinite Scroll Monitor
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        if (range && range.from < 5 && !isFetchingRef.current) {
+        // 🔥 Prefetch earlier for seamless UX (no loading indicators visible)
+        if (range && range.from < 40 && !isFetchingRef.current) {
              if (onLoadMore) {
                  // Throttle locally to prevent spam
                  isFetchingRef.current = true;
                  onLoadMore();
-                 setTimeout(() => isFetchingRef.current = false, 2000); // 2s cooldown
+                 // 3s cooldown to prevent rapid requests
+                 setTimeout(() => isFetchingRef.current = false, 3000);
              }
         }
     });
 
     chartRef.current = chart;
     candleSeriesRef.current = candlestickSeriesInstance;
+    volumeSeriesRef.current = volumeSeriesInstance; // ✅ Store ref
     setChartInstance(chart); // Trigger re-render to mount DrawingManager
     
     if (onChartReady) {
@@ -155,8 +196,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       chart.remove();
       chartRef.current = null;
     };
-  }, [height, onChartReady, onLoadMore]);
- // Run once on mount, height handled by separate effect
+  }, []); // 🔥 CRITICAL: Empty deps = mount once, never recreate
+  // height/callbacks are stable enough, don't remount chart for them
 
   // ═══════════════════════════════════════════════════════════
   // 🛠️ CHART CONTROLLER INTEGRATION: Direct updates via RAF batching
@@ -201,12 +242,37 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   // 🔥 SEPARATE EFFECT: Handle data updates without remounting
   // ═══════════════════════════════════════════════════════════
   useEffect(() => {
-    if (!chartControllerRef.current || !data || data.length === 0) return;
+    const controller = chartControllerRef.current;
+    
+    // 🛡️ RACE CONDITION FIX: Ensure controller exists and has valid series
+    // When switching stocks, old controller might be destroyed while new data arrives
+    if (!controller || !data || data.length === 0) return;
+    
+    // Double-check the controller still has a valid series (not destroyed)
+    const stats = controller.getStats();
+    if (!stats.hasSeries) {
+        console.warn(`⚠️ Skipping data update - controller series not ready for ${symbol}`);
+        return;
+    }
     
     // Update chart data via controller (no remount!)
-    chartControllerRef.current.setData(data);
+    controller.setData(data);
     console.log(`📊 Chart data updated: ${data.length} candles for ${symbol}`);
   }, [data, symbol]); // Listen to data changes, update via controller
+
+  // Handle Volume Updates
+  useEffect(() => {
+    // 🛡️ RACE CONDITION FIX: Store local reference to prevent null during stock switch
+    const volumeSeries = volumeSeriesRef.current;
+    
+    if (volumeSeries && volumeData && volumeData.length > 0) {
+        try {
+            volumeSeries.setData(volumeData);
+        } catch (error) {
+            console.warn(`⚠️ Failed to update volume data:`, error);
+        }
+    }
+  }, [volumeData]);
 
   // 1.5 Handle Resize with ResizeObserver
   useEffect(() => {

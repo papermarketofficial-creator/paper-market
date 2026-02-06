@@ -53,7 +53,10 @@ export class ChartController {
      * to max 60/sec (aligned with browser paint cycle).
      */
     updateCandle(candle: CandlestickData) {
-        if (!this.series) {
+        // 🛡️ RACE CONDITION FIX: Store local reference
+        const series = this.series;
+        
+        if (!series) {
             console.warn(`⚠️ ChartController: No series attached for ${this.chartId}`);
             return;
         }
@@ -66,17 +69,25 @@ export class ChartController {
         // ═══════════════════════════════════════════════════════════
         if (!this.rafId) {
             this.rafId = requestAnimationFrame(() => {
-                if (this.pendingUpdate && this.series) {
-                    // Execute update
-                    this.series.update(this.pendingUpdate);
-                    this.updateCount++;
+                // 🛡️ RACE CONDITION FIX: Re-check series in RAF callback
+                const currentSeries = this.series;
+                
+                if (this.pendingUpdate && currentSeries) {
+                    try {
+                        // Execute update
+                        currentSeries.update(this.pendingUpdate);
+                        this.updateCount++;
 
-                    // Sample logging (every 100 updates)
-                    if (this.updateCount % 100 === 0) {
-                        console.log(`📈 ChartController [${this.chartId}]: ${this.updateCount} updates processed`);
+                        // Sample logging (every 100 updates)
+                        if (this.updateCount % 100 === 0) {
+                            console.log(`📈 ChartController [${this.chartId}]: ${this.updateCount} updates processed`);
+                        }
+
+                        this.pendingUpdate = null;
+                    } catch (error) {
+                        // Series destroyed during RAF callback
+                        console.warn(`⚠️ ChartController [${this.chartId}]: Series destroyed during update`, error);
                     }
-
-                    this.pendingUpdate = null;
                 }
                 this.rafId = null;
             });
@@ -89,13 +100,33 @@ export class ChartController {
      * Set full dataset (for initial load or symbol change)
      */
     setData(data: CandlestickData[]) {
-        if (!this.series) {
+        // 🛡️ RACE CONDITION FIX: Store local reference to prevent null between check and usage
+        // This happens when switching stocks - chart destroys while data update is in flight
+        const series = this.series;
+        
+        if (!series) {
             console.warn(`⚠️ ChartController: No series attached for ${this.chartId}`);
             return;
         }
 
-        this.series.setData(data);
-        console.log(`📊 ChartController [${this.chartId}]: Set ${data.length} candles`);
+        // 🔥 CRITICAL: lightweight-charts requires data sorted by time (ascending)
+        // Sort before passing to avoid "data must be asc ordered by time" error
+        const sortedData = [...data].sort((a, b) => {
+            const timeA = typeof a.time === 'number' ? a.time : new Date(a.time as any).getTime() / 1000;
+            const timeB = typeof b.time === 'number' ? b.time : new Date(b.time as any).getTime() / 1000;
+            return timeA - timeB;
+        });
+
+        // 🔥 NO CAPPING HERE - Store layer handles it correctly
+        // Store caps only on symbol/range change, NOT during pagination
+        // This allows infinite scroll to work properly
+        try {
+            series.setData(sortedData);
+            console.log(`📊 ChartController [${this.chartId}]: Set ${sortedData.length} candles`);
+        } catch (error) {
+            // Series was destroyed mid-call (rapid stock switching)
+            console.warn(`⚠️ ChartController [${this.chartId}]: Series destroyed during setData`, error);
+        }
     }
 
     /**

@@ -2,83 +2,48 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePositionsStore } from '@/stores/trading/positions.store';
 import { useMarketStore } from '@/stores/trading/market.store';
-import { toast } from 'sonner';
 import { tickBus } from '@/lib/trading/tick-bus';
-
-// ═══════════════════════════════════════════════════════════
-// 🛠️ GLOBAL CONNECTION FLAG: Prevent React Strict Mode duplicates
-// ═══════════════════════════════════════════════════════════
-let globalEventSource: EventSource | null = null;
-let isConnecting = false;
+import { getMarketStream } from '@/lib/sse'; // Import Singleton
 
 export const useMarketStream = () => {
-    const { updateAllPositionsPrices, positions } = usePositionsStore();
-    const { stocks, updateStockPrice } = useMarketStore();
-    const eventSourceRef = useRef<EventSource | null>(null);
+    const { updateAllPositionsPrices } = usePositionsStore();
+    const { updateStockPrice, instruments: allInstruments, updateLiveCandle } = useMarketStore();
     const [isConnected, setIsConnected] = useState(false);
 
-    const positionSymbolsStr = positions.map(p => p.symbol).sort().join(',');
-    const watchlistSymbolsStr = stocks.map(s => s.symbol).sort().join(',');
-    const simulatedSymbol = useMarketStore.getState().simulatedSymbol;
-
     useEffect(() => {
-        // ... previous logic using internal values ...
-        // Note: inside useEffect we should re-derive valid symbols if needed
-        // But here we rely on the effect re-running when the strings change.
+        // ═══════════════════════════════════════════════════════════
+        // 📡 TRANSPORT LAYER: Singleton Connection
+        // ═══════════════════════════════════════════════════════════
+        // We ask the singleton for the active stream.
+        // We do NOT create a new one every time.
+        const eventSource = getMarketStream();
         
-        const { simulatedSymbol: currentSimulatedSymbol, instruments: allInstruments } = useMarketStore.getState();
-
-        // Collect symbols to subscribe to:
-        const positionSymbols = positions.map(p => p.symbol);
-        const watchlistSymbols = stocks.map(s => s.symbol);
-        const activeSymbol = currentSimulatedSymbol ? [currentSimulatedSymbol] : [];
-        
-        const allSymbols = [...new Set([...positionSymbols, ...watchlistSymbols, ...activeSymbol])];
-
-        if (allSymbols.length === 0) {
-            console.log('⚠️ SSE: No symbols to subscribe to');
-            return;
+        // Update local state based on current readiness
+        if (eventSource.readyState === 1) {
+            setIsConnected(true);
         }
 
         // ═══════════════════════════════════════════════════════════
-        // 🛠️ GUARD: Prevent duplicate connections (React Strict Mode)
+        // 📨 MESSAGE HANDLING
         // ═══════════════════════════════════════════════════════════
-        if (globalEventSource || isConnecting) {
-            console.log('⚠️ SSE: Already connected or connecting, skipping duplicate');
-            eventSourceRef.current = globalEventSource;
-            return;
-        }
-
-        isConnecting = true;
-        isConnecting = true;
-
-        // Construct SSE URL with symbols
-        const url = `/api/v1/market/stream?symbols=${allSymbols.join(',')}`;
-        console.log('📡 SSE: Connecting to', url, 'Symbols:', allSymbols);
-
-        const eventSource = new EventSource(url);
-        eventSourceRef.current = eventSource;
-        globalEventSource = eventSource;
+        // We attach our listener to the singleton.
+        // NOTE: If multiple components use this, they sort of fight for onmessage.
+        // ideally use addEventListener, but for now we follow the pattern.
         
-        // ... (rest of the effect logic is same, just need to close correctly)
-        eventSource.onopen = () => {
-             console.log("✅ Market Stream Connected - SSE is LIVE");
-             setIsConnected(true);
-             isConnecting = false; // Reset flag on successful connection
-        };
-
         eventSource.onmessage = (event) => {
-             // ... existing message handler ...
-             console.log('📨 RAW SSE Event:', event.data); // Debug log
+             // console.log('📨 RAW SSE Event:', event.data); 
              try {
-                if (event.data.startsWith(':')) return;
+                if (event.data.startsWith(':')) return; // Heartbeat/Ping
                 const message = JSON.parse(event.data);
-                console.log('📦 Parsed SSE Message:', message); // Debug log
-                if (message.type === 'connected') return;
+                
+                if (message.type === 'connected') {
+                    setIsConnected(true);
+                    return;
+                }
 
                 if (message.type === 'tick') {
                     const quote = message.data;
-                    console.log('📊 SSE Tick Received:', quote.symbol, quote.price);
+                    // console.log('📊 SSE Tick:', quote.symbol, quote.price);
                     
                     let tradingSymbol = quote.symbol;
 
@@ -94,7 +59,6 @@ export const useMarketStream = () => {
                     // ═══════════════════════════════════════════════════════════
                     // 🚌 HIGH-PERFORMANCE PATH: Emit to Client TickBus
                     // ═══════════════════════════════════════════════════════════
-                    // This feeds: TickBus → CandleEngine → ChartController (RAF batching @ 60 FPS)
                     tickBus.emitTick({
                         symbol: tradingSymbol,
                         price: quote.price,
@@ -107,13 +71,12 @@ export const useMarketStream = () => {
                     // ═══════════════════════════════════════════════════════════
                     // 📊 LEGACY PATH: Update stores for watchlist/positions
                     // ═══════════════════════════════════════════════════════════
+                    // These are fast Zustand updates
                     updateAllPositionsPrices({ [tradingSymbol]: quote.price });
                     updateStockPrice(tradingSymbol, quote.price, quote.close);
                     
-                    const { updateLiveCandle } = useMarketStore.getState();
-                    // Use actual tick timestamp (in milliseconds) from Upstox, convert to seconds
+                    // Update candle (if relevant)
                     const tickTime = quote.timestamp ? Math.floor(quote.timestamp / 1000) : Math.floor(Date.now() / 1000);
-                    console.log('📈 Updating live candle for:', tradingSymbol, 'Price:', quote.price, 'Time:', tickTime);
                     updateLiveCandle({
                         price: quote.price,
                         volume: quote.volume,
@@ -125,36 +88,37 @@ export const useMarketStream = () => {
             }
         };
 
-        eventSource.onerror = (err) => {
-            console.error("❌ Market Stream Error", err);
-            setIsConnected(false);
-            eventSource.close();
+        eventSource.onopen = () => {
+             console.log("✅ Market Stream Connected (Hook)");
+             setIsConnected(true);
         };
 
-        return () => {
-            console.log("🔴 Cleanup called - checking if should close");
-            console.trace("Cleanup stack trace"); // See what's triggering cleanup
-            
-            // Only close if this effect instance created the connection
-            if (eventSourceRef.current && eventSourceRef.current === globalEventSource) {
-                console.log("🔴 Closing Market Stream (this instance owns it)");
-                eventSourceRef.current.close();
-                globalEventSource = null;
-            } else {
-                console.log("⚠️ Cleanup skipped - connection owned by another instance");
-            }
-            
-            eventSourceRef.current = null;
-            isConnecting = false;
+        eventSource.onerror = (err) => {
+            console.error("❌ Market Stream Error (Hook view)", err);
+            // Don't close, let singleton/browser retry
+            setIsConnected(false);
         };
-    }, [
-        positionSymbolsStr, 
-        watchlistSymbolsStr, 
-        simulatedSymbol
-        // ❌ REMOVED: updateAllPositionsPrices, updateStockPrice
-        // These are Zustand store functions - they're stable and don't need to be in deps
-        // Including them causes the effect to re-run on every render!
-    ]);
+
+        // ═══════════════════════════════════════════════════════════
+        // 🧹 CLEANUP: Do NOT close connection
+        // ═══════════════════════════════════════════════════════════
+        return () => {
+            console.log("🧘 Hook unmounting - detaching listeners but KEEPING connection");
+            // We ideally should remove listeners if we used addEventListener.
+            // With onmessage, setting it to null stops updates for this hook instance.
+            // eventSource.onmessage = null; 
+            // BUT: If other components rely on this singleton, clearing it kills their updates too.
+            // Since we assume this hook is used once (Layout), this is acceptable.
+            // If moved to provider, this logic changes slightly.
+            
+            // For now, we leave it or clear it?
+            // "Singleton owns lifecycle"
+            // If we clear onmessage, we stop processing ticks. 
+            // If we navigate away, we probably WANT to stop processing ticks to save CPU.
+            // So:
+            eventSource.onmessage = null; 
+        };
+    }, []); // ✅ FIX: No dependencies = Connect ONCE
 
     return { isConnected };
 };

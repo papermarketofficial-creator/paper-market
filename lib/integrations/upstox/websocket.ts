@@ -15,16 +15,23 @@ declare global {
 type MarketUpdateCallback = (data: unknown) => void;
 
 // ═══════════════════════════════════════════════════════════
-// 🛠️ PROTOBUF PATH RESOLUTION: Use absolute path from project root
+// 🚨 PROTOBUF LOADING STRATEGY
 // ═══════════════════════════════════════════════════════════
+// We load the .proto file directly from the public folder.
+// This avoids bundling issues and webpack complex configurations.
 const PROTO_PATH = path.join(
-    process.cwd(), // Points to project root in Next.js
-    "lib", "integrations", "upstox", "proto", "MarketDataFeedV3.proto"
+    process.cwd(),
+    "public",
+    "proto",
+    "MarketDataFeedV3.proto"
 );
 
+// Lazy singleton for protobuf root
 let protobufRoot: any = null;
 
-function loadProtobuf() {
+function getProtobufRoot() {
+    if (protobufRoot) return protobufRoot;
+
     console.log("📂 Attempting to load proto from:", PROTO_PATH);
 
     if (!fs.existsSync(PROTO_PATH)) {
@@ -35,15 +42,13 @@ function loadProtobuf() {
     try {
         protobufRoot = protobuf.loadSync(PROTO_PATH);
         console.log("✅ Protobuf loaded successfully");
-        return true;
+        return protobufRoot;
     } catch (error) {
         console.error("❌ Failed to parse proto file:", error);
         throw error;
     }
 }
 
-// Load immediately on module init
-loadProtobuf();
 
 export class UpstoxWebSocket {
     private static instance: UpstoxWebSocket | null = null;
@@ -123,6 +128,19 @@ export class UpstoxWebSocket {
                 initialKeys, // Use actual symbols only (no fallback)
                 initialMode
             );
+
+            // ═══════════════════════════════════════════════════════════
+            // 🚨 PROTOBUF INJECTION
+            // ═══════════════════════════════════════════════════════════
+            // SDK tries to load proto during connect(), so inject before that
+            // This prevents the ENOENT error from .next directory
+            const feeder = (this.streamer as any)?.streamer;
+            const root = getProtobufRoot();
+            
+            if (feeder && root) {
+                feeder.protobufRoot = root;
+                console.log("✅ Protobuf pre-injected into SDK feeder");
+            }
 
             console.log("STEP 5: attaching events");
             // Setup Event Handlers
@@ -223,11 +241,13 @@ export class UpstoxWebSocket {
         // The internal feeder is only available AFTER connect(), so we patch here.
         // ─────────────────────────────────────────────────────────────────
         const feeder = (this.streamer as any)?.streamer;
-        if (feeder && protobufRoot) {
-            feeder.protobufRoot = protobufRoot;
+        const root = getProtobufRoot();
+        
+        if (feeder && root) {
+            feeder.protobufRoot = root;
             console.log("✅ Protobuf injected into SDK feeder");
         } else {
-            console.error("❌ HACK FAIL: Could not inject protobufRoot. Feeder:", !!feeder, "Root:", !!protobufRoot);
+            console.error("❌ HACK FAIL: Could not inject protobufRoot. Feeder:", !!feeder, "Root:", !!root);
         }
         // ─────────────────────────────────────────────────────────────────
         

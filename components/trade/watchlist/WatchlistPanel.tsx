@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -27,6 +27,7 @@ interface WatchlistPanelProps {
 export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSearch }: WatchlistPanelProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newWatchlistName, setNewWatchlistName] = useState('');
+  const subscribedSymbolsRef = useRef<string[]>([]);
 
   const { 
       watchlists, 
@@ -41,6 +42,46 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
 
   // Show all instruments
   const localMatches = instruments;
+
+  // ═══════════════════════════════════════════════════════════
+  // 🔥 SUBSCRIBE TO ALL WATCHLIST STOCKS FOR REAL-TIME UPDATES
+  // ═══════════════════════════════════════════════════════════
+  useEffect(() => {
+    if (instruments.length === 0) return;
+
+    // Subscribe to all watchlist stocks
+    const symbols = instruments.map(stock => stock.symbol);
+    
+    // Check if we're already subscribed to these exact symbols
+    const symbolsKey = symbols.sort().join(',');
+    const currentKey = subscribedSymbolsRef.current.sort().join(',');
+    
+    if (symbolsKey === currentKey) {
+      // Already subscribed to these symbols, skip
+      return;
+    }
+
+    console.log('📡 Subscribing to', symbols.length, 'watchlist stocks:', symbols);
+
+    fetch('/api/v1/market/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ symbols, action: 'subscribe' })
+    }).catch(err => console.error('Failed to subscribe to watchlist:', err));
+
+    subscribedSymbolsRef.current = symbols;
+
+    // Cleanup: Unsubscribe when watchlist changes or component unmounts
+    return () => {
+      console.log('🔕 Unsubscribing from', symbols.length, 'watchlist stocks');
+      fetch('/api/v1/market/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols, action: 'unsubscribe' })
+      }).catch(err => console.error('Failed to unsubscribe from watchlist:', err));
+      subscribedSymbolsRef.current = [];
+    };
+  }, [instruments, activeWatchlistId]); // Use watchlist ID instead of instruments array
 
   const handleCreateWatchlist = async () => {
     if (!newWatchlistName.trim()) return;

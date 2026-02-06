@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { tickBus } from '@/lib/trading/tick-bus';
+import { getMarketStream } from '@/lib/sse'; // 🔥 USE SINGLETON
 
 // ═══════════════════════════════════════════════════════════
 // 📡 MARKET STREAM CONTEXT: Single SSE connection for entire app
@@ -17,122 +18,94 @@ const MarketStreamContext = createContext<MarketStreamContextValue | null>(null)
 /**
  * 🔥 CRITICAL: Single SSE connection provider
  * 
- * Mount this ONCE at root layout level.
+ * Mount this ONCE at dashboard layout level.
  * Child components consume via useMarketStreamStatus hook.
  * 
- * Why: Prevents multiple SSE connections that cause:
- * - Duplicate upstream subscriptions
- * - Broker throttling
- * - Ghost subscriptions
- * - Partial feeds
+ * Uses getMarketStream() singleton to prevent duplicate connections
+ * from both this context AND use-market-stream.ts hook.
  */
 export function MarketStreamProvider({ children }: { children: React.ReactNode }) {
     const [status, setStatus] = useState<MarketStreamContextValue['status']>('connecting');
     const [error, setError] = useState<string>();
     
     useEffect(() => {
-        console.log('🔌 MarketStreamProvider: Establishing SINGLE SSE connection');
+        console.log('🔌 MarketStreamProvider: Using SSE singleton');
         
-        let eventSource: EventSource | null = null;
-        let reconnectAttempts = 0;
-        const maxReconnectAttempts = 5;
+        // 🔥 CRITICAL: Use singleton instead of raw EventSource
+        // This prevents duplicate connections
+        const eventSource = getMarketStream();
         
-        // 🔥 CRITICAL: Tab sleep detection
+        // 🔥 Tab sleep detection
         let lastHeartbeat = Date.now();
         let heartbeatCheckInterval: NodeJS.Timeout | null = null;
         
-        function connect() {
-            try {
-                eventSource = new EventSource('/api/v1/market/stream');
-                
-                eventSource.onopen = () => {
-                    console.log('✅ SSE Connected');
-                    setStatus('connected');
-                    setError(undefined);
-                    reconnectAttempts = 0;
-                    lastHeartbeat = Date.now();
-                    
-                    // Start heartbeat monitoring
-                    if (heartbeatCheckInterval) clearInterval(heartbeatCheckInterval);
-                    heartbeatCheckInterval = setInterval(() => {
-                        const timeSinceHeartbeat = Date.now() - lastHeartbeat;
-                        
-                        // 🔥 CRITICAL: Detect dead connection (browser sleep, network issue)
-                        if (timeSinceHeartbeat > 30000) {
-                            console.warn(`⚠️ No heartbeat for ${timeSinceHeartbeat/1000}s, reconnecting...`);
-                            eventSource?.close();
-                            connect();
-                        }
-                    }, 10000); // Check every 10s
-                };
-                
-                eventSource.onmessage = (event) => {
-                    try {
-                        const message = JSON.parse(event.data);
-                        
-                        // Handle different message types
-                        if (message.type === 'connected') {
-                            console.log('📡 SSE: Server confirmed connection');
-                        } else if (message.type === 'heartbeat') {
-                            // 🔥 Server heartbeat
-                            lastHeartbeat = Date.now();
-                        } else if (message.type === 'tick') {
-                            // Update heartbeat on any tick
-                            lastHeartbeat = Date.now();
-                            // 🔥 CRITICAL: Emit to TickBus (batched dispatch with backpressure)
-                            tickBus.emitTick(message.data);
-                        } else if (message.type === 'error') {
-                            console.error('❌ SSE Server Error:', message.error);
-                            setError(message.error);
-                        }
-                    } catch (err) {
-                        console.error('❌ Failed to parse SSE message:', err);
-                    }
-                };
-                
-                eventSource.onerror = (err) => {
-                    console.error('❌ SSE Error:', err);
-                    setStatus('error');
-                    eventSource?.close();
-                    
-                    if (heartbeatCheckInterval) {
-                        clearInterval(heartbeatCheckInterval);
-                        heartbeatCheckInterval = null;
-                    }
-                    
-                    // Exponential backoff reconnect
-                    if (reconnectAttempts < maxReconnectAttempts) {
-                        const delay = Math.min(1000 * Math.pow(2, reconnectAttempts) + Math.random() * 500, 30000);
-                        reconnectAttempts++;
-                        
-                        console.log(`🔄 Reconnecting SSE in ${delay}ms (attempt ${reconnectAttempts})`);
-                        setTimeout(connect, delay);
-                    } else {
-                        setError('Maximum reconnect attempts reached');
-                        setStatus('disconnected');
-                    }
-                };
-            } catch (err) {
-                console.error('❌ Failed to create EventSource:', err);
-                setStatus('error');
-                setError(err instanceof Error ? err.message : 'Unknown error');
-            }
+        // Check if already connected
+        if (eventSource.readyState === EventSource.OPEN) {
+            setStatus('connected');
         }
         
-        // Initial connection
-        connect();
+        // Start heartbeat monitoring
+        heartbeatCheckInterval = setInterval(() => {
+            const timeSinceHeartbeat = Date.now() - lastHeartbeat;
+            
+            // Detect dead connection (browser sleep, network issue)
+            if (timeSinceHeartbeat > 30000 && status === 'connected') {
+                console.warn(`⚠️ No heartbeat for ${timeSinceHeartbeat/1000}s`);
+                setStatus('error');
+            }
+        }, 10000);
         
-        // Cleanup on unmount
+        const handleOpen = () => {
+            console.log('✅ SSE Connected (Context)');
+            setStatus('connected');
+            setError(undefined);
+            lastHeartbeat = Date.now();
+        };
+        
+        const handleMessage = (event: MessageEvent) => {
+            try {
+                const message = JSON.parse(event.data);
+                
+                if (message.type === 'connected') {
+                    console.log('📡 SSE: Server confirmed connection');
+                    setStatus('connected');
+                } else if (message.type === 'heartbeat') {
+                    lastHeartbeat = Date.now();
+                } else if (message.type === 'tick') {
+                    lastHeartbeat = Date.now();
+                    // Emit to TickBus
+                    tickBus.emitTick(message.data);
+                } else if (message.type === 'error') {
+                    console.error('❌ SSE Server Error:', message.error);
+                    setError(message.error);
+                }
+            } catch (err) {
+                console.error('❌ Failed to parse SSE message:', err);
+            }
+        };
+        
+        const handleError = (err: Event) => {
+            console.error('❌ SSE Error (Context):', err);
+            setStatus('error');
+        };
+        
+        // Attach listeners
+        eventSource.addEventListener('open', handleOpen);
+        eventSource.addEventListener('message', handleMessage);
+        eventSource.addEventListener('error', handleError);
+        
+        // Cleanup
         return () => {
-            console.log('🔴 MarketStreamProvider: Closing SSE connection');
+            console.log('🧹 MarketStreamProvider: Detaching listeners (NOT closing singleton)');
             if (heartbeatCheckInterval) {
                 clearInterval(heartbeatCheckInterval);
             }
-            if (eventSource) {
-                eventSource.close();
-            }
+            eventSource.removeEventListener('open', handleOpen);
+            eventSource.removeEventListener('message', handleMessage);
+            eventSource.removeEventListener('error', handleError);
+            // 🔥 DO NOT close singleton - other components may still use it
         };
-    }, []); // Empty deps - connect once, never reconnect due to React
+    }, [status]);
     
     return (
         <MarketStreamContext.Provider value={{ status, error }}>
@@ -143,12 +116,6 @@ export function MarketStreamProvider({ children }: { children: React.ReactNode }
 
 /**
  * Hook to access market stream status
- * 
- * Usage:
- * ```tsx
- * const { status } = useMarketStreamStatus();
- * if (status === 'connected') { // Show live indicator }
- * ```
  */
 export function useMarketStreamStatus() {
     const context = useContext(MarketStreamContext);

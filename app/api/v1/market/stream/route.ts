@@ -6,6 +6,7 @@ import { tickBus } from "@/lib/trading/tick-bus";
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // Required for EventEmitter and long-running connections
+const SSE_HEARTBEAT_INTERVAL = 15000;
 
 export async function GET(req: NextRequest) {
     const session = await auth();
@@ -27,6 +28,13 @@ export async function GET(req: NextRequest) {
 
     const stream = new ReadableStream({
         start(controller) {
+            // ═══════════════════════════════════════════════════════════
+            // 🚨 PHASE 0: SSE Connection Counter (Baseline Visibility)
+            // ═══════════════════════════════════════════════════════════
+            const globalAny = globalThis as any;
+            globalAny.__SSE_COUNT = (globalAny.__SSE_COUNT || 0) + 1;
+            console.log("ACTIVE SSE:", globalAny.__SSE_COUNT);
+            
             console.log('📡 SSE: Stream started for client');
             // Send initial connection message
             controller.enqueue(encoder.encode(`data: {"type":"connected"}\n\n`));
@@ -62,6 +70,12 @@ export async function GET(req: NextRequest) {
 
             // Cleanup on close
             req.signal.addEventListener('abort', () => {
+                // ═══════════════════════════════════════════════════════════
+                // 🚨 PHASE 0: Decrement SSE counter on disconnect
+                // ═══════════════════════════════════════════════════════════
+                const globalAny = globalThis as any;
+                globalAny.__SSE_COUNT = (globalAny.__SSE_COUNT || 0) - 1;
+                
                 clearInterval(heartbeat);
                 tickBus.off('tick', onTick);
                 controller.close();

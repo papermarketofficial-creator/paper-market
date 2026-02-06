@@ -12,7 +12,7 @@ import { UpstoxWebSocket } from "@/lib/integrations/upstox/websocket";
 async function main(): Promise<void> {
     console.log("Testing Upstox WebSocket connection...\n");
 
-    const ws = new UpstoxWebSocket();
+    const ws = UpstoxWebSocket.getInstance();
     let tickCount = 0;
 
     try {

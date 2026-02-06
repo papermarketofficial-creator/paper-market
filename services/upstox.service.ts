@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { upstoxTokens, type NewUpstoxToken } from "@/lib/db/schema";
+import { upstoxTokens, type NewUpstoxToken, instruments } from "@/lib/db/schema";
 import { eq, gt, desc } from "drizzle-orm";
 import { logger } from "@/lib/logger";
 import { ApiError } from "@/lib/errors";
@@ -20,6 +20,16 @@ export class UpstoxService {
     apiSecret: process.env.UPSTOX_API_SECRET || "",
     redirectUri: process.env.UPSTOX_REDIRECT_URI || "",
   };
+
+  // ═══════════════════════════════════════════════════════════
+  // 🚨 PHASE 3: Token Cache (Prevent DB hits on reconnect)
+  // ═══════════════════════════════════════════════════════════
+  // WHY: Reconnect path must be memory-only. DB hits = latency spikes.
+  // Reconnect storms → DB storms → system latency (cascade failure)
+  private static cachedToken: string | null = null;
+  private static expiry = 0;
+  // 🔥 CRITICAL: promise lock to prevent stampedes
+  private static tokenPromise: Promise<string | null> | null = null;
 
   /**
    * Generate the Authorization URL for user login
@@ -124,16 +134,46 @@ export class UpstoxService {
 
   /**
    * Get ANY valid token for system-wide background tasks (Stream)
+   * 🚨 PHASE 3: Cached to prevent DB hits on reconnect
    */
   static async getSystemToken(): Promise<string | null> {
-    const [record] = await db
-      .select()
-      .from(upstoxTokens)
-      .where(gt(upstoxTokens.expiresAt, new Date())) // Must be valid
-      .orderBy(desc(upstoxTokens.updatedAt)) // Get most recently used
-      .limit(1);
+    const now = Date.now();
 
-    return record ? record.accessToken : null;
+    // Return cached token if still valid (with 5min buffer)
+    if (this.cachedToken && now < this.expiry - 300000) {
+      return this.cachedToken;
+    }
+
+    // 🔥 CRITICAL: promise lock
+    if (this.tokenPromise) {
+        return this.tokenPromise;
+    }
+
+    this.tokenPromise = (async () => {
+        // Fetch from DB
+        const [record] = await db
+        .select()
+        .from(upstoxTokens)
+        .where(gt(upstoxTokens.expiresAt, new Date())) // Must be valid
+        .orderBy(desc(upstoxTokens.updatedAt)) // Get most recently used
+        .limit(1);
+
+        if (!record) {
+        this.cachedToken = null;
+        this.expiry = 0;
+        this.tokenPromise = null;
+        return null;
+        }
+
+        // Cache the token
+        this.cachedToken = record.accessToken;
+        this.expiry = new Date(record.expiresAt).getTime();
+        this.tokenPromise = null; // Clear promise when done
+
+        return this.cachedToken;
+    })();
+
+    return this.tokenPromise;
   }
 
   /**
@@ -213,6 +253,41 @@ export class UpstoxService {
     * @param fromDate - YYYY-MM-DD
     * @param toDate - YYYY-MM-DD
     */
+    private static requestInflights = new Map<string, Promise<any[]>>();
+
+    /**
+     * Resolve valid candle source to prevent dual-fetching
+     */
+    private static resolveCandleSource(
+        interval: string,
+        fromDate: string,
+        toDate: string
+    ): 'intraday' | 'historical' {
+        const today = new Date().toISOString().slice(0, 10);
+
+        // 🟢 ROUTING RULE: If requesting today's data with 1-minute interval -> Use Intraday endpoint
+        if (interval === "1" && fromDate === today && toDate === today) {
+            return "intraday";
+        }
+
+        // ✅ REMOVED: Incorrect 3-day limit validation
+        // Upstox API V3 supports:
+        // - 1-15 minute intervals: 1 MONTH max retrieval
+        // - >15 minute intervals: 1 QUARTER max retrieval
+        // Let Upstox API handle validation and return proper errors
+
+        return "historical";
+    }
+
+   /**
+    * Fetch Historical Candle Data (API V3)
+    * @param instrumentKey - NSE_EQ|INE...
+    * @param unit - minutes, hours, days, weeks, months
+    * @param interval - 1, 3, 5, 30, etc.
+    * @param fromDate - YYYY-MM-DD
+    * @param toDate - YYYY-MM-DD
+    */
+
    static async getHistoricalCandleData(
        instrumentKey: string, 
        unit: string, 
@@ -220,71 +295,160 @@ export class UpstoxService {
        fromDate: string, 
        toDate: string
     ): Promise<any[]> {
+        // ═══════════════════════════════════════════════════════════
+        // 🚨 CRITICAL RULE: Single Routing Authority
+        // ═══════════════════════════════════════════════════════════
+        // This method is the ONLY place that decides between Intraday/Historical endpoints.
+        // Do NOT call getIntraDayCandleData() separately from the outside.
+        // The CandleOrchestrator relies on this internal routing.
+        
+        // 🟢 ROUTING TABLE: Decide Source Logic
+        
+        // 🟢 ROUTING TABLE: Decide Source Logic
+        // Service layer must NEVER mutate request parameters
+        // CandleOrchestrator is the SINGLE AUTHORITY for date resolution
+
+        // 🟢 ROUTING EXECUTION
+        const source = this.resolveCandleSource(interval, fromDate, toDate);
+        
+        if (source === 'intraday') {
+             logger.debug({ instrumentKey }, "🔀 Routing to Intraday Endpoint (Optimized Path)");
+             return this.getIntraDayCandleData(instrumentKey, unit, interval);
+        }
+
         // 1. Generate Cache Key
         const cacheKey = CacheKeys.historicalCandles(instrumentKey, interval, fromDate, toDate);
+
+        // ═══════════════════════════════════════════════════════════
+        // ⚡ LOAD SPIKE PREVENTION: Request Coalescing
+        // ═══════════════════════════════════════════════════════════
+        if (this.requestInflights.has(cacheKey)) {
+            // logger.debug({ cacheKey }, "⚡ Coalescing inflight request");
+            return this.requestInflights.get(cacheKey)!;
+        }
 
         // 2. Check Cache
         const cachedData = cache.get(cacheKey) as any[];
         if (cachedData) {
-            logger.debug({ cacheKey }, "History served from CACHE");
+            // logger.debug({ cacheKey }, "History served from CACHE");
             return cachedData;
         }
 
-        const token = await this.getSystemToken();
-        if (!token) throw new Error("No token");
+        const fetchPromise = (async () => {
+            try {
+                const token = await this.getSystemToken();
+                if (!token) throw new Error("No token");
 
-        // Construct URL: /v3/historical-candle/:instrumentKey/:unit/:interval/:toDate/:fromDate
-        // Note: Docs say /:toDate/:fromDate order for path params or is it query?
-        // Let's re-read the doc closely. 
-        // Doc says: GET /historical-candle/:instrument_key/:unit/:interval/:to_date/:from_date
-        // Example: .../minutes/1/2025-01-02/2025-01-01
+                const encodedKey = encodeURIComponent(instrumentKey);
+                const urlV3 = `https://api.upstox.com/v3/historical-candle/${encodedKey}/${unit}/${interval}/${toDate}/${fromDate}`;
         
-        const encodedKey = encodeURIComponent(instrumentKey);
-
-
-        const urlV3 = `https://api.upstox.com/v3/historical-candle/${encodedKey}/${unit}/${interval}/${toDate}/${fromDate}`;
- 
-         try {
-             logger.info({ instrumentKey, interval }, "Fetching History from UPSTOX API");
-             
-             await upstoxRateLimiter.waitForToken("history");
-             const response = await fetch(urlV3, {
-                 headers: {
-                     Authorization: `Bearer ${token}`,
-                    Accept: "application/json"
-                }
-            });
-
-            const data = await response.json();
-            if (data.status === "success" && data.data && data.data.candles) {
-                const candles = data.data.candles;
+                logger.info({ instrumentKey, interval }, "Fetching History from UPSTOX API");
                 
-                // 3. Store in Cache
-                // 🔥 INSTITUTIONAL RULE: Historical candles DON'T change
-                // TTL Strategy:
-                // - 1m candles: 5 minutes (balance freshness + reduce API calls)
-                // - 5m-30m: 15 minutes  
-                // - 1h+: 30 minutes
-                // - Daily+: 24 hours (candles are final)
-                let ttl = 1000 * 60 * 5; // Default 5 min for 1m
+                await upstoxRateLimiter.waitForToken("history");
+                const response = await fetch(urlV3, {
+                    headers: {
+                        Authorization: `Bearer ${token}`,
+                        Accept: "application/json"
+                    }
+                });
+
+                const data = await response.json();
                 
-if (interval === "day" || interval === "week" || interval === "month") {
-                    ttl = 1000 * 60 * 60 * 24; // 24 hours for daily+ (candles don't change!)
-                } else if (parseInt(interval) >= 60) {
-                    ttl = 1000 * 60 * 30; // 30 mins for hourly
-                } else if (parseInt(interval) >= 5) {
-                      ttl = 1000 * 60 * 15; // 15 mins for 5m-30m
+                if (!response.ok) {
+                    console.error(`❌ Upstox API Error (${response.status}):`, data);
+                    logger.error({ instrumentKey, interval, error: data }, "Upstox API returned error");
+                    return [];
                 }
+                
+                if (data.status === "success" && data.data && data.data.candles) {
+                    let candles = data.data.candles;
+                    
+                    // ═══════════════════════════════════════════════════════════
+                    // 🔗 BRIDGE GAP: Merge Intraday Data for 1-minute intervals
+                    // ═══════════════════════════════════════════════════════════
+                    // Problem: Historical endpoint returns completed candles up to some point in the past
+                    // Live candles start at current time, creating a visual gap
+                    // Solution: Fetch today's intraday data and merge it with historical data
+                    const today = new Date().toISOString().slice(0, 10);
+                    const shouldMergeIntraday = interval === "1" && toDate === today;
+                    
+                    console.log('🔍 Intraday Merge Check:', { interval, toDate, today, shouldMergeIntraday });
+                    
+                    if (shouldMergeIntraday) {
+                        try {
+                            logger.debug({ instrumentKey }, "🔗 Fetching intraday data to bridge gap");
+                            console.log('🔗 Fetching intraday data to bridge gap for', instrumentKey);
+                            const intradayCandles = await this.getIntraDayCandleData(instrumentKey, unit, interval);
+                            
+                            if (intradayCandles.length > 0) {
+                                // Merge: Remove duplicates by timestamp
+                                const historicalTimestamps = new Set(candles.map((c: any) => c[0]));
+                                const newIntradayCandles = intradayCandles.filter((c: any) => !historicalTimestamps.has(c[0]));
+                                
+                                console.log('🔗 Intraday Merge:', {
+                                    historicalCount: candles.length,
+                                    intradayTotal: intradayCandles.length,
+                                    intradayNew: newIntradayCandles.length,
+                                    lastHistorical: candles[candles.length - 1]?.[0],
+                                    firstIntraday: intradayCandles[0]?.[0]
+                                });
+                                
+                                // Combine and sort by timestamp
+                                candles = [...candles, ...newIntradayCandles].sort((a, b) => {
+                                    const timeA = new Date(a[0]).getTime();
+                                    const timeB = new Date(b[0]).getTime();
+                                    return timeA - timeB;
+                                });
+                                
+                                logger.debug({ 
+                                    historical: candles.length - newIntradayCandles.length, 
+                                    intraday: newIntradayCandles.length,
+                                    total: candles.length 
+                                }, "🔗 Merged intraday data with historical");
+                                
+                                console.log('✅ Merged! Total candles:', candles.length);
+                            } else {
+                                console.log('⚠️ No intraday candles returned');
+                            }
+                        } catch (error) {
+                            // Don't fail the whole request if intraday fetch fails
+                            console.error('❌ Failed to fetch intraday data:', error);
+                            logger.warn({ instrumentKey, error }, "Failed to fetch intraday data for merge");
+                        }
+                    }
+                    
+                    // 3. Store in Cache
+                    let ttl = 1000 * 60 * 5; // Default 5 min for 1m
+                    
+                    if (interval === "day" || interval === "week" || interval === "month") {
+                        ttl = 1000 * 60 * 60 * 24; 
+                    } else if (parseInt(interval) >= 60) {
+                        ttl = 1000 * 60 * 30; 
+                    } else if (parseInt(interval) >= 5) {
+                        ttl = 1000 * 60 * 15; 
+                    }
 
-                cache.set(cacheKey, candles, { ttl } as any);
-                logger.debug({ cacheKey, ttl }, "History cached");
-
-                return candles;
+                    cache.set(cacheKey, candles, { ttl } as any);
+                    return candles;
+                }
+                
+                console.warn("⚠️ Upstox API returned no candles:", { instrumentKey, unit, interval, fromDate, toDate, response: data });
+                return [];
+            } catch (error) {
+                console.error("❌ Historical Data Fetch Failed:", error);
+                logger.error({ instrumentKey, interval, error }, "Historical fetch exception");
+                return [];
             }
-            return [];
-        } catch (error) {
-            console.error("Historical Data Fetch Failed", error);
-            return [];
+        })();
+
+        // Track Inflight
+        this.requestInflights.set(cacheKey, fetchPromise);
+
+        try {
+            return await fetchPromise;
+        } finally {
+            // Cleanup inflight map
+            this.requestInflights.delete(cacheKey);
         }
    }
 
@@ -319,6 +483,40 @@ if (interval === "day" || interval === "week" || interval === "month") {
            return [];
        }
    }
+
+    /**
+     * Resolve Instrument Key from Symbol (Cached)
+     * 🚨 PHASE 4: Memory Cache to prevent DB spam
+     */
+    static async resolveInstrumentKey(symbol: string): Promise<string> {
+        // 1. Check Cache (24h TTL)
+        const cacheKey = CacheKeys.instrumentKey(symbol);
+        const cached = cache.get(cacheKey) as string;
+        if (cached) {
+            // logger.debug({ symbol }, "Instrument Key resolved from CACHE");
+            return cached;
+        }
+
+        // 2. DB Lookup
+        try {
+            const [instrument] = await db
+                .select({ token: instruments.instrumentToken })
+                .from(instruments)
+                .where(eq(instruments.tradingsymbol, symbol))
+                .limit(1);
+            
+            if (instrument) {
+                // 3. Cache Result
+                cache.set(cacheKey, instrument.token, { ttl: 86400000 }); // 24 hours
+                return instrument.token;
+            }
+        } catch (e) {
+            logger.error({ err: e, symbol }, "Instrument DB Lookup Failed");
+        }
+        
+        // 4. Fallback
+        return `NSE_EQ|${symbol}`;
+    }
 
     /**
      * Fetch Intraday Candle Data (V3 API) - For current trading day

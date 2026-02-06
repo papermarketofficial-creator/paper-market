@@ -3,6 +3,13 @@ import { EventEmitter } from 'events';
 // ═══════════════════════════════════════════════════════════
 // 🎯 NORMALIZED TICK: Broker-agnostic tick format
 // ═══════════════════════════════════════════════════════════
+declare global {
+    var __TPS: number | undefined;
+    var __TPS_INTERVAL: NodeJS.Timeout | undefined;
+    var __tickBus: TickBus | undefined;
+    var __MEMORY_INTERVAL: NodeJS.Timeout | undefined;
+}
+
 export interface NormalizedTick {
     symbol: string;          // Trading symbol (e.g., "RELIANCE")
     price: number;           // Last traded price
@@ -81,6 +88,21 @@ class TickBus {
         : (fn: () => void) => setTimeout(fn, 0);
     
     emitTick(tick: NormalizedTick) {
+        // ═══════════════════════════════════════════════════════════
+        // 🚨 PHASE 0: Tick Throughput Logging (Baseline Visibility)
+        // ═══════════════════════════════════════════════════════════
+        if (!globalThis.__TPS) {
+            globalThis.__TPS = 0;
+        }
+        if (!globalThis.__TPS_INTERVAL) {
+            globalThis.__TPS_INTERVAL = setInterval(() => {
+                const tps = (globalThis.__TPS || 0) / 5;
+                console.log("TICKS/SEC:", tps.toFixed(1));
+                globalThis.__TPS = 0;
+            }, 5000);
+        }
+        globalThis.__TPS = (globalThis.__TPS || 0) + 1;
+        
         this.tickCount++;
         
         // Track per-symbol counts
@@ -133,6 +155,15 @@ class TickBus {
     }
 
     /**
+     * Get listener count for a specific event (Mocking EventEmitter API)
+     */
+    listenerCount(event: string): number {
+        // We only support 'tick' event for now
+        if (event === 'tick') return this.listeners.size;
+        return 0;
+    }
+
+    /**
      * Reset statistics
      */
     resetStats() {
@@ -153,4 +184,15 @@ export const tickBus = globalForTickBus.__tickBus || new TickBus();
 
 if (process.env.NODE_ENV !== 'production') {
     globalForTickBus.__tickBus = tickBus;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 🚨 PHASE 0: Memory Logging (Baseline Visibility)
+// ═══════════════════════════════════════════════════════════
+// Initialize memory monitoring on module load (runs once per Node process)
+if (typeof process !== 'undefined' && process.memoryUsage && !globalThis.__MEMORY_INTERVAL) {
+    globalThis.__MEMORY_INTERVAL = setInterval(() => {
+        const m = process.memoryUsage();
+        console.log("HEAP MB:", (m.heapUsed / 1024 / 1024).toFixed(1));
+    }, 15000);
 }

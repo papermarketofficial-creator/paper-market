@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
         session: {
             state: healthMetrics.sessionState,
             isConnected: healthMetrics.isConnected,
-            timeSinceHeartbeatMs: healthMetrics.timeSinceHeartbeatMs,
+            timeSinceLastTickMs: healthMetrics.timeSinceLastTickMs,
             circuitBreakerOpen: healthMetrics.circuitBreakerOpen,
             reconnectFailures: healthMetrics.reconnectFailures,
         },

@@ -1,0 +1,1 @@
+CREATE INDEX "idxInstrumentsName" ON "instruments" USING btree ("name");

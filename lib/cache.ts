@@ -18,7 +18,8 @@ export const cache = new LRUCache<string, any>(options);
 
 export const CacheKeys = {
   historicalCandles: (instrumentKey: string, interval: string, fromDate: string, toDate: string) => 
-    `history:${instrumentKey}:${interval}:${fromDate}:${toDate}`
+    `history:${instrumentKey}:${interval}:${fromDate}:${toDate}`,
+  instrumentKey: (symbol: string) => `instrument:${symbol}`
 };
 
 export function getFromCache<T>(key: string): T | undefined {

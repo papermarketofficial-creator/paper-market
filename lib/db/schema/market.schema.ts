@@ -49,6 +49,7 @@ export const instruments = pgTable('instruments', {
     return {
         uniqueExchangeToken: uniqueIndex('uniqueExchangeToken').on(t.exchange, t.exchangeToken),
         idxSymbol: index('idxInstrumentsSymbol').on(t.tradingsymbol),
+        idxName: index('idxInstrumentsName').on(t.name),
         idxExpiry: index('idxInstrumentsExpiry').on(t.expiry),
         idxSegment: index('idxInstrumentsSegment').on(t.segment),
     }
