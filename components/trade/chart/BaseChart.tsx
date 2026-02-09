@@ -61,6 +61,13 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     onLoadMoreRef.current = onLoadMore;
   }, [onLoadMore]);
 
+  // 🔥 ULTRA-PRO OPTIMIZATION: Cached Intl formatters (created once, reused forever)
+  // Prevents expensive formatter creation in hot path (tickMarkFormatter runs many times per frame)
+  const monthFormatter = useRef(new Intl.DateTimeFormat('en-IN', { month: 'short' }));
+  const dayFormatter = useRef(new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' }));
+  const timeFormatter = useRef(new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }));
+  const yearFormatter = useRef(new Intl.DateTimeFormat('en-IN', { year: 'numeric' }));
+
   // State to force re-render when chart is ready
   const [chartInstance, setChartInstance] = useState<IChartApi | null>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 400 });
@@ -97,74 +104,32 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         borderColor: '#1F2937',
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 12, // ✅ Add space on right
-        // ✅ Dynamic tick formatter based on range
-        tickMarkFormatter: (time: number) => {
+        rightOffset: 12,
+        // 🔥 INSTITUTIONAL-GRADE TICK MARK FORMATTER
+        // Uses tick weight (not timeframe) for automatic zoom adaptation
+        // Matches TradingView/Bloomberg professional behavior
+        tickMarkFormatter: (time: number, tickMarkType: number) => {
           const date = new Date(time * 1000);
-          const currentRange = range?.toUpperCase() || '1D';
           
-          // ✅ Professional X-Axis Formatting
-          // Intraday (1D, 5D) → Show time only
-          if (currentRange === '1D' || currentRange === '5D') {
-            return date.toLocaleTimeString('en-IN', { 
-              timeZone: 'Asia/Kolkata', 
-              hour12: false, 
-              hour: '2-digit', 
-              minute: '2-digit' 
-            });
+          // 🔥 Tick weight-based formatting (professional approach)
+          // tickMarkType: 0=year, 1=month, 2=day, 3=hour, 4=minute
+          switch (tickMarkType) {
+            case 0: // Year boundary
+              return yearFormatter.current.format(date);
+            
+            case 1: // Month boundary
+              return monthFormatter.current.format(date);
+            
+            case 2: // Day boundary
+              return dayFormatter.current.format(date);
+            
+            case 3: // Hour boundary
+            case 4: // Minute boundary
+              return timeFormatter.current.format(date);
+            
+            default:
+              return dayFormatter.current.format(date);
           }
-          
-          // Mid-range (1M) → Show date
-          if (currentRange === '1M') {
-            return date.toLocaleDateString('en-IN', { 
-              timeZone: 'Asia/Kolkata', 
-              day: 'numeric', 
-              month: 'short' 
-            });
-          }
-          
-          // 6M range → Show month + year
-          if (currentRange === '6M') {
-            return date.toLocaleDateString('en-IN', { 
-              timeZone: 'Asia/Kolkata', 
-              month: 'short',
-              year: 'numeric'
-            });
-          }
-          
-          // 1Y range → Show quarterly (every 3 months)
-          if (currentRange === '1Y') {
-            const month = date.getMonth();
-            // Show Jan, Apr, Jul, Oct only (quarterly)
-            if (month === 0 || month === 3 || month === 6 || month === 9) {
-              return date.toLocaleDateString('en-IN', { 
-                timeZone: 'Asia/Kolkata', 
-                month: 'short',
-                year: 'numeric'
-              });
-            }
-            return ''; // Hide other months
-          }
-          
-          // 5Y range → Show yearly (January only)
-          if (currentRange === '5Y') {
-            const month = date.getMonth();
-            // Show only January of each year
-            if (month === 0) {
-              return date.toLocaleDateString('en-IN', { 
-                timeZone: 'Asia/Kolkata', 
-                year: 'numeric'
-              });
-            }
-            return ''; // Hide other months
-          }
-          
-          // Default fallback
-          return date.toLocaleDateString('en-IN', { 
-            timeZone: 'Asia/Kolkata', 
-            day: 'numeric', 
-            month: 'short' 
-          });
         },
       },
       rightPriceScale: {

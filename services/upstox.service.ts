@@ -362,6 +362,7 @@ export class UpstoxService {
                 const encodedKey = encodeURIComponent(instrumentKey);
                 const urlV3 = `https://api.upstox.com/v3/historical-candle/${encodedKey}/${unit}/${interval}/${toDate}/${fromDate}`;
         
+                console.log('🔍 Upstox API URL:', urlV3);
                 logger.info({ instrumentKey, interval }, "Fetching History from UPSTOX API");
                 
                 await upstoxRateLimiter.waitForToken("history");
@@ -372,7 +373,9 @@ export class UpstoxService {
                     }
                 });
 
+                console.log('🔍 Upstox API Response Status:', response.status, response.statusText);
                 const data = await response.json();
+                console.log('🔍 Upstox API Response Data:', JSON.stringify(data).substring(0, 200));
                 
                 if (!response.ok) {
                     console.error(`❌ Upstox API Error (${response.status}):`, data);

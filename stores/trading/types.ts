@@ -64,7 +64,9 @@ export interface ChartDataSlice {
   intervalId: NodeJS.Timeout | null;
   activeInterval: string;
   isFetchingHistory: boolean;
+  isInitialLoad: boolean; // 🔥 NEW: Track if this is the first load
   hasMoreHistory: boolean;
+  currentRequestId: number; // 🔥 CRITICAL: Prevent stale fetch overwrites
 
   // Actions
   initializeSimulation: (symbol: string, timeframe?: string, range?: string) => Promise<void>;

@@ -10,7 +10,9 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
   intervalId: null,
   activeInterval: '1m', // Default
   isFetchingHistory: false,
+  isInitialLoad: true, // 🔥 NEW: Track if this is the first load (show full overlay) vs pagination (show header spinner only)
   hasMoreHistory: true,
+  currentRequestId: 0, // 🔥 CRITICAL: Prevent stale fetch overwrites
 
   // ─────────────────────────────────────────────────────────────────
   // 📈 Chart Data Actions
@@ -29,7 +31,9 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
           return;
       }
 
-      set({ isFetchingHistory: true });
+      // 🔥 Pagination load - NOT initial load
+      const requestId = get().currentRequestId + 1;
+      set({ isFetchingHistory: true, isInitialLoad: false, currentRequestId: requestId });
 
       try {
           // 🔥 CRITICAL FIX: Send cursor as YYYY-MM-DD only
@@ -46,6 +50,12 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
           
           const res = await fetch(`/api/v1/market/history?${queryParams}`);
           const data = await res.json();
+
+          // 🔥 CRITICAL: Check if this response is stale
+          if (get().currentRequestId !== requestId) {
+              console.log('⏸️ fetchMoreHistory: Stale response detected, ignoring');
+              return;
+          }
   
           console.log(`📜 API Response:`, { success: data.success, hasData: !!data.data });
           
@@ -162,12 +172,15 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
     console.log(`📊 Detected interval: ${detectedInterval} for range: ${range || timeframe}`);
     
     // 1. Set Loading FIRST to prevent empty-state flash
+    const requestId = get().currentRequestId + 1;
     set({ 
         isFetchingHistory: true, 
+        isInitialLoad: true, // 🔥 Initial load - show full overlay
         historicalData: [], 
         volumeData: [],
         activeInterval: detectedInterval, // 🔥 Store for dynamic tick boundaries
-        hasMoreHistory: true // 🔥 Reset pagination flag
+        hasMoreHistory: true, // 🔥 Reset pagination flag
+        currentRequestId: requestId // 🔥 Track this request
     }); 
     
     try {
@@ -179,6 +192,13 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
         
         const res = await fetch(`/api/v1/market/history?${queryParams}`);
         const data = await res.json();
+
+        // 🔥 CRITICAL: Check if this response is stale (user switched stocks)
+        if (get().currentRequestId !== requestId) {
+            console.log('⏸️ initializeSimulation: Stale response detected, ignoring');
+            set({ isFetchingHistory: false });
+            return;
+        }
 
         console.log(`📊 API Response:`, { success: data.success, hasData: !!data.data });
 

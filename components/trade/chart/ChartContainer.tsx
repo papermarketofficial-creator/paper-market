@@ -10,7 +10,7 @@ import { IndicatorsMenu } from './IndicatorsMenu';
 import { ChartHeader } from './ChartHeader';
 import { ChartOverlayLegend } from './ChartOverlayLegend';
 import { ChartTradingPanel } from './ChartTradingPanel';
-
+import { ChartLoadingIndicator } from './ChartLoadingIndicator';
 import { debounce } from '@/lib/utils/debounce';
 
 // Dynamic imports to avoid SSR issues with LWC
@@ -42,6 +42,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     startSimulation,
     stopSimulation,
     isFetchingHistory, // ✅ Extract
+    isInitialLoad,     // ✅ NEW: Extract to differentiate initial vs pagination loading
     fetchMoreHistory,   // ✅ Extract
     updateLiveCandle    // ✅ Extract for live updates
   } = useMarketStore();
@@ -322,7 +323,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
             onScreenshot={handleScreenshot}
             onMaximize={handleMaximize}
             onSearchClick={onSearchClick}
-            isLoading={historicalData.length === 0 || isFetchingHistory}
+            isLoading={isFetchingHistory && !isInitialLoad} // 🔥 Show spinner in header only during pagination
           />
 
           <div className="flex flex-1 relative min-h-0">
@@ -365,7 +366,12 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
 
                {/* Main Chart */}
                <div className="flex-1 w-full min-h-0 relative">
-
+                  {/* Loading Overlay - ONLY on initial load */}
+                  {isFetchingHistory && isInitialLoad && (
+                      <div className="absolute inset-0 z-50 bg-background/50 flex items-center justify-center">
+                          <ChartLoadingIndicator />
+                      </div>
+                  )}
 
                   {/* Empty State */}
                   {!isFetchingHistory && historicalData.length === 0 && (
