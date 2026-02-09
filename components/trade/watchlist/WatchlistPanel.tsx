@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import { WatchlistItemMenu } from './WatchlistItemMenu';
+import { WatchlistSkeleton } from './WatchlistSkeleton';
 
 interface WatchlistPanelProps {
   instruments: Stock[];
@@ -96,6 +97,13 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
         toast.error('Failed to create watchlist');
     }
   };
+
+  // ═══════════════════════════════════════════════════════════
+  // 💀 SKELETON LOADER: Show placeholders while fetching
+  // ═══════════════════════════════════════════════════════════
+  if (isFetchingWatchlistData && instruments.length === 0) {
+    return <WatchlistSkeleton />;
+  }
 
   return (
     <div className="flex flex-col h-full bg-card border-r border-border w-full max-w-full">
@@ -179,91 +187,84 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
 
       {/* List Content */}
       <ScrollArea className="flex-1">
-        {isFetchingWatchlistData ? (
-             <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground bg-card/50">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <span className="text-xs font-medium">Loading watchlist...</span>
-             </div>
-        ) : (
-            <div className="flex flex-col">
-              {localMatches.map((stock, i) => (
-                <div
-                  key={`${stock.symbol}-${i}`}
-                  onClick={() => onSelect(stock)}
-                  onMouseEnter={() => {
-                    setHoveredSymbol(stock.symbol);
-                    if (stock.instrumentToken) prefetchInstrument(stock.instrumentToken);
-                  }}
-                  onMouseLeave={() => setHoveredSymbol(null)}
-                  className={cn(
-                    "group flex items-center justify-between px-3 py-2.5 border-b border-border/40 cursor-pointer transition-colors hover:bg-accent/50",
-                    selectedSymbol === stock.symbol && "bg-accent border-l-2 border-l-primary"
-                  )}
-                >
-                  {/* Left: Symbol + Name */}
-                  <div className="flex flex-col gap-1 flex-1">
-                    <span className="text-sm font-bold text-foreground">{stock.symbol}</span>
-                    <span className="text-xs text-muted-foreground truncate max-w-[140px]">{stock.name}</span>
-                  </div>
-                  
-                  {/* Right: Price/Percentage OR B/S Buttons */}
-                  <div className="flex items-center gap-2">
-                    {hoveredSymbol !== stock.symbol ? (
-                      // Normal State: Show Price + Percentage
-                      <div className="flex flex-col items-end gap-1">
-                        <span 
-                          className="text-sm font-mono font-semibold"
-                          style={{ color: stock.change >= 0 ? '#089981' : '#F23645' }}
-                        >
-                          {stock.price.toLocaleString('en-IN')}
-                        </span>
-                        <span className="text-xs font-mono text-gray-500">
-                          {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
-                        </span>
-                      </div>
-                    ) : (
-                      // Hover State: Show B/S Buttons + Menu
-                      <>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelect(stock);
-                            (window as any).triggerTrade?.('BUY');
-                          }}
-                          className="h-7 px-3 text-xs font-bold border border-[#089981] text-[#089981] bg-transparent hover:bg-[#089981] hover:text-white transition-colors"
-                        >
-                          B
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onSelect(stock);
-                            (window as any).triggerTrade?.('SELL');
-                          }}
-                          className="h-7 px-3 text-xs font-bold border border-[#F23645] text-[#F23645] bg-transparent hover:bg-[#F23645] hover:text-white transition-colors"
-                        >
-                          S
-                        </Button>
-                        <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-                          <WatchlistItemMenu stock={stock} isInWatchlist={true} />
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-              
-              {localMatches.length === 0 && (
-                <div className="p-4 text-center text-xs text-muted-foreground">
-                  No symbols in watchlist
-                </div>
+        <div className="flex flex-col">
+          {localMatches.map((stock, i) => (
+            <div
+              key={`${stock.symbol}-${i}`}
+              onClick={() => onSelect(stock)}
+              onMouseEnter={() => {
+                setHoveredSymbol(stock.symbol);
+                if (stock.instrumentToken) prefetchInstrument(stock.instrumentToken);
+              }}
+              onMouseLeave={() => setHoveredSymbol(null)}
+              className={cn(
+                "group flex items-center justify-between px-3 py-2.5 border-b border-border/40 cursor-pointer transition-colors hover:bg-accent/50",
+                selectedSymbol === stock.symbol && "bg-accent border-l-2 border-l-primary"
               )}
+            >
+              {/* Left: Symbol + Name */}
+              <div className="flex flex-col gap-1 flex-1">
+                <span className="text-sm font-bold text-foreground">{stock.symbol}</span>
+                <span className="text-xs text-muted-foreground truncate max-w-[140px]">{stock.name}</span>
+              </div>
+              
+              {/* Right: Price/Percentage OR B/S Buttons */}
+              <div className="flex items-center gap-2">
+                {hoveredSymbol !== stock.symbol ? (
+                  // Normal State: Show Price + Percentage
+                  <div className="flex flex-col items-end gap-1">
+                    <span 
+                      className="text-sm font-mono font-semibold"
+                      style={{ color: stock.change >= 0 ? '#089981' : '#F23645' }}
+                    >
+                      {stock.price.toLocaleString('en-IN')}
+                    </span>
+                    <span className="text-xs font-mono text-gray-500">
+                      {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
+                    </span>
+                  </div>
+                ) : (
+                  // Hover State: Show B/S Buttons + Menu
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect(stock);
+                        (window as any).triggerTrade?.('BUY');
+                      }}
+                      className="h-7 px-3 text-xs font-bold border border-[#089981] text-[#089981] bg-transparent hover:bg-[#089981] hover:text-white transition-colors"
+                    >
+                      B
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect(stock);
+                        (window as any).triggerTrade?.('SELL');
+                      }}
+                      className="h-7 px-3 text-xs font-bold border border-[#F23645] text-[#F23645] bg-transparent hover:bg-[#F23645] hover:text-white transition-colors"
+                    >
+                      S
+                    </Button>
+                    <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                      <WatchlistItemMenu stock={stock} isInWatchlist={true} />
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-        )}
+          ))}
+          
+          {!isFetchingWatchlistData && localMatches.length === 0 && (
+            <div className="p-4 text-center text-xs text-muted-foreground">
+              No symbols in watchlist
+            </div>
+          )}
+        </div>
       </ScrollArea>
     </div>
   );

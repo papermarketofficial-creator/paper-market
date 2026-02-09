@@ -12,7 +12,7 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
   instruments: [], // All tradable instruments
   watchlists: [],
   activeWatchlistId: null,
-  isFetchingWatchlistData: false,
+  isFetchingWatchlistData: true,
   
   futures: futuresList,
   options: optionsList,
@@ -63,7 +63,23 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
   },
 
   fetchWatchlistInstruments: async (watchlistId: string) => {
-    set({ isFetchingWatchlistData: true });
+    // ═══════════════════════════════════════════════════════════
+    // 🚀 PERFORMANCE: Show cached data immediately (optimistic UI)
+    // ═══════════════════════════════════════════════════════════
+    const cacheKey = `watchlist_${watchlistId}`;
+    const cached = typeof window !== 'undefined' ? sessionStorage.getItem(cacheKey) : null;
+    if (cached) {
+      try {
+        const cachedStocks = JSON.parse(cached);
+        set({ stocks: cachedStocks, isFetchingWatchlistData: true }); // Show cached, but still fetching
+        console.log('⚡ Showing cached watchlist instantly');
+      } catch (e) {
+        console.warn('Cache parse error, fetching fresh');
+      }
+    } else {
+      set({ isFetchingWatchlistData: true });
+    }
+    
     try {
       const res = await fetch(`/api/v1/watchlists/${watchlistId}`);
       if (!res.ok) {
@@ -87,7 +103,18 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
       }));
       
       set({ stocks });
+      
+      // 🚀 Cache for instant repeat visits
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(cacheKey, JSON.stringify(stocks));
+      }
       console.log('✅ Watchlist loaded with DB prices');
+      
+      // ═══════════════════════════════════════════════════════════
+      // 🚀 PERFORMANCE: Clear loading IMMEDIATELY so UI appears fast
+      // Quotes fetch happens in background (non-blocking)
+      // ═══════════════════════════════════════════════════════════
+      set({ isFetchingWatchlistData: false });
 
       // ═══════════════════════════════════════════════════════════
       // 🔥 FETCH LIVE QUOTES: Update prices immediately like Upstox
@@ -180,9 +207,9 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
 
     } catch (error) {
       console.error('Failed to fetch watchlist instruments:', error);
-    } finally {
-      set({ isFetchingWatchlistData: false });
+      set({ isFetchingWatchlistData: false }); // Clear on error too
     }
+    // 🚀 Note: finally block removed - loading cleared earlier
   },
 
   createWatchlist: async (name: string) => {
