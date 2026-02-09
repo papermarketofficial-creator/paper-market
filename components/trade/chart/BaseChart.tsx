@@ -140,14 +140,36 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       localization: {
         timeFormatter: (time: number) => {
           const date = new Date(time * 1000);
-          return date.toLocaleString('en-IN', {
+          
+          // 🔥 SMART FORMATTING: Detect if this is a daily/weekly/monthly candle
+          // Daily+ candles have time = 00:00 in IST, intraday candles have actual times
+          const timeStr = date.toLocaleTimeString('en-IN', {
             timeZone: 'Asia/Kolkata',
-            month: 'short',
-            day: 'numeric',
             hour: '2-digit',
             minute: '2-digit',
             hour12: false
           });
+          const isDailyOrHigher = timeStr === '00:00';
+          
+          if (isDailyOrHigher) {
+            // Daily/Weekly/Monthly candles → Show date only
+            return date.toLocaleDateString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric'
+            });
+          } else {
+            // Intraday candles → Show date + time
+            return date.toLocaleString('en-IN', {
+              timeZone: 'Asia/Kolkata',
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: false
+            });
+          }
         },
       },
       crosshair: { mode: CrosshairMode.Normal }
