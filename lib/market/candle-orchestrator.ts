@@ -147,8 +147,8 @@ export class CandleOrchestrator {
         const formattedVolume: FormattedVolume[] = validRawCandles.map(c => ({
             time: Math.floor(Date.parse(c[0]) / 1000),
             value: c[5],
-            color: c[4] >= c[1] ? '#22C55E' : '#EF4444' // Green if bullish
-        }));
+            color: c[4] >= c[1] ? '#033d34' : '#61161c' // Darker green/red for dark mode
+        })); 
 
         // 🔥 CRITICAL FIX #2: FORCE SORTING (Broker APIs sometimes return reversed arrays)
         // Lightweight Charts REQUIRES ascending order - not optional

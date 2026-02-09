@@ -27,6 +27,7 @@ interface WatchlistPanelProps {
 export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSearch }: WatchlistPanelProps) {
   const [isCreating, setIsCreating] = useState(false);
   const [newWatchlistName, setNewWatchlistName] = useState('');
+  const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
   const subscribedSymbolsRef = useRef<string[]>([]);
 
   const { 
@@ -189,34 +190,69 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
                 <div
                   key={`${stock.symbol}-${i}`}
                   onClick={() => onSelect(stock)}
-                  onMouseEnter={() => stock.instrumentToken && prefetchInstrument(stock.instrumentToken)}
+                  onMouseEnter={() => {
+                    setHoveredSymbol(stock.symbol);
+                    if (stock.instrumentToken) prefetchInstrument(stock.instrumentToken);
+                  }}
+                  onMouseLeave={() => setHoveredSymbol(null)}
                   className={cn(
-                    "group flex items-center justify-between p-2.5 border-b border-border/40 cursor-pointer transition-colors hover:bg-accent/50",
+                    "group flex items-center justify-between px-3 py-2.5 border-b border-border/40 cursor-pointer transition-colors hover:bg-accent/50",
                     selectedSymbol === stock.symbol && "bg-accent border-l-2 border-l-primary"
                   )}
                 >
-                  <div className="flex flex-col gap-0.5 flex-1">
-                    <span className="text-xs font-bold text-foreground">{stock.symbol}</span>
-                    <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">{stock.name}</span>
+                  {/* Left: Symbol + Name */}
+                  <div className="flex flex-col gap-1 flex-1">
+                    <span className="text-sm font-bold text-foreground">{stock.symbol}</span>
+                    <span className="text-xs text-muted-foreground truncate max-w-[140px]">{stock.name}</span>
                   </div>
                   
+                  {/* Right: Price/Percentage OR B/S Buttons */}
                   <div className="flex items-center gap-2">
-                    <div className="flex flex-col items-end gap-0.5">
-                      <span className={cn(
-                        "text-xs font-mono font-medium",
-                        stock.change >= 0 ? "text-profit" : "text-loss"
-                      )}>
-                        {stock.price.toLocaleString('en-IN')}
-                      </span>
-                      <span className={cn(
-                        "text-[10px] font-mono",
-                        stock.change >= 0 ? "text-profit" : "text-loss"
-                      )}>
-                        {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
-                      </span>
-                    </div>
-                    
-                    <WatchlistItemMenu stock={stock} isInWatchlist={true} />
+                    {hoveredSymbol !== stock.symbol ? (
+                      // Normal State: Show Price + Percentage
+                      <div className="flex flex-col items-end gap-1">
+                        <span 
+                          className="text-sm font-mono font-semibold"
+                          style={{ color: stock.change >= 0 ? '#089981' : '#F23645' }}
+                        >
+                          {stock.price.toLocaleString('en-IN')}
+                        </span>
+                        <span className="text-xs font-mono text-gray-500">
+                          {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
+                        </span>
+                      </div>
+                    ) : (
+                      // Hover State: Show B/S Buttons + Menu
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(stock);
+                            (window as any).triggerTrade?.('BUY');
+                          }}
+                          className="h-7 px-3 text-xs font-bold border border-[#089981] text-[#089981] bg-transparent hover:bg-[#089981] hover:text-white transition-colors"
+                        >
+                          B
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(stock);
+                            (window as any).triggerTrade?.('SELL');
+                          }}
+                          className="h-7 px-3 text-xs font-bold border border-[#F23645] text-[#F23645] bg-transparent hover:bg-[#F23645] hover:text-white transition-colors"
+                        >
+                          S
+                        </Button>
+                        <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+                          <WatchlistItemMenu stock={stock} isInWatchlist={true} />
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}

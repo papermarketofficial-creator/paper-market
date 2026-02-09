@@ -185,17 +185,17 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       wickDownColor: '#F23645',
     });
 
-    // Configure candlestick scale margins (top 75% of chart)
+    // Configure candlestick scale margins (top 70% of chart)
     chart.priceScale('right').applyOptions({
       scaleMargins: {
         top: 0.05,   // 5% from top
-        bottom: 0.25, // Leave 25% for volume
+        bottom: 0.30, // Leave 30% for volume (increased gap)
       },
     });
 
     // 2. Volume Series (SEPARATE price scale for true separation)
     const volumeSeriesInstance = chart.addSeries(HistogramSeries, {
-      color: '#26a69a',
+      color: '#334155', // Dark gray (darker for dark mode)
       priceFormat: {
         type: 'volume',
       },
@@ -204,10 +204,10 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       lastValueVisible: false,
     });
 
-    // Configure volume scale margins (bottom 20% of chart)
+    // Configure volume scale margins (bottom 18% of chart)
     chart.priceScale('volume').applyOptions({
       scaleMargins: {
-        top: 0.8,    // Start at 80% down
+        top: 0.82,    // Start at 82% down (increased gap)
         bottom: 0.02, // 2% from bottom
       },
     });
