@@ -17,8 +17,10 @@ const options = {
 export const cache = new LRUCache<string, any>(options);
 
 export const CacheKeys = {
-  historicalCandles: (instrumentKey: string, interval: string, fromDate: string, toDate: string) => 
-    `history:${instrumentKey}:${interval}:${fromDate}:${toDate}`,
+  // 🔥 CRITICAL FIX: Include unit in cache key
+  // Without unit: "1 minute" and "1 day" have same key → wrong candles served
+  historicalCandles: (instrumentKey: string, unit: string, interval: string, fromDate: string, toDate: string) => 
+    `history:${instrumentKey}:${unit}:${interval}:${fromDate}:${toDate}`,
   instrumentKey: (symbol: string) => `instrument:${symbol}`
 };
 

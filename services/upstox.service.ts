@@ -258,12 +258,32 @@ export class UpstoxService {
     /**
      * Resolve valid candle source to prevent dual-fetching
      */
+    
+    /**
+     * Get today's date in IST timezone (YYYY-MM-DD format)
+     * 🔥 CRITICAL: Never mix UTC + IST in trading systems
+     */
+    private static todayIST(): string {
+        return new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).format(new Date());
+    }
+    
     private static resolveCandleSource(
         interval: string,
         fromDate: string,
         toDate: string
     ): 'intraday' | 'historical' {
-        const today = new Date().toISOString().slice(0, 10);
+        // 🔥 CRITICAL FIX: Use IST timezone consistently
+        // Mixing UTC (.toISOString()) with IST (orchestrator) causes:
+        // - Duplicate fetch windows
+        // - Overlapping merges
+        // - Phantom pagination
+        // - Missing candles
+        const today = this.todayIST();
 
         // 🟢 ROUTING RULE: If requesting today's data with 1-minute interval -> Use Intraday endpoint
         if (interval === "1" && fromDate === today && toDate === today) {
@@ -316,8 +336,8 @@ export class UpstoxService {
              return this.getIntraDayCandleData(instrumentKey, unit, interval);
         }
 
-        // 1. Generate Cache Key
-        const cacheKey = CacheKeys.historicalCandles(instrumentKey, interval, fromDate, toDate);
+        // 1. Generate Cache Key (with unit to prevent collisions)
+        const cacheKey = CacheKeys.historicalCandles(instrumentKey, unit, interval, fromDate, toDate);
 
         // ═══════════════════════════════════════════════════════════
         // ⚡ LOAD SPIKE PREVENTION: Request Coalescing
@@ -363,13 +383,56 @@ export class UpstoxService {
                 if (data.status === "success" && data.data && data.data.candles) {
                     let candles = data.data.candles;
                     
+                    console.log(`🔍 Service: Received ${candles.length} raw candles from Upstox`);
+                    
+                    // 🔥 CRITICAL FIX: HARD numeric validation at service layer
+                    // Service must guarantee clean data - orchestrator should NEVER be defensive
+                    // Upstox can return: "0" (string), NaN, null volume, partial candles (especially near market open)
+                    const beforeFilterCount = candles.length;
+                    candles = candles.filter((c: any) => {
+                        if (!c || !Array.isArray(c) || c.length < 6) {
+                            console.warn('⚠️ Service: Skipping malformed candle:', c);
+                            return false;
+                        }
+                        
+                        // Convert and validate OHLC
+                        const open = Number(c[1]);
+                        const high = Number(c[2]);
+                        const low = Number(c[3]);
+                        const close = Number(c[4]);
+                        const volume = Number(c[5]);
+                        
+                        if (!Number.isFinite(open) || !Number.isFinite(high) || 
+                            !Number.isFinite(low) || !Number.isFinite(close) ||
+                            !Number.isFinite(volume)) {
+                            console.warn('⚠️ Service: Skipping candle with invalid numbers:', {
+                                timestamp: c[0],
+                                open: c[1],
+                                high: c[2],
+                                low: c[3],
+                                close: c[4],
+                                volume: c[5]
+                            });
+                            return false;
+                        }
+                        
+                        return true;
+                    });
+                    
+                    console.log(`🔍 Service: Filtered ${beforeFilterCount - candles.length} invalid candles, ${candles.length} remaining`);
+                    
+                    if (candles.length === 0) {
+                        console.warn('⚠️ Service: All candles filtered out - no valid data from Upstox');
+                        return [];
+                    }
+                    
                     // ═══════════════════════════════════════════════════════════
                     // 🔗 BRIDGE GAP: Merge Intraday Data for 1-minute intervals
                     // ═══════════════════════════════════════════════════════════
                     // Problem: Historical endpoint returns completed candles up to some point in the past
                     // Live candles start at current time, creating a visual gap
                     // Solution: Fetch today's intraday data and merge it with historical data
-                    const today = new Date().toISOString().slice(0, 10);
+                    const today = this.todayIST(); // 🔥 FIX: Use IST consistently
                     const shouldMergeIntraday = interval === "1" && toDate === today;
                     
                     console.log('🔍 Intraday Merge Check:', { interval, toDate, today, shouldMergeIntraday });
@@ -381,9 +444,16 @@ export class UpstoxService {
                             const intradayCandles = await this.getIntraDayCandleData(instrumentKey, unit, interval);
                             
                             if (intradayCandles.length > 0) {
-                                // Merge: Remove duplicates by timestamp
-                                const historicalTimestamps = new Set(candles.map((c: any) => c[0]));
-                                const newIntradayCandles = intradayCandles.filter((c: any) => !historicalTimestamps.has(c[0]));
+                                // 🔥 CRITICAL FIX: Normalize timestamps to Unix time BEFORE deduplication
+                                // Problem: "2026-02-09T09:15:00+05:30" vs "2026-02-09T03:45:00Z" are same moment
+                                // but string comparison fails → duplicates slip through → chart crash
+                                // Solution: Convert to Unix time first, then dedupe
+                                const historicalTimestamps = new Set(
+                                    candles.map((c: any) => new Date(c[0]).getTime())
+                                );
+                                const newIntradayCandles = intradayCandles.filter(
+                                    (c: any) => !historicalTimestamps.has(new Date(c[0]).getTime())
+                                );
                                 
                                 console.log('🔗 Intraday Merge:', {
                                     historicalCount: candles.length,

@@ -52,13 +52,13 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
     // Subscribe to all watchlist stocks
     const symbols = instruments.map(stock => stock.symbol);
     
-    // Check if we're already subscribed to these exact symbols
+    // 🔥 FIX: Create stable key for comparison
     const symbolsKey = symbols.sort().join(',');
     const currentKey = subscribedSymbolsRef.current.sort().join(',');
     
+    // 🔥 FIX: If already subscribed to these exact symbols, skip completely
     if (symbolsKey === currentKey) {
-      // Already subscribed to these symbols, skip
-      return;
+      return; // No cleanup needed - already subscribed
     }
 
     console.log('📡 Subscribing to', symbols.length, 'watchlist stocks:', symbols);
@@ -81,7 +81,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
       }).catch(err => console.error('Failed to unsubscribe from watchlist:', err));
       subscribedSymbolsRef.current = [];
     };
-  }, [instruments, activeWatchlistId]); // Use watchlist ID instead of instruments array
+  }, [activeWatchlistId]); // 🔥 FIX: Only depend on watchlist ID, not instruments array
 
   const handleCreateWatchlist = async () => {
     if (!newWatchlistName.trim()) return;

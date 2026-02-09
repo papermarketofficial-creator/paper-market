@@ -10,7 +10,7 @@ import { IndicatorsMenu } from './IndicatorsMenu';
 import { ChartHeader } from './ChartHeader';
 import { ChartOverlayLegend } from './ChartOverlayLegend';
 import { ChartTradingPanel } from './ChartTradingPanel';
-import { ChartLoadingIndicator } from './ChartLoadingIndicator';
+
 import { debounce } from '@/lib/utils/debounce';
 
 // Dynamic imports to avoid SSR issues with LWC
@@ -289,16 +289,23 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
 
   // Infinite Scroll Handler (Memoized to prevent BaseChart re-creation loop)
   const handleLoadMore = useCallback(() => {
-    // Prevent if already fetching or no data
-    if (isFetchingHistory || historicalData.length === 0) return;
+    console.log(`🔄 handleLoadMore called: historicalData.length=${historicalData.length}`);
+    
+    // ✅ Removed isFetchingHistory check - store's fetchMoreHistory has internal guard
+    if (historicalData.length === 0) {
+        console.log('⏸️ handleLoadMore: No historical data yet, skipping');
+        return;
+    }
     
     const firstCandle = historicalData[0];
     const currentRange = range || '1d';
     
-    console.log(`🔄 Loading more data before ${new Date((firstCandle.time as number) * 1000).toISOString()}`);
+    const firstCandleTime = new Date((firstCandle.time as number) * 1000).toISOString();
+    console.log(`🔄 handleLoadMore: Loading more data before ${firstCandleTime}`);
+    console.log(`🔄 handleLoadMore: Parameters - symbol=${symbol}, range=${currentRange}, endTime=${firstCandle.time}`);
     
     fetchMoreHistory(symbol, currentRange, firstCandle.time as number);
-  }, [historicalData, symbol, range, fetchMoreHistory, isFetchingHistory]);
+  }, [historicalData, symbol, range, fetchMoreHistory]); // ✅ Stable dependencies only
  
   return (
     <div className="relative w-full h-full group">
@@ -358,12 +365,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
 
                {/* Main Chart */}
                <div className="flex-1 w-full min-h-0 relative">
-                  {/* Loading Overlay */}
-                  {isFetchingHistory && (
-                      <div className="absolute inset-0 z-50 bg-background/50 flex items-center justify-center">
-                          <ChartLoadingIndicator />
-                      </div>
-                  )}
+
 
                   {/* Empty State */}
                   {!isFetchingHistory && historicalData.length === 0 && (
@@ -377,6 +379,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
                      {...chartProps} 
                      height={500}
                      symbol={symbol} 
+                     range={range} // ✅ Pass range for dynamic X-axis formatting
                      onChartReady={setChartApi}
                      onLoadMore={handleLoadMore}
                    />

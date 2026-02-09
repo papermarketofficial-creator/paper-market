@@ -30,6 +30,7 @@ export class ChartController {
     private pendingUpdate: CandlestickData | null = null;
     private rafId: number | null = null;
     private updateCount: number = 0;
+    private isDestroyed: boolean = false; // 🔥 NEW: Track destruction state
 
     constructor(chartId: string) {
         this.chartId = chartId;
@@ -40,6 +41,10 @@ export class ChartController {
      * Set the chart series (called from React component)
      */
     setSeries(series: ISeriesApi<'Candlestick'> | null) {
+        if (this.isDestroyed) {
+            console.warn(`⚠️ ChartController [${this.chartId}]: Cannot set series - controller is destroyed`);
+            return;
+        }
         this.series = series;
         if (series) {
             console.log(`✅ Series attached to ChartController: ${this.chartId}`);
@@ -53,6 +58,11 @@ export class ChartController {
      * to max 60/sec (aligned with browser paint cycle).
      */
     updateCandle(candle: CandlestickData) {
+        // 🔥 CRITICAL: Check if destroyed first
+        if (this.isDestroyed) {
+            return; // Silently skip - this is normal during chart transitions
+        }
+        
         // 🛡️ RACE CONDITION FIX: Store local reference
         const series = this.series;
         
@@ -69,6 +79,12 @@ export class ChartController {
         // ═══════════════════════════════════════════════════════════
         if (!this.rafId) {
             this.rafId = requestAnimationFrame(() => {
+                // 🔥 CRITICAL: Check if destroyed during RAF delay
+                if (this.isDestroyed) {
+                    this.rafId = null;
+                    return;
+                }
+                
                 // 🛡️ RACE CONDITION FIX: Re-check series in RAF callback
                 const currentSeries = this.series;
                 
@@ -100,6 +116,12 @@ export class ChartController {
      * Set full dataset (for initial load or symbol change)
      */
     setData(data: CandlestickData[]) {
+        // 🔥 CRITICAL: Check if destroyed first
+        if (this.isDestroyed) {
+            console.warn(`⚠️ ChartController [${this.chartId}]: Cannot setData - controller is destroyed`);
+            return;
+        }
+        
         // 🛡️ RACE CONDITION FIX: Store local reference to prevent null between check and usage
         // This happens when switching stocks - chart destroys while data update is in flight
         const series = this.series;
@@ -109,9 +131,38 @@ export class ChartController {
             return;
         }
 
+        // 🔥 CRITICAL FIX: Filter out candles with null/undefined values
+        // Lightweight Charts throws "Value is null" error if OHLC values are null
+        const validData = data.filter((candle: any) => {
+            if (!candle || candle.time == null) {
+                console.warn(`⚠️ ChartController: Skipping candle with null time:`, candle);
+                return false;
+            }
+            if (candle.open == null || candle.high == null || candle.low == null || candle.close == null) {
+                console.warn(`⚠️ ChartController: Skipping candle with null OHLC:`, {
+                    time: candle.time,
+                    open: candle.open,
+                    high: candle.high,
+                    low: candle.low,
+                    close: candle.close
+                });
+                return false;
+            }
+            return true;
+        });
+
+        if (validData.length < data.length) {
+            console.warn(`🔥 ChartController: Filtered out ${data.length - validData.length} invalid candles`);
+        }
+
+        if (validData.length === 0) {
+            console.error(`❌ ChartController: No valid candles to display`);
+            return;
+        }
+
         // 🔥 CRITICAL: lightweight-charts requires data sorted by time (ascending)
         // Sort before passing to avoid "data must be asc ordered by time" error
-        const sortedData = [...data].sort((a, b) => {
+        const sortedData = [...validData].sort((a, b) => {
             const timeA = typeof a.time === 'number' ? a.time : new Date(a.time as any).getTime() / 1000;
             const timeB = typeof b.time === 'number' ? b.time : new Date(b.time as any).getTime() / 1000;
             return timeA - timeB;
@@ -137,7 +188,8 @@ export class ChartController {
             chartId: this.chartId,
             updateCount: this.updateCount,
             hasSeries: !!this.series,
-            hasPendingUpdate: !!this.pendingUpdate
+            hasPendingUpdate: !!this.pendingUpdate,
+            isDestroyed: this.isDestroyed
         };
     }
 
@@ -145,6 +197,9 @@ export class ChartController {
      * Cleanup (called when component unmounts)
      */
     destroy() {
+        // 🔥 CRITICAL: Mark as destroyed FIRST to prevent any new operations
+        this.isDestroyed = true;
+        
         if (this.rafId) {
             cancelAnimationFrame(this.rafId);
             this.rafId = null;

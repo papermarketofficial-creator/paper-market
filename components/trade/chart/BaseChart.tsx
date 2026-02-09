@@ -26,6 +26,7 @@ interface BaseChartProps {
   height?: number;
   autoResize?: boolean;
   symbol: string;
+  range?: string; // ✅ Add range prop for dynamic formatting
   onChartReady?: (api: IChartApi) => void;
   onLoadMore?: () => void; // ✅ New Prop
 }
@@ -42,6 +43,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   height = 400,
   autoResize = true,
   symbol,
+  range, // ✅ Extract range prop
   onChartReady,
   onLoadMore 
 }, ref) => {
@@ -52,6 +54,12 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<any>[]>>(new Map()); // Map ID to Array of Series
   const isFetchingRef = useRef(false); // Throttle
   const chartControllerRef = useRef<ChartController | null>(null); // Chart controller for direct updates
+  
+  // 🔥 FIX: Use ref for onLoadMore to prevent chart remounting when callback changes
+  const onLoadMoreRef = useRef(onLoadMore);
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore;
+  }, [onLoadMore]);
 
   // State to force re-render when chart is ready
   const [chartInstance, setChartInstance] = useState<IChartApi | null>(null);
@@ -90,33 +98,79 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 12, // ✅ Add space on right
-        // Configure timezone to IST (UTC+5:30)
+        // ✅ Dynamic tick formatter based on range
         tickMarkFormatter: (time: number) => {
           const date = new Date(time * 1000);
-          // Efficiently check for midnight in IST
-          const timeStr = date.toLocaleTimeString('en-IN', { 
-            timeZone: 'Asia/Kolkata', 
-            hour12: false, 
-            hour: '2-digit', 
-            minute: '2-digit' 
-          });
+          const currentRange = range?.toUpperCase() || '1D';
           
-          // If midnight (Daily/Weekly candles) OR 24:00 edge case -> Show Date
-          if (timeStr === '00:00' || timeStr === '24:00') {
+          // ✅ Professional X-Axis Formatting
+          // Intraday (1D, 5D) → Show time only
+          if (currentRange === '1D' || currentRange === '5D') {
+            return date.toLocaleTimeString('en-IN', { 
+              timeZone: 'Asia/Kolkata', 
+              hour12: false, 
+              hour: '2-digit', 
+              minute: '2-digit' 
+            });
+          }
+          
+          // Mid-range (1M) → Show date
+          if (currentRange === '1M') {
+            return date.toLocaleDateString('en-IN', { 
+              timeZone: 'Asia/Kolkata', 
+              day: 'numeric', 
+              month: 'short' 
+            });
+          }
+          
+          // 6M range → Show month + year
+          if (currentRange === '6M') {
+            return date.toLocaleDateString('en-IN', { 
+              timeZone: 'Asia/Kolkata', 
+              month: 'short',
+              year: 'numeric'
+            });
+          }
+          
+          // 1Y range → Show quarterly (every 3 months)
+          if (currentRange === '1Y') {
+            const month = date.getMonth();
+            // Show Jan, Apr, Jul, Oct only (quarterly)
+            if (month === 0 || month === 3 || month === 6 || month === 9) {
               return date.toLocaleDateString('en-IN', { 
                 timeZone: 'Asia/Kolkata', 
-                day: 'numeric', 
-                month: 'short' 
+                month: 'short',
+                year: 'numeric'
               });
+            }
+            return ''; // Hide other months
           }
-          // Intraday -> Show Time
-          return timeStr;
+          
+          // 5Y range → Show yearly (January only)
+          if (currentRange === '5Y') {
+            const month = date.getMonth();
+            // Show only January of each year
+            if (month === 0) {
+              return date.toLocaleDateString('en-IN', { 
+                timeZone: 'Asia/Kolkata', 
+                year: 'numeric'
+              });
+            }
+            return ''; // Hide other months
+          }
+          
+          // Default fallback
+          return date.toLocaleDateString('en-IN', { 
+            timeZone: 'Asia/Kolkata', 
+            day: 'numeric', 
+            month: 'short' 
+          });
         },
       },
       rightPriceScale: {
         borderColor: '#1F2937',
         visible: true,
-        autoScale: true, // ✅ Ensure auto-scaling
+        autoScale: true,
       },
       localization: {
         timeFormatter: (time: number) => {
@@ -134,51 +188,62 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       crosshair: { mode: CrosshairMode.Normal }
     });
 
-    // 1. Candlestick Series
+    // 1. Candlestick Series (uses default 'right' price scale)
     const candlestickSeriesInstance = chart.addSeries(CandlestickSeries, {
-      upColor: '#089981',   // ✅ Matte Green
-      downColor: '#F23645', // ✅ Matte Red
+      upColor: '#089981',
+      downColor: '#F23645',
       borderUpColor: '#089981',
       borderDownColor: '#F23645',
       wickUpColor: '#089981',
       wickDownColor: '#F23645',
     });
 
-    // Set candlestick scale margins (top 75% of chart)
-    candlestickSeriesInstance.priceScale().applyOptions({
+    // Configure candlestick scale margins (top 75% of chart)
+    chart.priceScale('right').applyOptions({
       scaleMargins: {
-        top: 0.05,    // 5% padding from top
-        bottom: 0.25, // Leave 25% for volume + gap
+        top: 0.05,   // 5% from top
+        bottom: 0.25, // Leave 25% for volume
       },
     });
 
-    // 2. Volume Series (Overlay)
+    // 2. Volume Series (SEPARATE price scale for true separation)
     const volumeSeriesInstance = chart.addSeries(HistogramSeries, {
       color: '#26a69a',
       priceFormat: {
         type: 'volume',
       },
-      priceScaleId: '', // Overlay on same scale (but we use margins to separate)
+      priceScaleId: 'volume', // ✅ Separate scale - NOT overlayed
+      priceLineVisible: false,
+      lastValueVisible: false,
     });
-    
-    // Position Volume at bottom 20%
-    volumeSeriesInstance.priceScale().applyOptions({
+
+    // Configure volume scale margins (bottom 20% of chart)
+    chart.priceScale('volume').applyOptions({
       scaleMargins: {
-        top: 0.80, // Start at 80% down (5% gap from candles)
-        bottom: 0,
+        top: 0.8,    // Start at 80% down
+        bottom: 0.02, // 2% from bottom
       },
     });
 
     // Infinite Scroll Monitor
+    console.log('📊 Setting up infinite scroll listener');
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        // 🔥 Prefetch earlier for seamless UX (no loading indicators visible)
-        if (range && range.from < 40 && !isFetchingRef.current) {
-             if (onLoadMore) {
+        // 🔥 Trigger when user scrolls near left edge (matching old working version)
+        if (range && range.from < 10 && !isFetchingRef.current) {
+             console.log(`📊 Infinite scroll triggered: range.from=${range.from}, isFetching=${isFetchingRef.current}`);
+             // 🔥 FIX: Use ref instead of direct callback to prevent chart remounting
+             if (onLoadMoreRef.current) {
                  // Throttle locally to prevent spam
                  isFetchingRef.current = true;
-                 onLoadMore();
-                 // 3s cooldown to prevent rapid requests
-                 setTimeout(() => isFetchingRef.current = false, 3000);
+                 console.log('📊 Calling onLoadMore callback...');
+                 onLoadMoreRef.current();
+                 // 2s cooldown (matching old working version)
+                 setTimeout(() => {
+                     isFetchingRef.current = false;
+                     console.log('📊 Infinite scroll cooldown complete');
+                 }, 2000);
+             } else {
+                 console.warn('⚠️ Infinite scroll triggered but no onLoadMore callback');
              }
         }
     });
@@ -196,8 +261,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       chart.remove();
       chartRef.current = null;
     };
-  }, []); // 🔥 CRITICAL: Empty deps = mount once, never recreate
-  // height/callbacks are stable enough, don't remount chart for them
+  }, []); // 🔥 CRITICAL FIX: Empty deps - chart only mounts once!
+  // onLoadMore changes are handled via ref, not by remounting the entire chart
 
   // ═══════════════════════════════════════════════════════════
   // 🛠️ CHART CONTROLLER INTEGRATION: Direct updates via RAF batching
@@ -205,6 +270,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     if (!candleSeriesRef.current || !symbol) return;
 
+    console.log(`🎨 Initializing ChartController for ${symbol}`);
+    
     // Create instance-based controller for this chart
     const controller = new ChartController(`chart-${symbol}`);
     controller.setSeries(candleSeriesRef.current);
@@ -216,20 +283,24 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     // This enables CandleEngine → ChartRegistry → ChartController
     // Direct updates bypass React/Zustand entirely
     chartRegistry.register(symbol, controller);
+    console.log(`✅ ChartController registered in registry for ${symbol}`);
 
     // ═══════════════════════════════════════════════════════════
     // 🔥 ELITE PATTERN: Load data DIRECTLY into controller
     // ═══════════════════════════════════════════════════════════
     // Do NOT wait for React/Zustand - inject immediately
     if (data && data.length > 0) {
+      console.log(`🔥 ChartController: Loading ${data.length} candles directly on init`);
       controller.setData(data);
-      console.log(`🔥 ChartController: Loaded ${data.length} candles directly`);
+    } else {
+      console.log(`⏸️ ChartController: No initial data to load (data.length=${data?.length || 0})`);
     }
 
     console.log(`✅ ChartController initialized and registered for ${symbol}`);
 
     // Cleanup
     return () => {
+      console.log(`🗑️ ChartController cleanup starting for ${symbol}`);
       chartRegistry.unregister(symbol);
       controller.destroy();
       chartControllerRef.current = null;
@@ -244,9 +315,14 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     const controller = chartControllerRef.current;
     
+    console.log(`📊 Data update effect triggered: data.length=${data?.length || 0}, symbol=${symbol}`);
+    
     // 🛡️ RACE CONDITION FIX: Ensure controller exists and has valid series
     // When switching stocks, old controller might be destroyed while new data arrives
-    if (!controller || !data || data.length === 0) return;
+    if (!controller || !data || data.length === 0) {
+        console.log(`⏸️ Skipping data update: controller=${!!controller}, data.length=${data?.length || 0}`);
+        return;
+    }
     
     // Double-check the controller still has a valid series (not destroyed)
     const stats = controller.getStats();
@@ -256,8 +332,9 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     }
     
     // Update chart data via controller (no remount!)
+    console.log(`📊 Updating ChartController with ${data.length} candles for ${symbol}`);
     controller.setData(data);
-    console.log(`📊 Chart data updated: ${data.length} candles for ${symbol}`);
+    console.log(`✅ Chart data updated successfully: ${data.length} candles for ${symbol}`);
   }, [data, symbol]); // Listen to data changes, update via controller
 
   // Handle Volume Updates

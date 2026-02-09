@@ -1,6 +1,7 @@
 import { Stock } from '@/types/equity.types';
 import { MarketSlice } from '../types';
 import { chartRegistry } from '@/lib/trading/chart-registry';
+import { candleEngine } from '@/lib/trading/candle-engine';
 
 export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
   // ─────────────────────────────────────────────────────────────────
@@ -76,108 +77,78 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
     const chartSymbol = normalizeSymbol(simulatedSymbol || '');
     
     // 🔥 HARD GUARD: Silently reject cross-symbol ticks
-    // This prevents chart crashes when switching symbols
     if (tickSymbol !== chartSymbol) {
-        // console.warn(`⚠️ Cross-symbol tick rejected: Tick=${tickSymbol}, Chart=${chartSymbol}`);
         return;
     }
 
     if (!historicalData || historicalData.length === 0) return;
 
-    const lastCandle = historicalData[historicalData.length - 1];
-    const lastVolume = volumeData && volumeData.length > 0 ? volumeData[volumeData.length - 1] : null;
-    
-    const tickTime = tick.time * 1000; // Convert to ms
-    const candleTime = (lastCandle.time as number) * 1000;
-
-    // 🔥 DYNAMIC INTERVAL CALCULATION
-    // Use activeInterval from store to decide when to spawn a new candle
+    // ═══════════════════════════════════════════════════════════
+    // 🏭 ONE WRITER RULE: Delegate to CandleEngine
+    // ═══════════════════════════════════════════════════════════
+    // Convert activeInterval to seconds
     const intervalMap: Record<string, number> = {
-        '1m': 60 * 1000,
-        '5m': 5 * 60 * 1000,
-        '15m': 15 * 60 * 1000,
-        '30m': 30 * 60 * 1000,
-        '1h': 60 * 60 * 1000
+        '1m': 60,
+        '5m': 300,
+        '15m': 900,
+        '30m': 1800,
+        '1h': 3600,
+        '1d': 86400
     };
     
-    const intervalMs = intervalMap[activeInterval] || 60 * 1000;
+    const intervalSeconds = intervalMap[activeInterval] || 60;
     
-    // Check if we need a new candle
-    // We want to snap to the interval boundaries
-    // e.g. 09:15:00, 09:16:00 for 1m
-    const currentIntervalStart = Math.floor(tickTime / intervalMs) * intervalMs;
-    const lastCandleStart = Math.floor(candleTime / intervalMs) * intervalMs;
+    // Process tick through CandleEngine (THE ONLY candle creator)
+    const normalizedTick = {
+        symbol: chartSymbol,
+        price: tick.price,
+        volume: tick.volume || 0,
+        timestamp: tick.time, // Already in seconds
+        exchange: 'NSE' // Default exchange
+    };
     
-    const isNewCandle = currentIntervalStart > lastCandleStart;
+    const candleUpdate = candleEngine.processTick(normalizedTick, intervalSeconds);
+    
+    if (!candleUpdate) {
+        // Stale tick or invalid - engine rejected it
+        return;
+    }
 
-    if (isNewCandle) {
-        // New Candle
-        const newCandle = {
-            time: currentIntervalStart / 1000, // Back to seconds for LWC
-            open: tick.price,
-            high: tick.price,
-            low: tick.price,
-            close: tick.price,
-        };
+    // ═══════════════════════════════════════════════════════════
+    // ✅ IMMUTABLE STATE UPDATES: No mutations allowed
+    // ═══════════════════════════════════════════════════════════
+    if (candleUpdate.type === 'new') {
+        console.log('📝 NEW Candle:', candleUpdate.candle, 'Total candles:', historicalData.length + 1);
         
-        const newVol = tick.volume ? {
-            time: currentIntervalStart / 1000,
-            value: tick.volume,
-            color: '#26a69a' // Green for up (initial)
-        } : null;
-
-        console.log('📝 NEW Candle:', newCandle, 'Total candles:', historicalData.length + 1);
-        
-        // Mutate array (Zustand immer-like behavior not available, direct push)
-        historicalData.push(newCandle);
-        if (newVol && volumeData) volumeData.push(newVol);
+        // ✅ CORRECT: Immutable array update
+        set(state => ({
+            historicalData: [...state.historicalData, candleUpdate.candle],
+            livePrice: tick.price
+        }));
         
         // Trigger ChartController update
         const controller = chartRegistry.get(chartSymbol);
         if (controller) {
-          controller.updateCandle(newCandle as any);
+          controller.updateCandle(candleUpdate.candle as any);
         }
-
+        
     } else {
-        // Update Existing Candle
-        const updatedCandle = {
-            ...lastCandle,
-            high: Math.max(lastCandle.high, tick.price),
-            low: Math.min(lastCandle.low, tick.price),
-            close: tick.price
-        };
+        // Update existing candle
+        console.log('📈 UPDATE Candle:', candleUpdate.candle, 'Price:', tick.price);
         
-        const isUp = updatedCandle.close >= updatedCandle.open;
-
-        const updatedVolume = tick.volume && lastVolume ? {
-            ...lastVolume,
-            value: (lastVolume.value || 0) + (tick.volume || 0), // Accumulate volume
-            color: isUp ? '#26a69a' : '#ef5350'
-        } : lastVolume;
-
-        console.log('📈 UPDATE Candle:', updatedCandle, 'Price:', tick.price);
+        // ✅ CORRECT: Immutable array update (replace last element)
+        set(state => ({
+            historicalData: [
+                ...state.historicalData.slice(0, -1),
+                candleUpdate.candle
+            ],
+            livePrice: tick.price
+        }));
         
-        // ═══════════════════════════════════════════════════════════
-        // 🛠️ FINAL FIX: Bypass Zustand to prevent re-render
-        // ═══════════════════════════════════════════════════════════
-        // Mutate arrays in place WITHOUT calling set()
-        // This prevents Zustand from notifying subscribers
-        historicalData[historicalData.length - 1] = updatedCandle;
-        if (updatedVolume && volumeData) {
-          volumeData[volumeData.length - 1] = updatedVolume;
-        }
-        
-        // Update livePrice directly on state object
-        const state = get();
-        state.livePrice = tick.price;
-        
-        // ═══════════════════════════════════════════════════════════
-        // 🎯 CRITICAL: Trigger chart update via ChartController
-        // ═══════════════════════════════════════════════════════════
-        // This is the high-performance path used by professional trading platforms
+        // Trigger ChartController update
         const controller = chartRegistry.get(chartSymbol);
         if (controller) {
-          controller.updateCandle(updatedCandle as any);
+          controller.updateCandle(candleUpdate.candle as any);
         }
     }
   },

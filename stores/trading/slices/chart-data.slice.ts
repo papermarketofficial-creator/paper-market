@@ -16,39 +16,90 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
   // 📈 Chart Data Actions
   // ─────────────────────────────────────────────────────────────────
   fetchMoreHistory: async (symbol: string, range: string, endTime: number) => {
+      console.log(`📜 fetchMoreHistory called:`, { symbol, range, endTime });
+      console.log(`📜 endTime as date: ${new Date(endTime * 1000).toISOString()}`);
+      
       // Prevent fetching if already loading or no more history
-      if (get().isFetchingHistory || !get().hasMoreHistory) return;
+      if (get().isFetchingHistory) {
+          console.log('⏸️ fetchMoreHistory: Already fetching, skipping');
+          return;
+      }
+      if (!get().hasMoreHistory) {
+          console.log('⏸️ fetchMoreHistory: No more history available, skipping');
+          return;
+      }
 
       set({ isFetchingHistory: true });
 
       try {
-          // Calculate toDate from endTime (which is unix timestamp)
-          const toDateStr = new Date(endTime * 1000).toISOString().slice(0, 19);
+          // 🔥 CRITICAL FIX: Send cursor as YYYY-MM-DD only
+          // Prevents timezone mixing (UTC ISO vs IST formatter vs broker timezone)
+          // This eliminates duplicate candles from overlapping fetches
+          const toDateStr = new Date(endTime * 1000).toISOString().split('T')[0];
           
           let queryParams = `symbol=${symbol}`;
           if (range) queryParams += `&range=${range}`;
-          queryParams += `&toDate=${toDateStr}`; // Pagination cursor
+          queryParams += `&toDate=${toDateStr}`; // Pagination cursor (YYYY-MM-DD)
   
-          console.log(`📊 Fetching more history: ${symbol}, range=${range}, toDate=${toDateStr}`);
+  
+          console.log(`📜 Fetching more history: /api/v1/market/history?${queryParams}`);
           
           const res = await fetch(`/api/v1/market/history?${queryParams}`);
           const data = await res.json();
   
+          console.log(`📜 API Response:`, { success: data.success, hasData: !!data.data });
+          
           if (data.success) {
               const { candles, volume } = data.data;
+              console.log(`📜 Received ${candles?.length || 0} candles from API`);
+              
               // 🔥 CRITICAL: Broker returned empty → no more history
-              if (candles.length === 0) {
+              if (!candles || candles.length === 0) {
                   set({ isFetchingHistory: false, hasMoreHistory: false });
-                  console.log('📊 No more history available');
+                  console.log('📜 No more history available (empty response)');
                   return; 
               }
 
+              // 🔥 CRITICAL FIX: Filter out candles with null/undefined time values
+              // This prevents "00:00" timestamps and chart breaking
+              const validCandles = candles.filter((c: any) => {
+                  if (!c || c.time == null || c.time === undefined) {
+                      console.warn('⚠️ Skipping candle with null/undefined time:', c);
+                      return false;
+                  }
+                  // Also validate OHLC values
+                  if (c.open == null || c.high == null || c.low == null || c.close == null) {
+                      console.warn('⚠️ Skipping candle with null OHLC values:', c);
+                      return false;
+                  }
+                  return true;
+              });
+
+              const validVolume = volume?.filter((v: any) => {
+                  if (!v || v.time == null || v.time === undefined || v.value == null) {
+                      console.warn('⚠️ Skipping volume with null values:', v);
+                      return false;
+                  }
+                  return true;
+              }) || [];
+
+              console.log(`📜 Valid candles after filtering: ${validCandles.length} (filtered out ${candles.length - validCandles.length})`);
+
+              if (validCandles.length === 0) {
+                  set({ isFetchingHistory: false, hasMoreHistory: false });
+                  console.log('📜 No valid candles after filtering, stopping pagination');
+                  return;
+              }
+
               // Sort ascending
-              const newCandles = [...candles].sort((a: any, b: any) => (a.time as number) - (b.time as number));
-              const newVolume = [...volume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+              const newCandles = [...validCandles].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+              const newVolume = [...validVolume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
               
               const currentHistory = get().historicalData;
               const currentVolume = get().volumeData;
+
+              console.log(`📜 Current history: ${currentHistory.length} candles`);
+              console.log(`📜 New candles time range: ${new Date(newCandles[0].time * 1000).toISOString()} to ${new Date(newCandles[newCandles.length - 1].time * 1000).toISOString()}`);
 
               // Prepend and Deduplicate
               const existingTimes = new Set(currentHistory.map(c => c.time));
@@ -57,9 +108,17 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
               const existingVolTimes = new Set(currentVolume.map(v => v.time));
               const uniqueVolume = newVolume.filter((v: any) => !existingVolTimes.has(v.time));
 
+              console.log(`📜 Unique new candles after deduplication: ${uniqueCandles.length}`);
+
               if (uniqueCandles.length > 0) {
                   const merged = [...uniqueCandles, ...currentHistory];
                   const mergedVol = [...uniqueVolume, ...currentVolume];
+                  
+                  // 🔥 CRITICAL FIX: ALWAYS sort after merge
+                  // Lightweight Charts requires STRICT ascending order
+                  // Never assume - always enforce
+                  merged.sort((a, b) => (a.time as number) - (b.time as number));
+                  mergedVol.sort((a, b) => (a.time as number) - (b.time as number));
                   
                   // 🔥 CRITICAL: DO NOT cap during pagination
                   // Capping here deletes the candles we just fetched
@@ -68,19 +127,24 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
                       volumeData: mergedVol
                   });
                   
-                  console.log(`📊 Loaded ${uniqueCandles.length} candles. Total: ${merged.length}`);
+                  console.log(`✅ Loaded ${uniqueCandles.length} new candles. Total: ${merged.length}`);
               } else {
+                  console.log('📜 No new unique candles, setting hasMoreHistory=false');
                   set({ hasMoreHistory: false }); // No new unique candles
               }
+          } else {
+              console.error('📜 API returned error:', data.error);
           }
       } catch (e) {
-          console.error("Fetch More History Failed", e);
+          console.error("❌ Fetch More History Failed:", e);
       } finally {
           set({ isFetchingHistory: false });
       }
   },
 
   initializeSimulation: async (symbol: string, timeframe = '1d', range?: string) => {
+    console.log('📊 initializeSimulation called:', { symbol, timeframe, range });
+    
     // 🔥 Detect interval from range or timeframe
     const rangeToInterval: Record<string, string> = {
         '1d': '1m',       // 1D range -> 1 minute candles
@@ -95,6 +159,7 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
         '1D': '1m', '5D': '5m', '1M': '30m', '3M': '1d', '6M': '1d', '1Y': '1d', '5Y': '1mo'
     };
     const detectedInterval = range ? (rangeToInterval[range] || '1d') : timeframe;
+    console.log(`📊 Detected interval: ${detectedInterval} for range: ${range || timeframe}`);
     
     // 1. Set Loading FIRST to prevent empty-state flash
     set({ 
@@ -110,43 +175,94 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
         if (range) queryParams += `&range=${range}`;
         else queryParams += `&timeframe=${timeframe}`;
 
-        console.log(`📊 Fetching history: ${symbol}, range=${range || timeframe}, interval=${detectedInterval}`);
+        console.log(`📊 Fetching from API: /api/v1/market/history?${queryParams}`);
         
         const res = await fetch(`/api/v1/market/history?${queryParams}`);
         const data = await res.json();
 
+        console.log(`📊 API Response:`, { success: data.success, hasData: !!data.data });
+
         if (data.success) {
             const { candles, volume } = data.data;
             
-            // Sort by time ascending
-            const sortedCandles = [...candles].sort((a: any, b: any) => (a.time as number) - (b.time as number));
-            const sortedVolume = [...volume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
-
-            // 🔥 CRITICAL: Cap initial load as well
-            const MAX_CANDLES = 3000;
-            const cappedCandles = sortedCandles.length > MAX_CANDLES
-                ? sortedCandles.slice(-MAX_CANDLES)
-                : sortedCandles;
+            console.log(`📊 Received from API: ${candles?.length || 0} candles, ${volume?.length || 0} volume bars`);
             
-            const cappedVolume = sortedVolume.length > MAX_CANDLES
-                ? sortedVolume.slice(-MAX_CANDLES)
-                : sortedVolume;
+            // Validate data
+            if (!candles || !Array.isArray(candles)) {
+                console.error('❌ Invalid candles data:', data);
+                set({ isFetchingHistory: false });
+                return;
+            }
+            
+            // 🔥 CRITICAL FIX: Filter out candles with null/undefined values
+            // 🔍 DEBUG: Log first candle to see structure
+            if (candles.length > 0) {
+                console.log('🔍 First candle structure:', JSON.stringify(candles[0]));
+                console.log('🔍 First candle types:', {
+                    time: typeof candles[0].time,
+                    open: typeof candles[0].open,
+                    high: typeof candles[0].high,
+                    low: typeof candles[0].low,
+                    close: typeof candles[0].close
+                });
+            }
+            
+            const validCandles = candles.filter((c: any) => {
+                if (!c || c.time == null || c.time === undefined) {
+                    console.warn('⚠️ Skipping candle with null/undefined time:', c);
+                    return false;
+                }
+                if (c.open == null || c.high == null || c.low == null || c.close == null) {
+                    console.warn('⚠️ Skipping candle with null OHLC values:', c);
+                    return false;
+                }
+                return true;
+            });
 
-            const lastClose = cappedCandles.length > 0 ? cappedCandles[cappedCandles.length - 1].close : 0;
+            const validVolume = volume?.filter((v: any) => {
+                if (!v || v.time == null || v.time === undefined || v.value == null) {
+                    console.warn('⚠️ Skipping volume with null values:', v);
+                    return false;
+                }
+                return true;
+            }) || [];
+
+            console.log(`📊 Valid data after filtering: ${validCandles.length} candles (filtered out ${candles.length - validCandles.length})`);
+
+            if (validCandles.length === 0) {
+                console.error('❌ No valid candles after filtering');
+                set({ isFetchingHistory: false });
+                return;
+            }
+            
+            // Sort by time ascending
+            const sortedCandles = [...validCandles].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+            const sortedVolume = [...validVolume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+
+            // 🔥 NO CAPPING: Allow unlimited candles for proper historical display
+            // Infinite scroll will handle loading older data progressively
+            const lastClose = sortedCandles.length > 0 ? sortedCandles[sortedCandles.length - 1].close : 0;
+            
+            console.log(`📊 Setting ${sortedCandles.length} candles in store`);
+            if (sortedCandles.length > 0) {
+                const firstTime = new Date(sortedCandles[0].time * 1000).toISOString();
+                const lastTime = new Date(sortedCandles[sortedCandles.length - 1].time * 1000).toISOString();
+                console.log(`📊 Time range: ${firstTime} to ${lastTime}`);
+            }
             
             set({
-                historicalData: cappedCandles,
-                volumeData: cappedVolume,
+                historicalData: sortedCandles,
+                volumeData: sortedVolume,
                 livePrice: lastClose,
                 simulatedSymbol: symbol
             });
             
-            console.log(`📊 Initial load: ${cappedCandles.length} candles (max: ${MAX_CANDLES})`);
+            console.log(`✅ initializeSimulation complete: ${sortedCandles.length} candles loaded`);
         } else {
-            console.error("Failed to fetch history:", data.error);
+            console.error("❌ Failed to fetch history:", data.error);
         }
     } catch (e) {
-        console.error("Chart data fetch error", e);
+        console.error("❌ Chart data fetch error:", e);
     } finally {
         set({ isFetchingHistory: false });
     }
