@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { Position } from '@/types/position.types';
-import { Trade } from '@/types/order.types';
+import { Trade, TradeParams, OrderType } from '@/types/order.types';
 import { InstrumentMode } from '@/types/general.types';
 import { usePositionsStore } from './positions.store';
 import { useOrdersStore } from './orders.store';
 import { useJournalStore } from './journal.store';
+import { useWalletStore } from '@/stores/wallet.store';
 import { parseOptionSymbol, calculateOptionRiskMetrics } from '@/lib/fno-utils';
 import { JournalEntry, ExitReason } from '@/types/journal.types';
 
@@ -84,6 +85,10 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
 
       // Refresh Orders List
       get().fetchOrders();
+      
+      // Refresh Wallet Balance (funds may be blocked for pending orders)
+      console.log('🔄 Refreshing wallet balance after order placement...');
+      useWalletStore.getState().fetchWallet();
 
     } catch (error: any) {
       console.error("🔥 STOCK STORE ERROR:", error);

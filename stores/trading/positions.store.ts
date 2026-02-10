@@ -10,6 +10,7 @@ interface PositionsState {
 
   // Actions
   fetchPositions: () => Promise<void>;
+  closePosition: (positionId: string, quantity?: number) => Promise<boolean>;
   updatePositionPrice: (positionId: string, newPrice: number) => void;
   updateAllPositionsPrices: (priceUpdates: { [symbol: string]: number }) => void;
   reset: () => void;
@@ -42,7 +43,25 @@ export const usePositionsStore = create<PositionsState>((set, get) => ({
       const data = await res.json();
 
       if (data.success) {
-        set({ positions: data.data });
+        const currentPositions = get().positions;
+        
+        // Merge new positions with existing ones, preserving last known currentPrice
+        const mergedPositions = data.data.map((newPos: Position) => {
+          const existingPos = currentPositions.find(p => p.id === newPos.id);
+          
+          // If API returns 0 for currentPrice but we have a previous price, keep the previous price
+          if (newPos.currentPrice === 0 && existingPos && existingPos.currentPrice > 0) {
+            return {
+              ...newPos,
+              currentPrice: existingPos.currentPrice,
+              currentPnL: existingPos.currentPnL
+            };
+          }
+          
+          return newPos;
+        });
+        
+        set({ positions: mergedPositions });
       } else {
         set({ error: data.error || 'Failed to fetch positions' });
       }
@@ -77,6 +96,38 @@ export const usePositionsStore = create<PositionsState>((set, get) => ({
         return position;
       }),
     }));
+  },
+
+  closePosition: async (positionId, quantity) => {
+    try {
+      const res = await fetch(`/api/v1/positions/${positionId}/close`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Failed to close position');
+      }
+
+      if (data.success) {
+        // Refresh positions to reflect the change
+        await get().fetchPositions();
+        toast.success('Position Closed', {
+          description: data.message || 'Position closed successfully'
+        });
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to close position:', error);
+      toast.error('Failed to Close Position', {
+        description: error instanceof Error ? error.message : 'Unknown error'
+      });
+      return false;
+    }
   },
 
   reset: () => set({ positions: [], error: null }),

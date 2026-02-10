@@ -1,54 +1,131 @@
 import { create } from 'zustand';
 import { Trade, JournalEntry } from '@/types/order.types';
+import { toast } from 'sonner';
+import { useWalletStore } from '@/stores/wallet.store';
 
 interface OrdersState {
   trades: Trade[];
   journalEntries: JournalEntry[];
   isLoading: boolean;
+  error: string | null;
 
   // Actions
-  fetchOrders: () => Promise<void>;
+  fetchOrders: (filters?: { status?: string; limit?: number }) => Promise<void>;
+  cancelOrder: (orderId: string) => Promise<void>;
   addTrade: (trade: Trade) => void;
   updateTrade: (tradeId: string, updates: Partial<Trade>) => void;
 }
 
-export const useOrdersStore = create<OrdersState>((set) => ({
+export const useOrdersStore = create<OrdersState>((set, get) => ({
   trades: [],
   journalEntries: [],
   isLoading: false,
+  error: null,
 
-  fetchOrders: async () => {
-    set({ isLoading: true });
+  fetchOrders: async (filters = {}) => {
+    set({ isLoading: true, error: null });
     try {
-      const res = await fetch('/api/v1/orders'); // Fetch all orders (default limit 20)
+      // Build query params
+      const params = new URLSearchParams();
+      if (filters.status) params.append('status', filters.status);
+      if (filters.limit) params.append('limit', filters.limit.toString());
+      
+      const res = await fetch(`/api/v1/orders?${params.toString()}`);
       const data = await res.json();
-      if (data.success) {
-        // Map backend orders to Trade type if necessary
-        // Assuming backend returns matching shape or close enough
-        const mappedTrades: Trade[] = data.data.map((o: any) => ({
-          id: o.id,
-          symbol: o.symbol,
-          side: o.side,
-          quantity: o.quantity,
-          filledQuantity: o.status === 'FILLED' ? o.quantity : 0, // Simplified
-          status: o.status,
-          entryPrice: parseFloat(o.limitPrice || o.averagePrice || "0"), // Adjust based on DB schema
-          entryTime: new Date(o.createdAt),
-          orderType: o.orderType,
-          instrument: 'EQUITY', // Backend doesn't store instrument mode explicitly in Orders table yet?
-          // Fallbacks for UI fields not in primitive Order table
-          name: o.symbol,
-          pnl: 0,
-          exitPrice: 0,
-          exitTime: null,
-          updatedAt: new Date(o.updatedAt)
-        }));
-        set({ trades: mappedTrades });
+      
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Failed to fetch orders');
       }
-    } catch (error) {
-      console.error("Failed to fetch orders", error);
+      
+      if (data.success) {
+        // Map backend orders to Trade type
+        const mappedTrades: Trade[] = data.data.map((o: any) => {
+          // Determine entry price based on order type and status
+          // Determine entry/exit/pnl based on whether this order closed a position
+          let entryPrice = 0;
+          let exitPrice = 0;
+          let pnl = 0;
+          let status = o.status; // Default to backend status
+
+          if (o.realizedPnL && parseFloat(o.realizedPnL) !== 0) {
+            // This is a Closing Order (has P&L)
+            pnl = parseFloat(o.realizedPnL);
+            entryPrice = o.averagePrice ? parseFloat(o.averagePrice) : 0; // Original Entry Price
+            exitPrice = o.executionPrice ? parseFloat(o.executionPrice) : 0; // Execution Price (Exit)
+            // Override status to CLOSED so UI renders P&L/Exit columns
+            status = 'CLOSED';
+          } else {
+             // This is an Opening Order (or PnL is 0)
+             if (o.status === 'FILLED' && o.executionPrice) {
+                entryPrice = parseFloat(o.executionPrice);
+             } else if (o.orderType === 'LIMIT' && o.limitPrice) {
+                entryPrice = parseFloat(o.limitPrice);
+             }
+          }
+
+          return {
+            id: o.id,
+            symbol: o.symbol,
+            side: o.side,
+            quantity: o.quantity,
+            filledQuantity: o.status === 'FILLED' ? o.quantity : 0,
+            status, // Use updated status
+            entryPrice, // Now reflects "Avg Entry" for closing orders
+            entryTime: o.createdAt ? new Date(o.createdAt) : new Date(),
+            orderType: o.orderType,
+            instrument: 'EQUITY',
+            name: o.symbol,
+            pnl, // Now populated for closing orders
+            exitPrice, // Now populated for closing orders
+            exitTime: o.executedAt ? new Date(o.executedAt) : null,
+            updatedAt: o.updatedAt ? new Date(o.updatedAt) : new Date(),
+            expiryDate: o.expiryDate ? new Date(o.expiryDate) : undefined
+          };
+        });
+        set({ trades: mappedTrades });
+        console.log('✅ Fetched', mappedTrades.length, 'orders');
+      }
+    } catch (error: any) {
+      console.error("Failed to fetch orders:", error);
+      set({ error: error.message });
+      toast.error('Failed to load orders');
     } finally {
       set({ isLoading: false });
+    }
+  },
+
+  cancelOrder: async (orderId: string) => {
+    try {
+      const res = await fetch(`/api/v1/orders/${orderId}`, {
+        method: 'DELETE',
+      });
+      
+      const data = await res.json();
+      
+      if (!res.ok) {
+        throw new Error(data.error?.message || 'Failed to cancel order');
+      }
+      
+      if (data.success) {
+        // Update local state
+        set((state) => ({
+          trades: state.trades.map((t) =>
+            t.id === orderId
+              ? { ...t, status: 'CANCELLED', updatedAt: new Date() }
+              : t
+          ),
+        }));
+        
+        // Refresh wallet (blocked funds released)
+        useWalletStore.getState().fetchWallet();
+        
+        toast.success('Order cancelled successfully');
+        console.log('✅ Cancelled order:', orderId);
+      }
+    } catch (error: any) {
+      console.error("Failed to cancel order:", error);
+      toast.error(error.message);
+      throw error;
     }
   },
 

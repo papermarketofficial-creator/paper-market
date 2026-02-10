@@ -6,6 +6,7 @@ import { eq, and, sql, ilike } from "drizzle-orm";
 import type { PlaceOrder, OrderQuery } from "@/lib/validation/oms";
 import { WalletService } from "@/services/wallet.service";
 import { MarginService } from "@/services/margin.service";
+import { ExecutionService } from "@/services/execution.service";
 
 import { TRADING_UNIVERSE, isInstrumentAllowed } from "@/lib/trading-universe";
 
@@ -74,49 +75,44 @@ export class OrderService {
             const requiredMargin = MarginService.calculateRequiredMargin(payload, instrument);
             logger.info({ userId, symbol: payload.symbol, requiredMargin }, "Margin calculated");
 
-            // Check if user has sufficient balance
-            const hasMargin = await WalletService.checkMargin(userId, requiredMargin);
-            if (!hasMargin) {
-                const availableBalance = await WalletService.getAvailableBalance(userId);
+            // 🎯 PAPER TRADING: Simple balance check using wallet
+            const availableBalance = await WalletService.getAvailableBalance(userId);
+            
+            if (requiredMargin > availableBalance) {
                 throw new ApiError(
                     `Insufficient balance. Available: ₹${availableBalance.toFixed(2)}, Required: ₹${requiredMargin.toFixed(2)}`,
                     400,
                     "INSUFFICIENT_FUNDS"
                 );
             }
+            
+            // Create order (simplified for paper trading)
+            const newOrder: NewOrder = {
+                userId,
+                symbol: payload.symbol,
+                side: payload.side,
+                quantity: payload.quantity,
+                orderType: payload.orderType,
+                limitPrice: payload.orderType === "LIMIT" ? payload.limitPrice.toString() : null,
+                status: "OPEN",
+                idempotencyKey: payload.idempotencyKey || null,
+            };
 
-            // Create order in transaction
-            const order = await db.transaction(async (tx) => {
-                const newOrder: NewOrder = {
-                    userId,
-                    symbol: payload.symbol,
-                    side: payload.side,
-                    quantity: payload.quantity,
-                    orderType: payload.orderType,
-                    limitPrice: payload.orderType === "LIMIT" ? payload.limitPrice.toString() : null,
-                    status: "OPEN", // Skip PENDING, go directly to OPEN after validation
-                    idempotencyKey: payload.idempotencyKey || null,
-                };
+            const [order] = await db.insert(orders).values(newOrder).returning();
 
-                const [createdOrder] = await tx.insert(orders).values(newOrder).returning();
-
-                // Block funds
-                // Now we have the order ID, we can safely block the funds linked to this order
-                await WalletService.blockFunds(
-                    userId,
-                    requiredMargin,
-                    createdOrder.id,
-                    tx,
-                    `Margin blocked for ${payload.side} ${payload.quantity} ${payload.symbol}`
-                );
-
-                // Store idempotency key mapping if provided
-                // Idempotency storage removed for simplification
-
-                return createdOrder;
-            });
-
-            logger.info({ orderId: order.id, userId, symbol: payload.symbol }, "Order placed");
+            logger.info({ orderId: order.id, userId, symbol: payload.symbol, availableBalance }, "Order placed (paper trading)");
+            
+            // ✅ Execute MARKET orders immediately
+            if (payload.orderType === "MARKET") {
+                try {
+                    logger.info({ orderId: order.id }, "Executing MARKET order immediately");
+                    await ExecutionService.executeOpenOrders();
+                } catch (error) {
+                    logger.error({ err: error, orderId: order.id }, "Failed to execute MARKET order");
+                    // Don't throw - order is placed, execution will be retried
+                }
+            }
+            
             return order;
         } catch (error) {
             if (error instanceof ApiError) throw error;
@@ -152,53 +148,17 @@ export class OrderService {
                 );
             }
 
-            // Get instrument to calculate blocked amount
-            const [instrument] = await db
-                .select()
-                .from(instruments)
-                .where(ilike(instruments.tradingsymbol, order.symbol))
-                .limit(1);
+            // 🎯 SIMPLIFIED FOR PAPER TRADING: Just update status, no wallet operations
+            const [cancelledOrder] = await db
+                .update(orders)
+                .set({
+                    status: "CANCELLED",
+                    updatedAt: new Date(),
+                })
+                .where(eq(orders.id, orderId))
+                .returning();
 
-            if (!instrument) {
-                logger.error({ orderId, symbol: order.symbol }, "Instrument not found for order cancellation");
-                throw new ApiError("Instrument not found", 404, "INSTRUMENT_NOT_FOUND");
-            }
-
-            // Calculate blocked amount (same as when order was placed)
-            const orderPayload: PlaceOrder = {
-                symbol: order.symbol,
-                side: order.side,
-                quantity: order.quantity,
-                orderType: order.orderType,
-                limitPrice: order.limitPrice ? parseFloat(order.limitPrice) : 0,
-            };
-            const blockedAmount = MarginService.calculateRequiredMargin(orderPayload, instrument);
-
-            // Cancel order and unblock funds in transaction
-            const cancelledOrder = await db.transaction(async (tx) => {
-                // Update order status
-                const [updated] = await tx
-                    .update(orders)
-                    .set({
-                        status: "CANCELLED",
-                        updatedAt: new Date(),
-                    })
-                    .where(eq(orders.id, orderId))
-                    .returning();
-
-                // Unblock funds
-                await WalletService.unblockFunds(
-                    userId,
-                    blockedAmount,
-                    orderId,
-                    tx,
-                    `Order cancelled: ${order.symbol}`
-                );
-
-                return updated;
-            });
-
-            logger.info({ orderId, userId, unblockedAmount: blockedAmount }, "Order cancelled");
+            logger.info({ orderId, userId, symbol: order.symbol }, "Order cancelled (paper trading)");
             return cancelledOrder;
         } catch (error) {
             if (error instanceof ApiError) throw error;

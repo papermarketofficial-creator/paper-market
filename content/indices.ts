@@ -4,29 +4,29 @@ export const indicesList: Stock[] = [
     {
         symbol: 'NIFTY 50',
         name: 'Nifty 50 Index',
-        price: 21750.00,
-        change: 125.50,
-        changePercent: 0.58,
+        price: 24825.45,
+        change: 0,
+        changePercent: 0,
         volume: 0,
-        lotSize: 0
+        lotSize: 50
     },
     {
-        symbol: 'BANKNIFTY',
+        symbol: 'NIFTY BANK',
         name: 'Nifty Bank Index',
-        price: 46500.00,
-        change: -200.00,
-        changePercent: -0.43,
+        price: 58417.20,
+        change: 0,
+        changePercent: 0,
         volume: 0,
-        lotSize: 0
+        lotSize: 25
     },
     {
-        symbol: 'SENSEX',
-        name: 'BSE Sensex',
-        price: 71500.00,
-        change: 350.00,
-        changePercent: 0.49,
+        symbol: 'NIFTY FIN SERVICE',
+        name: 'Nifty Fin Service',
+        price: 26699.10,
+        change: 0,
+        changePercent: 0,
         volume: 0,
-        lotSize: 0
+        lotSize: 40
     }
 ];
 

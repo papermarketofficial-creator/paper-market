@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,17 +22,23 @@ import {
 import { useOrdersStore } from '@/stores/trading/orders.store';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { Search, ArrowUpDown, History, TrendingUp, TrendingDown, Download } from 'lucide-react';
+import { Search, ArrowUpDown, History, TrendingUp, TrendingDown, Download, X, Loader2 } from 'lucide-react';
 import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
 
 const OrdersPage = () => {
-  const trades = useOrdersStore((state) => state.trades);
+  const { trades, isLoading, error, fetchOrders, cancelOrder } = useOrdersStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'pnl'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [statusFilter, setStatusFilter] = useState<'all' | 'OPEN' | 'CLOSED'>('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null);
   const itemsPerPage = 10;
+
+  // Fetch orders on mount
+  useEffect(() => {
+    fetchOrders();
+  }, [fetchOrders]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -107,6 +113,17 @@ const OrdersPage = () => {
     }
   };
 
+  const handleCancelOrder = async (orderId: string) => {
+    setCancellingOrderId(orderId);
+    try {
+      await cancelOrder(orderId);
+    } catch (error) {
+      // Error already handled in store with toast
+    } finally {
+      setCancellingOrderId(null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -173,7 +190,24 @@ const OrdersPage = () => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {trades.length === 0 ? (
+          {/* Loading State */}
+          {isLoading && trades.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <Loader2 className="h-12 w-12 mb-4 animate-spin" />
+              <p className="text-lg font-medium">Loading orders...</p>
+            </div>
+          ) : error ? (
+            /* Error State */
+            <div className="flex flex-col items-center justify-center py-12 text-destructive">
+              <X className="h-12 w-12 mb-4" />
+              <p className="text-lg font-medium">Failed to load orders</p>
+              <p className="text-sm text-muted-foreground">{error}</p>
+              <Button onClick={() => fetchOrders()} variant="outline" className="mt-4">
+                Retry
+              </Button>
+            </div>
+          ) : trades.length === 0 ? (
+            /* Empty State */
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
               <History className="h-12 w-12 mb-4 opacity-50" />
               <p className="text-lg font-medium">No Orders Yet</p>
@@ -219,7 +253,11 @@ const OrdersPage = () => {
                       </div>
                       <div>
                         <p className="text-muted-foreground">Entry</p>
-                        <p className="font-medium text-foreground">{formatCurrency(trade.entryPrice)}</p>
+                        <p className="font-medium text-foreground">
+                          {trade.orderType === 'MARKET' && trade.entryPrice === 0
+                            ? 'Market'
+                            : formatCurrency(trade.entryPrice)}
+                        </p>
                       </div>
                       <div>
                         <p className="text-muted-foreground">Exit</p>
@@ -241,9 +279,29 @@ const OrdersPage = () => {
                         </p>
                       </div>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-3">
-                      {format(new Date(trade.entryTime), 'dd MMM yyyy, HH:mm')}
-                    </p>
+                    <div className="flex items-center justify-between mt-3">
+                      <p className="text-xs text-muted-foreground">
+                        {!isNaN(new Date(trade.entryTime).getTime()) ? format(new Date(trade.entryTime), 'dd MMM yyyy, HH:mm') : '-'}
+                      </p>
+                      {(trade.status === 'PENDING' || trade.status === 'OPEN') && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCancelOrder(trade.id)}
+                          disabled={cancellingOrderId === trade.id}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10 h-7 px-2"
+                        >
+                          {cancellingOrderId === trade.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <>
+                              <X className="h-3 w-3 mr-1" />
+                              <span className="text-xs">Cancel</span>
+                            </>
+                          )}
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -284,9 +342,11 @@ const OrdersPage = () => {
                       <TableRow key={trade.id} className="border-border">
                         <TableCell className="text-foreground">
                           <div>
-                            <p className="font-medium">{format(new Date(trade.entryTime), 'dd MMM yyyy')}</p>
+                            <p className="font-medium">
+                              {!isNaN(new Date(trade.entryTime).getTime()) ? format(new Date(trade.entryTime), 'dd MMM yyyy') : '-'}
+                            </p>
                             <p className="text-xs text-muted-foreground">
-                              {format(new Date(trade.entryTime), 'HH:mm:ss')}
+                              {!isNaN(new Date(trade.entryTime).getTime()) ? format(new Date(trade.entryTime), 'HH:mm:ss') : '-'}
                             </p>
                           </div>
                         </TableCell>
@@ -333,7 +393,9 @@ const OrdersPage = () => {
                           {trade.quantity}
                         </TableCell>
                         <TableCell className="text-right text-foreground">
-                          {formatCurrency(trade.entryPrice)}
+                          {trade.orderType === 'MARKET' && trade.entryPrice === 0
+                            ? 'Market'
+                            : formatCurrency(trade.entryPrice)}
                         </TableCell>
                         <TableCell className="text-right text-foreground">
                           {trade.status === 'CLOSED' ? formatCurrency(trade.exitPrice!) : '-'}

@@ -1,4 +1,5 @@
 "use client";
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { forwardRef } from 'react';
@@ -13,12 +14,19 @@ interface NavLinkProps {
 }
 
 const NavLink = forwardRef<HTMLAnchorElement, NavLinkProps>(
-  ({ to, className, activeClassName, children, ...props }, ref) => {
+  ({ to, className, activeClassName, children, onClick, ...props }, ref) => {
     const pathname = usePathname();
-    const isActive = pathname?.startsWith(to || '');
+    // Use exact match for active state to avoid conflicts
+    const isActive = pathname === to;
 
     return (
-      <Link href={to} {...props} ref={ref} className={cn(className, isActive && activeClassName)}>
+      <Link 
+        href={to} 
+        ref={ref} 
+        className={cn(className, isActive && activeClassName)}
+        onClick={onClick}
+        {...props}
+      >
         {children}
       </Link>
     );

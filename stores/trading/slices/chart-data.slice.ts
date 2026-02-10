@@ -1,5 +1,23 @@
 import { MarketSlice } from '../types';
 
+
+// Helper to add color to volume based on candle open/close
+const enrichVolumeWithColor = (volume: any[], candles: any[]) => {
+    // Create a map of time -> candle for fast lookup
+    const candleMap = new Map(candles.map((c: any) => [c.time, c]));
+    
+    return volume.map((v: any) => {
+        const candle = candleMap.get(v.time);
+        if (!candle) return v; // Keep original if no matching candle
+        
+        const isUp = candle.close >= candle.open;
+        return {
+            ...v,
+            color: isUp ? '#033d34' : '#61161c' // Teal for Up, Red for Down
+        };
+    });
+};
+
 export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
   // ─────────────────────────────────────────────────────────────────
   // 📊 Initial State
@@ -54,7 +72,9 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
 
               // Sort ascending
               const newCandles = [...candles].sort((a: any, b: any) => (a.time as number) - (b.time as number));
-              const newVolume = [...volume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+              // 🔥 Apply colors to volume before sorting/merging
+              const newlyColoredVolume = enrichVolumeWithColor(volume, newCandles);
+              const newVolume = [...newlyColoredVolume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
               
               const currentHistory = get().historicalData;
               const currentVolume = get().volumeData;
@@ -132,7 +152,10 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
             
             // Sort by time ascending
             const sortedCandles = [...candles].sort((a: any, b: any) => (a.time as number) - (b.time as number));
-            const sortedVolume = [...volume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+            
+            // 🔥 Apply colors to volume based on candle (Up=Teal, Down=Red)
+            const coloredVolume = enrichVolumeWithColor(volume, sortedCandles);
+            const sortedVolume = [...coloredVolume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
 
             // 🔥 NO CAPPING: Allow unlimited candles for proper historical display
             // Infinite scroll will handle loading older data progressively

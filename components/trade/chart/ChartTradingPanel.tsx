@@ -24,7 +24,8 @@ export function ChartTradingPanel({ symbol }: ChartTradingPanelProps) {
 
   const change = lastCandle ? (lastCandle.close - lastCandle.open) : 0;
   const changePct = lastCandle ? ((change / lastCandle.open) * 100) : 0;
-  const colorClass = change >= 0 ? 'text-[#22C55E]' : 'text-[#EF4444]';
+  const colorClass = change >= 0 ? 'text-[#089981]' : 'text-[#F23645]';
+
 
   return (
     <div className="absolute top-3 left-3 z-30 flex flex-col gap-1 min-w-[340px]">

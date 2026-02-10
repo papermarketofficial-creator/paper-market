@@ -92,7 +92,7 @@ async function main() {
     const pos1 = (await PositionService.getUserPositionsWithPnL(user.id))[0];
     console.log(`Position: ${pos1.quantity} @ ${pos1.averagePrice} (Realized: ${pos1.realizedPnL})`);
     
-    if (pos1.quantity !== 10 || parseFloat(pos1.averagePrice) !== 100) {
+    if (pos1.quantity !== 10 || pos1.averagePrice !== 100) {
         console.error("❌ FAIL: Incorrect Position Entry");
         process.exit(1);
     }
@@ -132,7 +132,7 @@ async function main() {
     console.log(`Position: ${pos3.quantity} @ ${pos3.averagePrice} (Realized: ${pos3.realizedPnL})`);
 
     // Expected Realized: (120 - 100) * 5 = +100
-    if (parseFloat(pos3.realizedPnL) !== 100) {
+    if (pos3.realizedPnL !== 100) {
         console.error(`❌ FAIL: Expected 100 Realized, got ${pos3.realizedPnL}`);
         process.exit(1);
     }

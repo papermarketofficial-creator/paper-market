@@ -13,7 +13,7 @@ export async function GET(req: NextRequest) {
             throw new ApiError("Unauthorized", 401, "UNAUTHORIZED");
         }
 
-        const positions = await PositionService.getPositions(session.user.id);
+        const positions = await PositionService.getUserPositionsWithPnL(session.user.id);
 
         return NextResponse.json({
             success: true,

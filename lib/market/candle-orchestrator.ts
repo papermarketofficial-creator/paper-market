@@ -127,10 +127,17 @@ export class CandleOrchestrator {
                     if (isPaginating) {
                         // Load 1 week chunks (API allows 1 month max for 1-minute)
                         fromDateObj = subDays(anchorDate, 7);
-                        toDateStr = this.formatDateIST(anchorDate); // Cursor is the anchor
+                        toDateStr = this.formatDateIST(anchorDate);
                     } else {
-                        // Initial: Load last 2 trading days
-                        fromDateObj = subDays(anchorDate, 2);
+                        // 🔥 CRITICAL FIX: Fetch last 3 days to ensure we get at least 1 full trading day
+                        // This handles:
+                        // - Market closed (after hours)
+                        // - Weekends
+                        // - Holidays
+                        // - Intraday endpoint returning empty data
+                        // The historical endpoint will return whatever trading days exist in this range
+                        fromDateObj = subDays(anchorDate, 3);
+                        toDateStr = this.formatDateIST(anchorDate);
                     }
                     break;
                 

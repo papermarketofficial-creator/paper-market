@@ -43,15 +43,15 @@ export class WalletService {
 
     /**
      * Check if user has sufficient available balance
-     * Available Balance = Total Balance - Blocked Balance
+     * Available Balance = Total Balance (No blocking in simplified mode)
      */
     static async checkMargin(userId: string, requiredAmount: number): Promise<boolean> {
         const wallet = await this.getWallet(userId);
-        const availableBalance = parseFloat(wallet.balance) - parseFloat(wallet.blockedBalance);
+        const availableBalance = parseFloat(wallet.balance);
 
         logger.debug(
-            { userId, requiredAmount, availableBalance, blocked: wallet.blockedBalance },
-            "Margin check"
+            { userId, requiredAmount, availableBalance },
+            "Margin check (Simplified)"
         );
 
         return availableBalance >= requiredAmount;
@@ -62,225 +62,17 @@ export class WalletService {
      */
     static async getAvailableBalance(userId: string): Promise<number> {
         const wallet = await this.getWallet(userId);
-        return parseFloat(wallet.balance) - parseFloat(wallet.blockedBalance);
+        // Simplified: Blocked balance is ignored/deprecated
+        return parseFloat(wallet.balance);
     }
 
-    /**
-     * Block funds when order is placed
-     * MUST be called within a transaction
-     * 
-     * @throws ApiError if insufficient balance
-     */
-    static async blockFunds(
-        userId: string,
-        amount: number,
-        orderId: string,
-        tx: any,
-        description?: string
-    ): Promise<void> {
-        const wallet = await this.getWallet(userId, tx);
-        const availableBalance = parseFloat(wallet.balance) - parseFloat(wallet.blockedBalance);
-
-        if (availableBalance < amount) {
-            throw new ApiError(
-                `Insufficient balance. Available: ₹${availableBalance.toFixed(2)}, Required: ₹${amount.toFixed(2)}`,
-                400,
-                "INSUFFICIENT_FUNDS"
-            );
-        }
-
-        // Record transaction (idempotency enforced by DB constraint)
-        try {
-            await tx.insert(transactions).values({
-                userId,
-                walletId: wallet.id,
-                type: "BLOCK" as TransactionType,
-                amount: amount.toFixed(2),
-                balanceBefore: wallet.balance,
-                balanceAfter: wallet.balance, // Balance unchanged
-                blockedBefore: wallet.blockedBalance,
-                blockedAfter: (parseFloat(wallet.blockedBalance) + amount).toFixed(2),
-                referenceType: "ORDER",
-                referenceId: orderId,
-                description: description || `Blocked funds for order ${orderId}`,
-            });
-        } catch (error: any) {
-            // If unique constraint violation, this is an idempotent retry - skip silently
-            if (error.code === "23505") {
-                logger.info({ userId, orderId }, "Duplicate block funds transaction (idempotent)");
-                return;
-            }
-            throw error;
-        }
-
-        // Update wallet cache
-        await tx
-            .update(wallets)
-            .set({
-                blockedBalance: (parseFloat(wallet.blockedBalance) + amount).toFixed(2),
-                updatedAt: new Date(),
-            })
-            .where(eq(wallets.id, wallet.id));
-
-        logger.info({ userId, orderId, amount, newBlocked: parseFloat(wallet.blockedBalance) + amount }, "Funds blocked");
-    }
-
-    /**
-     * Release blocked funds when order is cancelled
-     * MUST be called within a transaction
-     */
-    static async unblockFunds(
-        userId: string,
-        amount: number,
-        orderId: string,
-        tx: any,
-        description?: string
-    ): Promise<void> {
-        const wallet = await this.getWallet(userId, tx);
-
-        // Validate sufficient blocked funds exist
-        if (parseFloat(wallet.blockedBalance) < amount) {
-            logger.error(
-                { userId, orderId, blockedBalance: wallet.blockedBalance, requestedAmount: amount },
-                "Insufficient blocked balance - wallet inconsistency detected"
-            );
-            throw new ApiError(
-                "Insufficient blocked balance - wallet inconsistency",
-                500,
-                "WALLET_INCONSISTENCY"
-            );
-        }
-
-        // Record transaction
-        try {
-            await tx.insert(transactions).values({
-                userId,
-                walletId: wallet.id,
-                type: "UNBLOCK" as TransactionType,
-                amount: amount.toFixed(2),
-                balanceBefore: wallet.balance,
-                balanceAfter: wallet.balance,
-                blockedBefore: wallet.blockedBalance,
-                blockedAfter: (parseFloat(wallet.blockedBalance) - amount).toFixed(2),
-                referenceType: "ORDER",
-                referenceId: orderId,
-                description: description || `Released blocked funds for cancelled order ${orderId}`,
-            });
-        } catch (error: any) {
-            if (error.code === "23505") {
-                logger.info({ userId, orderId }, "Duplicate unblock funds transaction (idempotent)");
-                return;
-            }
-            throw error;
-        }
-
-        // Update wallet cache
-        await tx
-            .update(wallets)
-            .set({
-                blockedBalance: (parseFloat(wallet.blockedBalance) - amount).toFixed(2),
-                updatedAt: new Date(),
-            })
-            .where(eq(wallets.id, wallet.id));
-
-        logger.info({ userId, orderId, amount }, "Funds unblocked");
-    }
-
-    /**
-     * Settle trade: Convert BLOCK → DEBIT (order executed)
-     * MUST be called within a transaction
-     * 
-     * This decreases BOTH balance AND blockedBalance
-     */
-    static async settleTrade(
-        userId: string,
-        amount: number,
-        tradeId: string,
-        tx: any,
-        description?: string,
-        orderId?: string // New param to look up exact blocked amount
-    ): Promise<void> {
-        const wallet = await this.getWallet(userId, tx);
-        
-        // Determine how much to unblock
-        let unblockAmount = amount; // Default to settlement amount
-
-        if (orderId) {
-            // Find original BLOCK transaction for this order
-            const [blockTx] = await tx
-                .select()
-                .from(transactions)
-                .where(and(
-                    eq(transactions.referenceId, orderId),
-                    eq(transactions.type, "BLOCK")
-                ))
-                .limit(1);
-
-            if (blockTx) {
-                unblockAmount = parseFloat(blockTx.amount);
-                logger.debug({ orderId, unblockAmount }, "Found original blocked amount for settlement");
-            } else {
-                logger.warn({ orderId }, "No BLOCK transaction found for order, using settlement amount");
-            }
-        }
-
-        // Validate blocked funds (with margin of error for floating point)
-        if (parseFloat(wallet.blockedBalance) < unblockAmount - 0.01) {
-             // If we rely on unblockAmount (from DB), this effectively means wallet is corrupted
-             // OR user had funds unblocked manually?
-             logger.error(
-                { userId, tradeId, blockedBalance: wallet.blockedBalance, unblockAmount },
-                "Settlement failed: insufficient blocked balance"
-            );
-            throw new ApiError(
-                "Settlement failed: insufficient blocked balance - wallet inconsistency",
-                500,
-                "WALLET_INCONSISTENCY"
-            );
-        }
-
-        // SETTLEMENT = decrease balance by COST, decrease blocked by BLOCKED_AMOUNT
-        const newBalance = parseFloat(wallet.balance) - amount;
-        const newBlocked = parseFloat(wallet.blockedBalance) - unblockAmount;
-
-        // Ensure newBlocked doesn't go negative due to float precision
-        const finalBlocked = Math.max(0, newBlocked);
-
-        // Record transaction
-        try {
-            await tx.insert(transactions).values({
-                userId,
-                walletId: wallet.id,
-                type: "SETTLEMENT" as TransactionType,
-                amount: amount.toFixed(2),
-                balanceBefore: wallet.balance,
-                balanceAfter: newBalance.toFixed(2),
-                blockedBefore: wallet.blockedBalance,
-                blockedAfter: finalBlocked.toFixed(2),
-                referenceType: "TRADE",
-                referenceId: tradeId,
-                description: description || `Settlement for trade ${tradeId}`,
-            });
-        } catch (error: any) {
-            if (error.code === "23505") {
-                logger.info({ userId, tradeId }, "Duplicate settlement transaction (idempotent)");
-                return;
-            }
-            throw error;
-        }
-
-        // Update wallet cache
-        await tx
-            .update(wallets)
-            .set({
-                balance: newBalance.toFixed(2),
-                blockedBalance: finalBlocked.toFixed(2),
-                updatedAt: new Date(),
-            })
-            .where(eq(wallets.id, wallet.id));
-
-        logger.info({ userId, tradeId, amount, newBalance, newBlocked: finalBlocked }, "Trade settled");
-    }
+    /* 
+    DEPRECATED: Blocking logic removed per user request for simplified "instant" trading.
+    
+    static async blockFunds(...) { ... }
+    static async unblockFunds(...) { ... }
+    static async settleTrade(...) { ... }
+    */
 
     /**
      * Credit balance when position is closed or profit realized

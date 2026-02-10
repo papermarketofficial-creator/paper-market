@@ -2,9 +2,9 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/auth";
-import { UpstoxService } from "@/services/upstox.service";
+import { UpstoxAuthService } from "@/services/upstox-auth.service";
 import Link from "next/link";
-import { AlertCircle, CheckCircle2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { StreamControl } from "@/components/admin/StreamControl";
 
@@ -18,11 +18,12 @@ export default async function UpstoxAdminPage({
   const userId = session?.user?.id;
   
   let isConnected = false;
-  let token = null;
+  let expiresAt: Date | null = null;
 
   if (userId) {
-     token = await UpstoxService.getAccessToken(userId);
-     isConnected = !!token;
+     const status = await UpstoxAuthService.getStatus(userId);
+     isConnected = status.connected;
+     expiresAt = status.expiresAt;
   }
 
   return (
@@ -71,8 +72,17 @@ export default async function UpstoxAdminPage({
              </div>
              
              {isConnected ? (
-                 <div className="p-4 bg-muted rounded-md text-xs font-mono break-all">
-                    Token Active
+                 <div className="p-4 bg-muted rounded-md text-xs font-mono">
+                    <div className="flex items-center gap-2 mb-2 text-green-600 font-semibold">
+                        <CheckCircle2 className="h-3 w-3" />
+                        Token Active
+                    </div>
+                    {expiresAt && (
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                            <Clock className="h-3 w-3" />
+                            <span>Valid until: {expiresAt.toLocaleString()}</span>
+                        </div>
+                    )}
                  </div>
              ) : (
                  <Alert variant="default" className="bg-yellow-500/10 border-yellow-500/20 text-yellow-700">

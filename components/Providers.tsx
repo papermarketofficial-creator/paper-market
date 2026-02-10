@@ -2,7 +2,7 @@
 import { ReactNode, useState } from 'react';
 import { ThemeProvider } from 'next-themes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from 'sonner';
+import { Toaster } from '@/components/ui/sonner';
 import { SessionProvider } from 'next-auth/react';
 
 export default function Providers({ children }: { children: ReactNode }) {

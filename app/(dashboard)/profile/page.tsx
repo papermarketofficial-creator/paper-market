@@ -12,7 +12,7 @@ import { useWalletStore } from '@/stores/wallet.store';
 
 const ProfilePage = () => {
   const { data: session } = useSession();
-  const { balance, blockedBalance, availableBalance, fetchWallet } = useWalletStore();
+  const { balance, fetchWallet } = useWalletStore();
 
   useEffect(() => {
     fetchWallet();
@@ -82,20 +82,13 @@ const ProfilePage = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-3 py-2">
-              <div className="flex justify-between items-center text-sm">
-                <span className="text-muted-foreground">Total Balance:</span>
-                <span className="font-semibold">{formatCurrency(balance)}</span>
+              <div className="flex justify-between items-center pt-2">
+                <span className="text-base font-medium">Available Balance:</span>
+                <span className="text-2xl font-bold text-success">{formatCurrency(balance)}</span>
               </div>
-              {blockedBalance > 0 && (
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-muted-foreground">Blocked Amount:</span>
-                  <span className="font-semibold text-orange-500">-{formatCurrency(blockedBalance)}</span>
-                </div>
-              )}
-              <div className="flex justify-between items-center pt-2 border-t border-border mt-2">
-                <span className="text-base font-medium">Available:</span>
-                <span className="text-xl font-bold text-success">{formatCurrency(availableBalance)}</span>
-              </div>
+              <p className="text-xs text-muted-foreground text-center pt-2">
+                Paper trading virtual funds
+              </p>
             </div>
           </CardContent>
         </Card>

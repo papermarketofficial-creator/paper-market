@@ -2,8 +2,6 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import {
   Table,
   TableBody,
@@ -26,10 +24,8 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Position } from '@/types/position.types';
 import { usePositionsStore } from '@/stores/trading/positions.store';
-import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
 import { cn } from '@/lib/utils';
 import { X, TrendingUp, TrendingDown } from 'lucide-react';
-import { toast } from 'sonner';
 import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
 
 interface PositionsTableProps {
@@ -37,13 +33,12 @@ interface PositionsTableProps {
 }
 
 export function PositionsTable({ loading = false }: PositionsTableProps) {
-  const { positions, fetchPositions } = usePositionsStore((state) => ({
-    positions: state.positions,
-    fetchPositions: state.fetchPositions
-  }));
-  const closePosition = useTradeExecutionStore((state) => state.closePosition); // This needs update later to be API driven too or removed
+  const positions = usePositionsStore((state) => state.positions);
+  const fetchPositions = usePositionsStore((state) => state.fetchPositions);
+  const closePosition = usePositionsStore((state) => state.closePosition);
+  
   const [closingPosition, setClosingPosition] = useState<Position | null>(null);
-  const [partialClose, setPartialClose] = useState<{ position: Position, quantity: number } | null>(null);
+  const [closingPositionId, setClosingPositionId] = useState<string | null>(null); // Track which position is closing
 
   useEffect(() => {
     fetchPositions();
@@ -60,6 +55,9 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
   };
 
   const calculatePnL = (position: Position) => {
+    // Don't calculate if no current price yet
+    if (position.currentPrice === 0) return 0;
+    
     return position.side === 'BUY'
       ? (position.currentPrice - position.entryPrice) * position.quantity
       : (position.entryPrice - position.currentPrice) * position.quantity;
@@ -67,27 +65,20 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
 
   // Use the store's calculated P&L for display
   const getPositionPnL = (position: Position) => {
+    // If currentPrice is 0, don't show P&L yet
+    if (position.currentPrice === 0) return 0;
     return position.currentPnL || calculatePnL(position);
   };
 
-  const handleClose = (position: Position) => {
-    closePosition(position.id, position.currentPrice);
-    setClosingPosition(null);
-    toast.success('Position Closed Successfully', {
-      description: `Closed ${position.quantity} shares of ${position.symbol}`,
-    });
-  };
 
-  const handlePartialClose = () => {
-    if (!partialClose) return;
-    // For partial close, we need to update the position quantity
-    // Since the store might not support partial close, we'll simulate by closing the full position
-    // In a real app, this would update the position quantity
-    closePosition(partialClose.position.id, partialClose.position.currentPrice);
-    setPartialClose(null);
-    toast.success('Partial Position Closed Successfully', {
-      description: `Closed ${partialClose.quantity} shares of ${partialClose.position.symbol}`,
-    });
+  const handleClose = async (position: Position) => {
+    setClosingPositionId(position.id); // Set the specific position being closed
+    const success = await closePosition(position.id);
+    setClosingPositionId(null); // Clear after completion
+    
+    if (success) {
+      setClosingPosition(null);
+    }
   };
 
   if (loading) {
@@ -141,7 +132,7 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
                         <div>
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-foreground">{position.symbol}</span>
-                            <Badge variant="outline" className="text-xs">{position.instrument}</Badge>
+                            <Badge variant="outline" className="text-xs">{position.instrument?.toUpperCase() || 'EQUITY'}</Badge>
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5">
                             {position.productType} • {position.quantity} qty
@@ -181,22 +172,15 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
                         </div>
                       </div>
 
-                      <div className="flex gap-2 pt-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setPartialClose({ position, quantity: 1 })}
-                          className="flex-1 border-blue-500/50 text-blue-600 hover:bg-blue-500 hover:text-white h-8 text-xs"
-                        >
-                          Partial
-                        </Button>
+                      <div className="pt-2">
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => setClosingPosition(position)}
-                          className="flex-1 border-destructive/50 text-destructive hover:bg-destructive hover:text-destructive-foreground h-8 text-xs"
+                          disabled={closingPositionId === position.id}
+                          className="w-full border-destructive/50 text-destructive hover:bg-destructive hover:text-destructive-foreground h-8 text-xs"
                         >
-                          Close
+                          {closingPositionId === position.id ? 'Closing...' : 'Close Position'}
                         </Button>
                       </div>
                     </div>
@@ -255,7 +239,7 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
                           </TableCell>
                           <TableCell>
                             <Badge variant="secondary" className="text-xs">
-                              {position.instrument.toUpperCase()}
+                              {position.instrument?.toUpperCase() || 'EQUITY'}
                             </Badge>
                           </TableCell>
                           <TableCell>
@@ -297,24 +281,15 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
                             </div>
                           </TableCell>
                           <TableCell className="text-right">
-                            <div className="flex gap-2 justify-end">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setPartialClose({ position, quantity: 1 })}
-                                className="border-blue-500/50 text-blue-600 hover:bg-blue-500 hover:text-white"
-                              >
-                                Partial
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => setClosingPosition(position)}
-                                className="border-destructive/50 text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                              >
-                                <X className="h-4 w-4" />
-                              </Button>
-                            </div>
+                            <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setClosingPosition(position)}
+                            disabled={closingPositionId !== null}
+                            className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:bg-destructive hover:text-destructive-foreground"
+                            >
+                              {closingPositionId === position.id ? 'Closing...' : <X className="h-4 w-4" />}
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -327,66 +302,37 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
         </CardContent>
       </Card>
 
-      <AlertDialog open={!!closingPosition} onOpenChange={() => setClosingPosition(null)}>
+      <AlertDialog open={!!closingPosition} onOpenChange={() => !closingPositionId && setClosingPosition(null)}>
         <AlertDialogContent className="bg-card border-border">
           <AlertDialogHeader>
             <AlertDialogTitle className="text-foreground">Close Position</AlertDialogTitle>
             <AlertDialogDescription className="text-muted-foreground">
               Are you sure you want to close your position in{' '}
-              <span className="font-medium text-foreground">{closingPosition?.symbol}</span>?
-              {closingPosition && (
-                <span className={cn(
-                  'block mt-2 font-medium',
-                  getPositionPnL(closingPosition) >= 0 ? 'text-profit' : 'text-loss'
-                )}>
-                  P&L: {getPositionPnL(closingPosition) >= 0 ? '+' : ''}
-                  {formatCurrency(getPositionPnL(closingPosition))}
-                </span>
-              )}
+              <span className="font-semibold text-foreground">{closingPosition?.symbol}</span>?
+              This will create a market order to exit your position.
             </AlertDialogDescription>
+            <div className="mt-4 p-3 bg-muted/50 rounded-md space-y-1">
+              <div className="flex justify-between text-sm">
+                <span>Current P&L:</span>
+                <span className={cn(
+                  "font-semibold",
+                  closingPosition && getPositionPnL(closingPosition) >= 0 ? "text-trade-buy" : "text-trade-sell"
+                )}>
+                  {closingPosition && formatCurrency(getPositionPnL(closingPosition))}
+                </span>
+              </div>
+            </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="border-border hover:bg-muted hover:text-muted-foreground">Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={closingPositionId !== null} className="bg-muted text-foreground hover:bg-muted/80">
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               onClick={() => closingPosition && handleClose(closingPosition)}
-              className="bg-destructive hover:bg-destructive/90"
+              disabled={closingPositionId !== null}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Close Position
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Partial Close Dialog */}
-      <AlertDialog open={!!partialClose} onOpenChange={() => setPartialClose(null)}>
-        <AlertDialogContent className="bg-card border-border">
-          <AlertDialogHeader>
-            <AlertDialogTitle className="text-foreground">Partial Close Position</AlertDialogTitle>
-            <AlertDialogDescription className="text-muted-foreground">
-              Close a portion of your position in{' '}
-              <span className="font-medium text-foreground">{partialClose?.position.symbol}</span>.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="partial-quantity">Close Quantity (Max: {partialClose?.position.quantity})</Label>
-              <Input
-                id="partial-quantity"
-                type="number"
-                value={partialClose?.quantity || ''}
-                onChange={(e) => setPartialClose(prev => prev ? { ...prev, quantity: +e.target.value } : null)}
-                max={partialClose?.position.quantity}
-                min={1}
-              />
-            </div>
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel className="border-border hover:bg-muted hover:text-muted-foreground">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handlePartialClose}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              Close {partialClose?.quantity} shares
+              {closingPositionId ? 'Closing...' : 'Close Position'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

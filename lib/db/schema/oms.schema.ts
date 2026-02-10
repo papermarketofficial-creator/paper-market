@@ -22,6 +22,9 @@ export const orders = pgTable('orders', {
     updatedAt: timestamp('updatedAt').defaultNow().notNull(),
     rejectionReason: text('rejectionReason'),
     idempotencyKey: text('idempotencyKey'),
+    // New fields for tracking realized P&L on closing orders
+    averagePrice: numeric('averagePrice', { precision: 10, scale: 2 }), // Entry price of the position being closed
+    realizedPnL: numeric('realizedPnL', { precision: 12, scale: 2 }), // Profit/Loss for this specific order execution
 }, (t) => {
     return {
         userIdIdx: index('orders_userId_idx').on(t.userId),

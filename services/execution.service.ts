@@ -50,7 +50,7 @@ export class ExecutionService {
     /**
      * Try to execute a single order based on market conditions.
      */
-    private static async tryExecuteOrder(order: typeof orders.$inferSelect): Promise<boolean> {
+    static async tryExecuteOrder(order: typeof orders.$inferSelect): Promise<boolean> {
         // Get current market price
         // Get current market price (Priority: Real-Time > Simulation)
         let quote = realTimeMarketService.getQuote(order.symbol);
@@ -76,31 +76,10 @@ export class ExecutionService {
         try {
             await db.transaction(async (tx) => {
                 // Get instrument for margin calculation
-                const [instrument] = await tx
-                    .select()
-                    .from(instruments)
-                    .where(ilike(instruments.tradingsymbol, order.symbol))
-                    .limit(1);
-
-                if (!instrument) {
-                    throw new ApiError("Instrument not found", 404, "INSTRUMENT_NOT_FOUND");
-                }
-
                 // Calculate actual execution cost
                 const executionCost = marketPrice * order.quantity;
 
-                // 1. Update order to FILLED
-                await tx
-                    .update(orders)
-                    .set({
-                        status: "FILLED",
-                        executionPrice: marketPrice.toString(),
-                        executedAt: new Date(),
-                        updatedAt: new Date(),
-                    })
-                    .where(eq(orders.id, order.id));
-
-                // 2. Create trade record
+                // Define newTrade before Promise.all
                 const newTrade: NewTrade = {
                     orderId: order.id,
                     userId: order.userId,
@@ -111,53 +90,53 @@ export class ExecutionService {
                     executedAt: new Date(),
                 };
 
-                const [trade] = await tx.insert(trades).values(newTrade).returning();
+                // Parallelize Order Update and Trade Insert
+                const [_, [trade]] = await Promise.all([
+                    tx.update(orders)
+                        .set({
+                            status: "FILLED",
+                            executionPrice: marketPrice.toString(),
+                            executedAt: new Date(),
+                            updatedAt: new Date(),
+                        })
+                        .where(eq(orders.id, order.id)),
+                    
+                    tx.insert(trades).values(newTrade).returning()
+                ]);
 
-                // 3. Settle trade: Convert BLOCK → DEBIT (for BUY orders)
-                // For SELL orders, we credit the proceeds
-                if (order.side === "BUY") {
-                    // Settle the blocked funds (convert BLOCK to DEBIT)
-                    await WalletService.settleTrade(
-                        order.userId,
-                        executionCost,
-                        trade.id,
-                        tx,
-                        `Executed BUY: ${order.quantity} ${order.symbol} @ ₹${marketPrice}`,
-                        order.id // Pass orderId for exact unblocking
+                // Parallelize Wallet and Position updates
+                const promises = [];
+
+                // 🎯 PAPER TRADING: Update Wallet Balance
+                if (order.side === 'BUY') {
+                    // DEBIT cost from wallet
+                    promises.push(
+                        WalletService.debitBalance(
+                            order.userId,
+                            executionCost,
+                            'TRADE',
+                            trade.id,
+                            tx,
+                            `Buy ${order.symbol} (${order.quantity} @ ${marketPrice})`
+                        )
                     );
                 } else {
-                    // For SELL orders: unblock the margin and credit the sale proceeds
-                    // First, calculate the margin that was blocked
-                    const orderPayload = {
-                        symbol: order.symbol,
-                        side: order.side,
-                        quantity: order.quantity,
-                        orderType: order.orderType,
-                        limitPrice: order.limitPrice ? parseFloat(order.limitPrice) : marketPrice,
-                    };
-                    const blockedMargin = MarginService.calculateRequiredMargin(orderPayload, instrument);
-
-                    // Unblock the margin
-                    await WalletService.unblockFunds(
-                        order.userId,
-                        blockedMargin,
-                        order.id,
-                        tx,
-                        `Released margin for SELL execution`
-                    );
-
-                    // Credit the sale proceeds
-                    await WalletService.creditProceeds(
-                        order.userId,
-                        executionCost,
-                        trade.id,
-                        tx,
-                        `Executed SELL: ${order.quantity} ${order.symbol} @ ₹${marketPrice}`
+                    // CREDIT proceeds to wallet (Sell)
+                    promises.push(
+                        WalletService.creditProceeds(
+                            order.userId,
+                            executionCost,
+                            trade.id,
+                            tx,
+                            `Sell ${order.symbol} (${order.quantity} @ ${marketPrice})`
+                        )
                     );
                 }
 
-                // 4. Update position
-                await PositionService.updatePosition(tx, trade);
+                // 3. Update position
+                promises.push(PositionService.updatePosition(tx, trade));
+
+                await Promise.all(promises);
             });
 
             logger.info(
@@ -192,7 +171,7 @@ export class ExecutionService {
     /**
      * Determine if order should execute based on market price.
      */
-    private static shouldExecute(
+    static shouldExecute(
         order: typeof orders.$inferSelect,
         marketPrice: number
     ): boolean {
