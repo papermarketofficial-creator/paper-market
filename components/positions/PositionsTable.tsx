@@ -27,22 +27,26 @@ import { usePositionsStore } from '@/stores/trading/positions.store';
 import { cn } from '@/lib/utils';
 import { X, TrendingUp, TrendingDown } from 'lucide-react';
 import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
+import Spinner from '@/components/ui/spinner';
 
 interface PositionsTableProps {
   loading?: boolean;
 }
 
-export function PositionsTable({ loading = false }: PositionsTableProps) {
+export function PositionsTable({ loading: parentLoading = false }: PositionsTableProps) {
   const positions = usePositionsStore((state) => state.positions);
   const fetchPositions = usePositionsStore((state) => state.fetchPositions);
+  const isLoading = usePositionsStore((state) => state.isLoading);
   const closePosition = usePositionsStore((state) => state.closePosition);
+  
+  const loading = parentLoading || isLoading;
   
   const [closingPosition, setClosingPosition] = useState<Position | null>(null);
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null); // Track which position is closing
 
   useEffect(() => {
     fetchPositions();
-    const interval = setInterval(fetchPositions, 1000); // Poll every second for PnL
+    const interval = setInterval(() => fetchPositions(true), 5000); // Poll every second for PnL
     return () => clearInterval(interval);
   }, [fetchPositions]);
 
@@ -81,22 +85,26 @@ export function PositionsTable({ loading = false }: PositionsTableProps) {
     }
   };
 
-  if (loading) {
-    return (
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle className="text-foreground">Open Positions</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {[...Array(3)].map((_, i) => (
-              <Skeleton key={i} className="h-16 w-full" />
-            ))}
-          </div>
-        </CardContent>
-      </Card>
-    );
-  }
+  const hasFetched = usePositionsStore((s) => s.hasFetched);
+
+if (!hasFetched) {
+  return (
+    <Card className="bg-card border-border">
+      <CardHeader>
+        <CardTitle className="text-foreground">Open Positions</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col items-center justify-center py-12">
+          <Spinner size={40} />
+          <p className="mt-4 text-muted-foreground">
+            Loading positions...
+          </p>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 
   return (
     <>

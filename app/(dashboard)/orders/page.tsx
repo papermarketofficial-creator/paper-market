@@ -22,11 +22,12 @@ import {
 import { useOrdersStore } from '@/stores/trading/orders.store';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { Search, ArrowUpDown, History, TrendingUp, TrendingDown, Download, X, Loader2 } from 'lucide-react';
+import { Search, ArrowUpDown, History, TrendingUp, TrendingDown, Download, X } from 'lucide-react';
 import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
+import Spinner from '@/components/ui/spinner';
 
 const OrdersPage = () => {
-  const { trades, isLoading, error, fetchOrders, cancelOrder } = useOrdersStore();
+  const { trades, isLoading, hasFetched, error, fetchOrders, cancelOrder } = useOrdersStore();
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<'date' | 'pnl'>('date');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -36,9 +37,11 @@ const OrdersPage = () => {
   const itemsPerPage = 10;
 
   // Fetch orders on mount
-  useEffect(() => {
+useEffect(() => {
+  if (!hasFetched) {
     fetchOrders();
-  }, [fetchOrders]);
+  }
+}, [hasFetched, fetchOrders]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -191,9 +194,9 @@ const OrdersPage = () => {
         </CardHeader>
         <CardContent>
           {/* Loading State */}
-          {isLoading && trades.length === 0 ? (
+          {!hasFetched ? (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-              <Loader2 className="h-12 w-12 mb-4 animate-spin" />
+              <Spinner size={48} className="mb-4" />
               <p className="text-lg font-medium">Loading orders...</p>
             </div>
           ) : error ? (
@@ -292,7 +295,7 @@ const OrdersPage = () => {
                           className="text-destructive hover:text-destructive hover:bg-destructive/10 h-7 px-2"
                         >
                           {cancellingOrderId === trade.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
+                            <Spinner size={12} />
                           ) : (
                             <>
                               <X className="h-3 w-3 mr-1" />

@@ -7,6 +7,7 @@ interface OrdersState {
   trades: Trade[];
   journalEntries: JournalEntry[];
   isLoading: boolean;
+  hasFetched: boolean;
   error: string | null;
 
   // Actions
@@ -20,6 +21,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
   trades: [],
   journalEntries: [],
   isLoading: false,
+  hasFetched: false,
   error: null,
 
   fetchOrders: async (filters = {}) => {
@@ -90,7 +92,7 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       set({ error: error.message });
       toast.error('Failed to load orders');
     } finally {
-      set({ isLoading: false });
+      set({ isLoading: false,hasFetched: true,  });
     }
   },
 

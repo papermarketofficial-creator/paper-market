@@ -49,9 +49,11 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
         return { ...stock, price, change, changePercent };
       };
 
-      // ✅ SINGLE WRITER PRINCIPLE: Only ChartController updates historicalData
-      // updateLiveCandle() handles all chart data mutations via ChartController
-      // This function only updates watchlist prices
+      // Debug only indices if needed
+      const isIndex = symbol.includes('NIFTY') || symbol.includes('SENSEX');
+      if (isIndex && process.env.NODE_ENV === 'development') {
+          console.log(`🆙 Updating Index ${symbol}: ${price} (${close})`);
+      }
 
       return {
         stocks: state.stocks.map(updateStock),
@@ -134,7 +136,7 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
         
     } else {
         // Update existing candle
-        console.log('📈 UPDATE Candle:', candleUpdate.candle, 'Price:', tick.price);
+        // console.log('📈 UPDATE Candle:', candleUpdate.candle, 'Price:', tick.price);
         
         // ✅ CORRECT: Immutable array update (replace last element)
         set(state => ({

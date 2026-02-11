@@ -128,30 +128,32 @@ export function MarketStatusBar() {
         };
     }, []);
 
-    // Listen to live price updates from the market store
+    // Listen to live price updates from the market store via selectors
+    const indices = useMarketStore(state => state.indices);
+    const stocks = useMarketStore(state => state.stocks);
+
     useEffect(() => {
-        const unsubscribe = useMarketStore.subscribe((state) => {
-            // Update index prices when stocks/indices are updated
-            INDEX_SYMBOLS.forEach(symbol => {
-                // Check in indices list first, then stocks
-                const data = state.indices.find(s => s.symbol === symbol) || 
-                             state.stocks.find(s => s.symbol === symbol);
-                
-                if (data) {
-                    setIndexPrices(prev => ({
-                        ...prev,
-                        [symbol]: data.price,
-                    }));
+        // Update index prices when stocks/indices are updated
+        INDEX_SYMBOLS.forEach(symbol => {
+            // Check in indices list first, then stocks
+            const data = indices.find(s => s.symbol === symbol) || 
+                         stocks.find(s => s.symbol === symbol);
+            
+            if (data && data.price > 0) {
+                setIndexPrices(prev => ({
+                    ...prev,
+                    [symbol]: data.price,
+                }));
+                // Only update change if it's non-zero or we need to reset
+                if (data.changePercent !== 0) {
                     setIndexChanges(prev => ({
                         ...prev,
                         [symbol]: data.changePercent,
                     }));
                 }
-            });
+            }
         });
-
-        return unsubscribe;
-    }, []);
+    }, [indices, stocks]); // Re-run when indices/stocks array reference changes
 
     const formatPrice = (price: number) => price > 0 ? price.toFixed(2) : '—';
     const formatChange = (change: number) => {

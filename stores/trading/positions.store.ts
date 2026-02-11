@@ -6,10 +6,11 @@ import { toast } from 'sonner';
 interface PositionsState {
   positions: Position[];
   isLoading: boolean;
+  hasFetched: boolean; 
   error: string | null;
 
   // Actions
-  fetchPositions: () => Promise<void>;
+  fetchPositions: (background?: boolean) => Promise<void>;
   closePosition: (positionId: string, quantity?: number) => Promise<boolean>;
   updatePositionPrice: (positionId: string, newPrice: number) => void;
   updateAllPositionsPrices: (priceUpdates: { [symbol: string]: number }) => void;
@@ -34,10 +35,13 @@ const calculatePnL = (position: Position, currentPrice: number): number => {
 export const usePositionsStore = create<PositionsState>((set, get) => ({
   positions: [],
   isLoading: false,
+  hasFetched: false,
   error: null,
 
-  fetchPositions: async () => {
-    set({ isLoading: true, error: null });
+  fetchPositions: async (background = false) => {
+    if (!background) {
+      set({ isLoading: true, error: null });
+    }
     try {
       const res = await fetch('/api/v1/positions');
       const data = await res.json();
@@ -46,7 +50,8 @@ export const usePositionsStore = create<PositionsState>((set, get) => ({
         const currentPositions = get().positions;
         
         // Merge new positions with existing ones, preserving last known currentPrice
-        const mergedPositions = data.data.map((newPos: Position) => {
+        // Also map to ensure we have a valid array
+        const mergedPositions = (data.data || []).map((newPos: Position) => {
           const existingPos = currentPositions.find(p => p.id === newPos.id);
           
           // If API returns 0 for currentPrice but we have a previous price, keep the previous price
@@ -69,7 +74,9 @@ export const usePositionsStore = create<PositionsState>((set, get) => ({
       console.error('Failed to fetch positions:', error);
       set({ error: 'Network error fetching positions' });
     } finally {
-      set({ isLoading: false });
+       if (!background) {
+           set({ isLoading: false , hasFetched: true });
+       }
     }
   },
 
@@ -130,5 +137,11 @@ export const usePositionsStore = create<PositionsState>((set, get) => ({
     }
   },
 
-  reset: () => set({ positions: [], error: null }),
+  reset: () =>
+  set({
+    positions: [],
+    error: null,
+    isLoading: false,
+    hasFetched: false, 
+  }),
 }));

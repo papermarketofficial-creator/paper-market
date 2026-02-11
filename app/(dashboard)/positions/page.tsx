@@ -8,7 +8,6 @@ import { useEffect } from 'react';
 export default function PositionsPage() {
   const positions = usePositionsStore((state) => state.positions);
 
-  /* Legacy Simulation Removed - Updates handled by useMarketStream via DashboardLayout */
 
   // Subscribe to market feed for all position symbols
   useEffect(() => {
