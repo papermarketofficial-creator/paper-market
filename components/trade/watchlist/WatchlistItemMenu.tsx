@@ -11,6 +11,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Stock } from '@/types/equity.types';
 import { useMarketStore } from '@/stores/trading/market.store';
+import { useAddInstrument, useRemoveInstrument } from '@/hooks/queries/use-watchlists';
 import { toast } from 'sonner';
 
 interface WatchlistItemMenuProps {
@@ -19,7 +20,9 @@ interface WatchlistItemMenuProps {
 }
 
 export function WatchlistItemMenu({ stock, isInWatchlist = true }: WatchlistItemMenuProps) {
-  const { addToWatchlist, removeFromWatchlist } = useMarketStore();
+  const { activeWatchlistId } = useMarketStore();
+  const { mutateAsync: addInstrument } = useAddInstrument(activeWatchlistId || '');
+  const { mutateAsync: removeInstrument } = useRemoveInstrument(activeWatchlistId || '');
 
   const handleAddToWatchlist = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -28,8 +31,13 @@ export function WatchlistItemMenu({ stock, isInWatchlist = true }: WatchlistItem
       return;
     }
 
+    if (!activeWatchlistId) {
+      toast.error('No active watchlist selected');
+      return;
+    }
+
     try {
-      await addToWatchlist(stock);
+      await addInstrument(stock.instrumentToken);
       toast.success(`Added ${stock.symbol} to watchlist`);
     } catch (error) {
       toast.error('Failed to add to watchlist');
@@ -43,8 +51,13 @@ export function WatchlistItemMenu({ stock, isInWatchlist = true }: WatchlistItem
       return;
     }
 
+    if (!activeWatchlistId) {
+      toast.error('No active watchlist selected');
+      return;
+    }
+
     try {
-      await removeFromWatchlist(stock.instrumentToken);
+      await removeInstrument(stock.instrumentToken);
       toast.success(`Removed ${stock.symbol} from watchlist`);
     } catch (error) {
       toast.error('Failed to remove from watchlist');

@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query';
+import { QueryClient, keepPreviousData } from '@tanstack/react-query';
 
 // ═══════════════════════════════════════════════════════════
 // 🔧 QUERY CLIENT CONFIGURATION
@@ -27,7 +27,7 @@ export const queryClient = new QueryClient({
       retry: false,
       
       // ✅ Show stale data while refetching (instant UI)
-      placeholderData: (previousData) => previousData,
+      placeholderData: keepPreviousData,
     },
     mutations: {
       // ❌ Don't retry mutations (add/remove should be explicit)
