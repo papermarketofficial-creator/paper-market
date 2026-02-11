@@ -9,8 +9,8 @@ import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
 import { useMarketStream } from '@/hooks/use-market-stream'; // New Hook
 
 export default function DashboardLayoutClient({ children }: { children: ReactNode }) {
-  // 1. Activate Market Simulation (Legacy - kept as fallback or needs removal)
-  useMarketSimulation();
+  // 1. Activate Market Simulation (Legacy - removed to ensure real data consistency)
+  // useMarketSimulation();
 
   // 2. Activate Real-Time Stream (Primary)
   useMarketStream();

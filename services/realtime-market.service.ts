@@ -139,7 +139,26 @@ class RealTimeMarketService extends EventEmitter {
         symbols.forEach(s => {
             // Normalize symbol
             const pureSymbol = s.includes("|") ? s.split("|")[1] : s;
-            const fullSymbolKey = s.includes("|") ? s : `${this.instrumentPrefix}${s}`;
+
+            // 🔥 FIX: Detect indices and use correct prefix AND Title Case for Upstox
+            const isIndex = pureSymbol.includes('NIFTY') || pureSymbol.includes('SENSEX') || pureSymbol.includes('BANKEX');
+            let prefix = this.instrumentPrefix;
+            let finalSymbol = pureSymbol;
+
+            if (isIndex) {
+                prefix = "NSE_INDEX|";
+                // Convert "NIFTY 50" -> "Nifty 50", "NIFTY BANK" -> "Nifty Bank"
+                // Simple title casing
+                finalSymbol = pureSymbol
+                    .toLowerCase()
+                    .split(' ')
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(' ');
+                
+                // Special case correction if needed (e.g. if any specifics differ)
+            }
+            
+            const fullSymbolKey = s.includes("|") ? s : `${prefix}${finalSymbol}`;
             
             // Resolve to ISIN if possible
             const isinKey = this.isinMap.get(pureSymbol) || this.isinMap.get(fullSymbolKey);

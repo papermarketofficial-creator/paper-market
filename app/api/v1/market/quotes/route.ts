@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
         // Fetch quotes from Upstox API
         const symbolList = instrumentKeys.map(k => encodeURIComponent(k)).join(",");
-        const url = `${UPSTOX_API_URL}/market-quote/ltp?instrument_key=${symbolList}`;
+        const url = `${UPSTOX_API_URL}/market-quote/quotes?instrument_key=${symbolList}`;
         
         console.log('📡 Upstox API URL:', url.substring(0, 100) + '...');
         

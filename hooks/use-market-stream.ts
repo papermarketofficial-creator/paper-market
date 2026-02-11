@@ -7,7 +7,7 @@ import { getMarketStream } from '@/lib/sse'; // Import Singleton
 
 export const useMarketStream = () => {
     const { updateAllPositionsPrices } = usePositionsStore();
-    const { updateStockPrice, instruments: allInstruments, updateLiveCandle } = useMarketStore();
+    const { updateStockPrice, instruments: allInstruments, indices: allIndices, updateLiveCandle } = useMarketStore();
     const [isConnected, setIsConnected] = useState(false);
 
     useEffect(() => {
@@ -50,10 +50,15 @@ export const useMarketStream = () => {
                     const matchedInstrument = allInstruments.find(i => 
                         i.instrumentToken === quote.symbol || 
                         i.instrumentToken?.includes(quote.symbol)
+                    ) || allIndices.find(i => 
+                        i.instrumentToken === quote.symbol || 
+                        i.instrumentToken?.includes(quote.symbol)
                     );
 
                     if (matchedInstrument) {
-                        tradingSymbol = matchedInstrument.tradingsymbol;
+                        // Handle potential structural differences (WatchlistInstrument vs Stock)
+                        // 'tradingsymbol' is in WatchlistInstrument, 'symbol' is in Stock
+                        tradingSymbol = (matchedInstrument as any).tradingsymbol || (matchedInstrument as any).symbol || quote.symbol;
                     }
 
                     // ═══════════════════════════════════════════════════════════

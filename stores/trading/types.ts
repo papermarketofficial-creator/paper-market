@@ -27,12 +27,10 @@ export interface WatchlistInstrument {
 // ─────────────────────────────────────────────────────────────────
 
 export interface WatchlistSlice {
-  // State
+  // State (UI State Only - Data managed by TanStack Query)
   stocks: Stock[];
   instruments: WatchlistInstrument[];
-  watchlists: Watchlist[];
   activeWatchlistId: string | null;
-  isFetchingWatchlistData: boolean;
   
   // Legacy
   futures: Stock[];
@@ -43,15 +41,11 @@ export interface WatchlistSlice {
   searchResults: Stock[];
   isSearching: boolean;
 
-  // Actions
-  fetchWatchlists: () => Promise<void>;
-  fetchInstruments: () => Promise<void>;
-  fetchWatchlistInstruments: (watchlistId: string) => Promise<void>;
-  createWatchlist: (name: string) => Promise<void>;
-  addToWatchlist: (instrument: Stock) => Promise<void>;
-  removeFromWatchlist: (instrumentToken: string) => Promise<void>;
+  // Actions (Simplified for TanStack Query)
+  setActiveWatchlistId: (watchlistId: string | null) => void;
+  setStocks: (stocks: Stock[]) => void;
+  updateStockPrices: (priceUpdates: Record<string, number>) => void;
   prefetchInstrument: (instrumentKey: string) => void;
-  setActiveWatchlist: (watchlistId: string) => void;
   getCurrentInstruments: (mode: InstrumentMode | 'indices') => Stock[];
   searchInstruments: (query: string, type?: string) => Promise<void>;
 }

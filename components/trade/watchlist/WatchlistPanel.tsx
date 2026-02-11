@@ -17,6 +17,7 @@ import {
 import { toast } from 'sonner';
 import { WatchlistItemMenu } from './WatchlistItemMenu';
 import { WatchlistSkeleton } from './WatchlistSkeleton';
+import { useWatchlists, useWatchlistInstruments, useCreateWatchlist } from '@/hooks/queries/use-watchlists';
 
 interface WatchlistPanelProps {
   instruments: Stock[];
@@ -31,18 +32,43 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
   const subscribedSymbolsRef = useRef<string[]>([]);
 
-  const { 
-      watchlists, 
-      activeWatchlistId, 
-      setActiveWatchlist, 
-      createWatchlist,
-      isFetchingWatchlistData,
-      prefetchInstrument
-  } = useMarketStore();
+  // 🔥 NEW: TanStack Query hooks for data fetching
+  const { data: watchlists = [], isLoading: isLoadingWatchlists } = useWatchlists();
+  const createWatchlistMutation = useCreateWatchlist();
+  
+  // Get active watchlist ID from Zustand (UI state only)
+  const { activeWatchlistId, setActiveWatchlistId, prefetchInstrument, setStocks } = useMarketStore();
+  
+  // Set default watchlist on mount
+  useEffect(() => {
+    if (!activeWatchlistId && watchlists.length > 0) {
+      const defaultWatchlist = watchlists.find(w => w.isDefault) || watchlists[0];
+      if (defaultWatchlist) {
+        setActiveWatchlistId(defaultWatchlist.id);
+      }
+    }
+  }, [watchlists, activeWatchlistId, setActiveWatchlistId]);
+  
+  // Fetch instruments for active watchlist
+  const { data: queryInstruments = [], isLoading: isLoadingInstruments } = useWatchlistInstruments(activeWatchlistId);
+  
+  // Sync query data to Zustand store (for SSE price updates)
+  useEffect(() => {
+    // 🔥 FIX: Prevent infinite loop by checking if data actually changed
+    if (!isLoadingInstruments && queryInstruments) {
+      const currentIds = queryInstruments.map(s => s.instrumentToken).sort().join(',');
+      const storeIds = instruments.map(s => s.instrumentToken).sort().join(',');
+      
+      if (currentIds !== storeIds) {
+        setStocks(queryInstruments);
+      }
+    }
+  }, [queryInstruments, isLoadingInstruments, setStocks, instruments]);
   
   const activeWatchlist = watchlists.find(w => w.id === activeWatchlistId);
+  const isFetchingWatchlistData = isLoadingWatchlists || isLoadingInstruments;
 
-  // Show all instruments
+  // Show all instruments (use props for live-updated prices from Zustand)
   const localMatches = instruments;
 
   // ═══════════════════════════════════════════════════════════
@@ -81,15 +107,20 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbols, action: 'unsubscribe' })
       }).catch(err => console.error('Failed to unsubscribe from watchlist:', err));
-      subscribedSymbolsRef.current = [];
     };
-  }, [activeWatchlistId]); // 🔥 FIX: Only depend on watchlist ID, not instruments array
+  }, [activeWatchlistId, instruments]); // 🔥 FIX: Re-run when instruments data arrives
 
   const handleCreateWatchlist = async () => {
     if (!newWatchlistName.trim()) return;
     
     try {
-      await createWatchlist(newWatchlistName.trim());
+      const res = await createWatchlistMutation.mutateAsync(newWatchlistName.trim());
+      
+      // 🔥 FIX: Switch to the new watchlist immediately
+      if (res.success && res.data?.id) {
+        setActiveWatchlistId(res.data.id);
+      }
+      
       setNewWatchlistName('');
       setIsCreating(false);
       toast.success('Watchlist created');
@@ -120,7 +151,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
             {watchlists.map(watchlist => (
               <DropdownMenuItem
                 key={watchlist.id}
-                onClick={() => setActiveWatchlist(watchlist.id)}
+                onClick={() => setActiveWatchlistId(watchlist.id)}
                 className={cn(
                   "text-xs cursor-pointer",
                   watchlist.id === activeWatchlistId && "bg-accent font-medium"

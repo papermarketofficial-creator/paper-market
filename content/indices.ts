@@ -8,7 +8,8 @@ export const indicesList: Stock[] = [
         change: 0,
         changePercent: 0,
         volume: 0,
-        lotSize: 50
+        lotSize: 50,
+        instrumentToken: 'NSE_INDEX|Nifty 50'  // Exact Upstox format
     },
     {
         symbol: 'NIFTY BANK',
@@ -17,7 +18,8 @@ export const indicesList: Stock[] = [
         change: 0,
         changePercent: 0,
         volume: 0,
-        lotSize: 25
+        lotSize: 25,
+        instrumentToken: 'NSE_INDEX|Nifty Bank'  // Exact Upstox format
     },
     {
         symbol: 'NIFTY FIN SERVICE',
@@ -26,7 +28,8 @@ export const indicesList: Stock[] = [
         change: 0,
         changePercent: 0,
         volume: 0,
-        lotSize: 40
+        lotSize: 40,
+        instrumentToken: 'NSE_INDEX|Nifty Fin Service'  // Exact Upstox format
     }
 ];
 

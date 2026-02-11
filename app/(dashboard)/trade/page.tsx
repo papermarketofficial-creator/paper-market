@@ -13,11 +13,12 @@ import { GlobalSearchModal } from '@/components/trade/search/GlobalSearchModal';
 const CandlestickChartComponent = dynamic(() => import('@/components/trade/CandlestickChart').then(mod => ({ default: mod.CandlestickChart })), { ssr: false });
 
 export default function TradePage() {
-  const { stocks, fetchWatchlists, initializeSimulation } = useMarketStore();
+  const { stocks, initializeSimulation } = useMarketStore();
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
 
   // 🔥 CRITICAL: No direct SSE here - managed by MarketStreamProvider in dashboard layout
+  // 🔥 CRITICAL: Watchlists fetched automatically by TanStack Query in WatchlistPanel
 
   // Initial Load & Parallel Fetching
   useEffect(() => {
@@ -66,18 +67,14 @@ export default function TradePage() {
         }
       }
 
-      // 3. Parallel Fetch: Watchlists + (Optional) Chart Data
-      const promises: Promise<any>[] = [fetchWatchlists()];
-      
+      // 3. Initialize chart simulation if we have a last symbol
       if (lastSymbol) {
-          promises.push(initializeSimulation(lastSymbol, '1d'));
+          initializeSimulation(lastSymbol, '1d').catch(console.error);
       }
-
-      Promise.all(promises).catch(console.error);
     };
 
     init();
-  }, [fetchWatchlists, initializeSimulation]); // Run on mount only
+  }, [initializeSimulation]); // Run on mount only
 
   // Persist selection
   useEffect(() => {
