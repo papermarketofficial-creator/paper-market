@@ -1,11 +1,9 @@
 "use client";
 
 import { ReactNode } from "react";
-import { useMarketStreamStatus } from "@/contexts/MarketStreamContext";
 
 export default function TradeLayout({ children }: { children: ReactNode }) {
-  // 🔥 CRITICAL: Only consume status, don't create connection
-  const { status } = useMarketStreamStatus();
+ 
 
   return (
     <div className="relative h-full">
