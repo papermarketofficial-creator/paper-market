@@ -103,13 +103,59 @@ const sessionCache = new LRUCache<string, any>({
     allowStale: false,
 });
 
+declare global {
+    var __testUserBootstrapPromise: Promise<string> | undefined;
+}
+
+async function ensureTestUserId(): Promise<string> {
+    const configuredId = process.env.TEST_USER_ID || "mock-user-id";
+    const configuredEmail = process.env.TEST_USER_EMAIL || "test@example.com";
+    const configuredName = process.env.TEST_USER_NAME || "Test User";
+
+    const [existingById] = await db
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .where(eq(users.id, configuredId))
+        .limit(1);
+
+    if (existingById) {
+        return existingById.id;
+    }
+
+    const [existingByEmail] = await db
+        .select({ id: users.id, email: users.email })
+        .from(users)
+        .where(eq(users.email, configuredEmail))
+        .limit(1);
+
+    if (existingByEmail) {
+        return existingByEmail.id;
+    }
+
+    await db.insert(users).values({
+        id: configuredId,
+        email: configuredEmail,
+        name: configuredName,
+        balance: "1000000.00",
+    });
+
+    return configuredId;
+}
+
 export const auth = async () => {
     // 🧪 Test Mode Bypass
     if (process.env.TEST_MODE === "true" && process.env.NODE_ENV !== "production") {
+        if (!globalThis.__testUserBootstrapPromise) {
+            globalThis.__testUserBootstrapPromise = ensureTestUserId();
+        }
+
+        const testUserId = await globalThis.__testUserBootstrapPromise;
+        const testUserEmail = process.env.TEST_USER_EMAIL || "test@example.com";
+
         return {
             user: {
-                id: process.env.TEST_USER_ID || "mock-user-id",
-                email: "test@example.com",
+                id: testUserId,
+                email: testUserEmail,
             }
         };
     }

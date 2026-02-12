@@ -127,7 +127,14 @@ export function MarketStatusBar() {
                 method: 'DELETE',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ symbols: INDEX_SYMBOLS }),
-            }).catch(err => console.error('Failed to unsubscribe from indices:', err));
+            })
+                .then(async (res) => {
+                    if (!res.ok) {
+                        const details = await res.text().catch(() => '');
+                        throw new Error(`Index unsubscribe failed (${res.status}) ${details}`);
+                    }
+                })
+                .catch(err => console.error('Failed to unsubscribe from indices:', err));
         };
     }, []);
 

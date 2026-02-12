@@ -17,7 +17,20 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const watchlists = await WatchlistService.getUserWatchlists(session.user.id);
+    let watchlists = await WatchlistService.getUserWatchlists(session.user.id);
+
+    // Self-heal first-load users: always provide one default watchlist.
+    if (watchlists.length === 0) {
+      try {
+        await WatchlistService.createDefaultWatchlist(session.user.id);
+      } catch (error: any) {
+        // Another concurrent request may have created it already.
+        if (error?.code !== '23505') {
+          throw error;
+        }
+      }
+      watchlists = await WatchlistService.getUserWatchlists(session.user.id);
+    }
 
     return NextResponse.json({
       success: true,

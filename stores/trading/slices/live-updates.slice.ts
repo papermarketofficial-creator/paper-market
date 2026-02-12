@@ -49,17 +49,34 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
         return { ...stock, price, change, changePercent };
       };
 
+      const updateList = (list: Stock[]) => {
+        const index = list.findIndex((item) => item.symbol === symbol);
+        if (index < 0) return list;
+        const next = [...list];
+        next[index] = updateStock(list[index]);
+        return next;
+      };
+
       // Debug only indices if needed
       const isIndex = symbol.includes('NIFTY') || symbol.includes('SENSEX');
       if (isIndex && process.env.NODE_ENV === 'development') {
           console.log(`🆙 Updating Index ${symbol}: ${price} (${close})`);
       }
 
+      let stocksBySymbol = state.stocksBySymbol;
+      if (stocksBySymbol?.[symbol]) {
+        stocksBySymbol = {
+          ...stocksBySymbol,
+          [symbol]: updateStock(stocksBySymbol[symbol]),
+        };
+      }
+
       return {
-        stocks: state.stocks.map(updateStock),
-        futures: state.futures.map(updateStock),
-        options: state.options.map(updateStock),
-        indices: state.indices.map(updateStock),
+        stocksBySymbol,
+        stocks: updateList(state.stocks),
+        futures: updateList(state.futures),
+        options: updateList(state.options),
+        indices: updateList(state.indices),
         livePrice: price
       };
     });

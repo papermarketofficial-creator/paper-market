@@ -154,16 +154,34 @@ export class WatchlistService {
         .from(instruments)
         .where(inArray(instruments.tradingsymbol, topStocks));
 
-      if (equityInstruments.length > 0) {
+      const fallbackInstruments = equityInstruments.length === 0
+        ? await db
+            .select({ instrumentToken: instruments.instrumentToken })
+            .from(instruments)
+            .limit(10)
+        : [];
+
+      const selectedInstruments =
+        equityInstruments.length > 0 ? equityInstruments : fallbackInstruments;
+
+      if (selectedInstruments.length > 0) {
         await db.insert(watchlistItems).values(
-          equityInstruments.map(inst => ({
+          selectedInstruments.map(inst => ({
             watchlistId: watchlist.id,
             instrumentToken: inst.instrumentToken,
           }))
         );
       }
 
-      logger.info({ watchlistId: watchlist.id, userId, count: equityInstruments.length }, 'Created default watchlist');
+      logger.info(
+        {
+          watchlistId: watchlist.id,
+          userId,
+          count: selectedInstruments.length,
+          seededFrom: equityInstruments.length > 0 ? 'top-stocks' : 'fallback-first-10',
+        },
+        'Created default watchlist'
+      );
       return watchlist;
     } catch (error) {
       logger.error({ err: error, userId }, 'Failed to create default watchlist');

@@ -49,13 +49,12 @@ export const usePositionsStore = create<PositionsState>((set, get) => ({
       if (data.success) {
         const currentPositions = get().positions;
         
-        // Merge new positions with existing ones, preserving last known currentPrice
-        // Also map to ensure we have a valid array
+        // Preserve live SSE prices as source of truth.
+        // Polling is only for structural hydration/recovery.
         const mergedPositions = (data.data || []).map((newPos: Position) => {
           const existingPos = currentPositions.find(p => p.id === newPos.id);
-          
-          // If API returns 0 for currentPrice but we have a previous price, keep the previous price
-          if (newPos.currentPrice === 0 && existingPos && existingPos.currentPrice > 0) {
+
+          if (existingPos && existingPos.currentPrice > 0) {
             return {
               ...newPos,
               currentPrice: existingPos.currentPrice,

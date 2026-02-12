@@ -7,7 +7,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "load:users": "node scripts/load/simulate-users.mjs"
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",

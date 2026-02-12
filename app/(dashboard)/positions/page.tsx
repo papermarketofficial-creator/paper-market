@@ -22,14 +22,28 @@ export default function PositionsPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ symbols })
-    }).catch(err => console.error('Failed to subscribe to position symbols:', err));
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const details = await res.text().catch(() => '');
+          throw new Error(`Subscribe failed (${res.status}) ${details}`);
+        }
+      })
+      .catch(err => console.error('Failed to subscribe to position symbols:', err));
 
     return () => {
       fetch('/api/v1/market/subscribe', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbols })
-      }).catch(err => console.error('Failed to unsubscribe position symbols:', err));
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const details = await res.text().catch(() => '');
+            throw new Error(`Unsubscribe failed (${res.status}) ${details}`);
+          }
+        })
+        .catch(err => console.error('Failed to unsubscribe position symbols:', err));
     };
   }, [symbolsKey]);
 

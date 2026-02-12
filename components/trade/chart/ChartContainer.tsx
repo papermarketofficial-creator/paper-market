@@ -32,7 +32,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     getIndicators,
     getDrawings,
     timeframe,
-    range // ✅ Read Range
+    range // Read Range
   } = useAnalysisStore();
 
   const {
@@ -41,10 +41,10 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     initializeSimulation,
     startSimulation,
     stopSimulation,
-    isFetchingHistory, // ✅ Extract
-    isInitialLoad,     // ✅ NEW: Extract to differentiate initial vs pagination loading
-    fetchMoreHistory,   // ✅ Extract
-    updateLiveCandle    // ✅ Extract for live updates
+    isFetchingHistory,
+    isInitialLoad,
+    fetchMoreHistory,
+    updateLiveCandle
   } = useMarketStore();
 
   const indicators = getIndicators(symbol);
@@ -54,33 +54,58 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   const data = historicalData;
   const volData = volumeData;
 
-  // ═══════════════════════════════════════════════════════════
-  // 🛡️ PHASE 5: Debounced Subscribe/Unsubscribe (Rate Limit Protection)
-  // ═══════════════════════════════════════════════════════════
   const debouncedInitRef = useRef(
     debounce((sym: string, tf: string | undefined, rng: string | undefined) => {
       initializeSimulation(sym, tf, rng);
-    }, 300) // 300ms debounce
+    }, 300)
   );
 
-  // Debounced subscribe to prevent rapid sub/unsub cycles
   const debouncedSubscribeRef = useRef(
-    debounce((sym: string) => {
-      fetch('/api/v1/market/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: [sym] })
-      }).catch(err => console.error('Failed to subscribe:', err));
-    }, 250) // 250ms debounce
+    debounce(async (sym: string) => {
+      try {
+        const res = await fetch('/api/v1/market/subscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ symbols: [sym] })
+        });
+
+        if (!res.ok) {
+          const details = await res.text().catch(() => '');
+          throw new Error(`Subscribe failed (${res.status}) ${details}`);
+        }
+      } catch (err) {
+        console.error('Failed to subscribe:', err);
+      }
+    }, 250)
   );
 
-  // 1. Data Fetching (Simulation / History)
+  // 1) Symbol subscription lifecycle.
   useEffect(() => {
-    // Reset interaction on symbol change
     useAnalysisStore.getState().cancelDrawing();
     stopSimulation();
+    startSimulation();
 
-    // Clear previous symbol candles immediately so stale geometry never flashes.
+    debouncedSubscribeRef.current(symbol);
+
+    return () => {
+      stopSimulation();
+      fetch('/api/v1/market/subscribe', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: [symbol] })
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const details = await res.text().catch(() => '');
+            throw new Error(`Unsubscribe failed (${res.status}) ${details}`);
+          }
+        })
+        .catch((err) => console.error('Failed to unsubscribe:', err));
+    };
+  }, [symbol, startSimulation, stopSimulation]);
+
+  // 2) History lifecycle.
+  useEffect(() => {
     useMarketStore.setState((state: any) => ({
       historicalData: [],
       volumeData: [],
@@ -89,40 +114,14 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
       simulatedSymbol: symbol,
       currentRequestId: (state.currentRequestId || 0) + 1,
     }));
-    
-    // 🛡️ DEBOUNCED Subscribe (250ms protection)
-    // Rapid symbol switching: RELIANCE → INFY → TCS → HDFC
-    // Without debounce: 4 subscribe calls in 1s
-    // With debounce: Only HDFC fires (last symbol)
-    debouncedSubscribeRef.current(symbol);
-    
-    // 🛡️ DEBOUNCED Fetch History with Range (300ms protection)
+
     debouncedInitRef.current(symbol, timeframe, range);
-    
-    // Start Live Updates (No fake simulated ticks, just listening)
-    startSimulation();
+  }, [symbol, timeframe, range]);
 
-    return () => {
-      stopSimulation();
-      
-      // 🔥 Unsubscribe on unmount (ref-counted - won't disconnect if others using it)
-      // Note: Not debounced because cleanup should be immediate
-      fetch('/api/v1/market/subscribe', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: [symbol] })
-      }).catch(err => console.error('Failed to unsubscribe:', err));
-    };
-  }, [symbol, timeframe, range, startSimulation, stopSimulation]); // 🔥 FIX: Store actions are stable, don't re-run effect
-
-  // 2. Live Candle Updates (via SSE)
-  // The existing SSE stream (use-market-stream.ts) now calls updateLiveCandle
-  // on each tick, mutating the last candle in real-time (Upstox Pro pattern)
+  // Live candle updates are applied by use-market-stream.ts.
   useEffect(() => {
     // No action needed here - SSE hook handles it automatically
   }, [symbol, updateLiveCandle]);
- // Reload on timeframe change
-
   // ... (Indicators calc remains same) ...
   // Indictor logic omitted for brevity in replace, only targeting Data Fetching block?
   // No, I need to keep the file valid. I will target the top part only.
@@ -417,3 +416,4 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     </div>
   );
 }
+

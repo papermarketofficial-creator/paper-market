@@ -29,6 +29,7 @@ export interface WatchlistInstrument {
 export interface WatchlistSlice {
   // State (UI State Only - Data managed by TanStack Query)
   stocks: Stock[];
+  stocksBySymbol: Record<string, Stock>;
   instruments: WatchlistInstrument[];
   activeWatchlistId: string | null;
   

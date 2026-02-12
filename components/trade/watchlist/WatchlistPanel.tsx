@@ -86,25 +86,38 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
     if (!watchlistSymbolsKey) return;
     const symbols = watchlistSymbolsKey.split(',');
 
-    console.log('📡 Subscribing to', symbols.length, 'watchlist stocks:', symbols);
+    console.log('Subscribing to', symbols.length, 'watchlist stocks:', symbols);
 
     fetch('/api/v1/market/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ symbols, action: 'subscribe' })
-    }).catch(err => console.error('Failed to subscribe to watchlist:', err));
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const details = await res.text().catch(() => '');
+          throw new Error(`Subscribe failed (${res.status}) ${details}`);
+        }
+      })
+      .catch(err => console.error('Failed to subscribe to watchlist:', err));
 
     // Cleanup: Unsubscribe when watchlist changes or component unmounts
     return () => {
-      console.log('🔕 Unsubscribing from', symbols.length, 'watchlist stocks');
+      console.log('Unsubscribing from', symbols.length, 'watchlist stocks');
       fetch('/api/v1/market/subscribe', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbols })
-      }).catch(err => console.error('Failed to unsubscribe from watchlist:', err));
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            const details = await res.text().catch(() => '');
+            throw new Error(`Unsubscribe failed (${res.status}) ${details}`);
+          }
+        })
+        .catch(err => console.error('Failed to unsubscribe from watchlist:', err));
     };
   }, [activeWatchlistId, watchlistSymbolsKey]);
-
   const handleCreateWatchlist = async () => {
     if (!newWatchlistName.trim()) return;
     
@@ -297,3 +310,4 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
     </div>
   );
 }
+

@@ -28,14 +28,29 @@ export class WalletService {
             .limit(1);
 
         if (!wallet) {
-            // Create wallet with default balance (₹10L)
-            const [newWallet] = await executor
-                .insert(wallets)
-                .values({ userId })
-                .returning();
+            // Create wallet with default balance. Concurrent first requests can race on unique(userId).
+            try {
+                const [newWallet] = await executor
+                    .insert(wallets)
+                    .values({ userId })
+                    .returning();
 
-            logger.info({ userId, walletId: newWallet.id }, "Wallet created");
-            return newWallet;
+                logger.info({ userId, walletId: newWallet.id }, "Wallet created");
+                return newWallet;
+            } catch (error: any) {
+                if (error?.code === "23505") {
+                    const [existingWallet] = await executor
+                        .select()
+                        .from(wallets)
+                        .where(eq(wallets.userId, userId))
+                        .limit(1);
+
+                    if (existingWallet) {
+                        return existingWallet;
+                    }
+                }
+                throw error;
+            }
         }
 
         return wallet;

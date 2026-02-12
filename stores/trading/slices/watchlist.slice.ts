@@ -4,11 +4,20 @@ import { futuresList } from '@/content/futures';
 import { optionsList } from '@/content/options';
 import { indicesList } from '@/content/indices';
 
+function buildStocksBySymbol(stocks: Stock[]): Record<string, Stock> {
+  const bySymbol: Record<string, Stock> = {};
+  for (const stock of stocks) {
+    bySymbol[stock.symbol] = stock;
+  }
+  return bySymbol;
+}
+
 export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
   // ─────────────────────────────────────────────────────────────────
   // 📊 Initial State (UI State Only - Data managed by TanStack Query)
   // ─────────────────────────────────────────────────────────────────
   stocks: [], // Live-updated prices from SSE (synced with TanStack Query data)
+  stocksBySymbol: {},
   instruments: [], // All tradable instruments
   activeWatchlistId: null, // UI state: which watchlist is selected
   
@@ -31,7 +40,10 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
   
   // Update stocks array (called by components after TanStack Query fetches data)
   setStocks: (stocks: Stock[]) => {
-    set({ stocks });
+    set({
+      stocks,
+      stocksBySymbol: buildStocksBySymbol(stocks),
+    });
   },
   
   // ─────────────────────────────────────────────────────────────────
@@ -39,22 +51,31 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
   // ─────────────────────────────────────────────────────────────────
   // This updates prices in real-time as ticks arrive
   updateStockPrices: (priceUpdates: Record<string, number>) => {
-    const { stocks } = get();
-    const updatedStocks = stocks.map(stock => {
-      const newPrice = priceUpdates[stock.symbol];
-      if (newPrice !== undefined) {
-        const change = newPrice - stock.price;
-        const changePercent = stock.price > 0 ? (change / stock.price) * 100 : 0;
-        return {
-          ...stock,
-          price: newPrice,
-          change,
-          changePercent,
-        };
-      }
-      return stock;
+    const { stocks, stocksBySymbol } = get();
+    const nextBySymbol: Record<string, Stock> = { ...stocksBySymbol };
+    let hasAnyChange = false;
+
+    for (const [symbol, nextPrice] of Object.entries(priceUpdates)) {
+      const existing = nextBySymbol[symbol];
+      if (!existing || existing.price === nextPrice) continue;
+
+      const change = nextPrice - existing.price;
+      const changePercent = existing.price > 0 ? (change / existing.price) * 100 : 0;
+      nextBySymbol[symbol] = {
+        ...existing,
+        price: nextPrice,
+        change,
+        changePercent,
+      };
+      hasAnyChange = true;
+    }
+
+    if (!hasAnyChange) return;
+
+    set({
+      stocksBySymbol: nextBySymbol,
+      stocks: stocks.map((stock) => nextBySymbol[stock.symbol] || stock),
     });
-    set({ stocks: updatedStocks });
   },
   
   prefetchInstrument: (instrumentKey: string) => {

@@ -46,7 +46,8 @@ export function PositionsTable({ loading: parentLoading = false }: PositionsTabl
 
   useEffect(() => {
     fetchPositions();
-    const interval = setInterval(() => fetchPositions(true), 5000); // Poll every second for PnL
+    // Poll lightly for structural recovery only (SSE remains price source of truth).
+    const interval = setInterval(() => fetchPositions(true), 30000);
     return () => clearInterval(interval);
   }, [fetchPositions]);
 

@@ -105,22 +105,49 @@ export class MarketFeedSupervisor extends EventEmitter {
     private shouldExpectTicks(): boolean {
         return this.isMarketHours() || this.isPostMarketAuction();
     }
+
+    private getIstClock(now: Date = new Date()): { day: number; hour: number; minute: number } {
+        const parts = new Intl.DateTimeFormat('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            hour12: false,
+            weekday: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+        }).formatToParts(now);
+
+        const weekday = parts.find((p) => p.type === 'weekday')?.value || '';
+        const hour = Number(parts.find((p) => p.type === 'hour')?.value || '0');
+        const minute = Number(parts.find((p) => p.type === 'minute')?.value || '0');
+
+        const dayMap: Record<string, number> = {
+            Sun: 0,
+            Mon: 1,
+            Tue: 2,
+            Wed: 3,
+            Thu: 4,
+            Fri: 5,
+            Sat: 6,
+        };
+
+        return {
+            day: dayMap[weekday] ?? 0,
+            hour,
+            minute,
+        };
+    }
     
     /**
      * Check if within regular market hours (9:15 AM - 3:30 PM IST)
      */
     private isMarketHours(): boolean {
-        const now = new Date();
-        const hours = now.getHours();
-        const minutes = now.getMinutes();
-        const day = now.getDay();
+        const { day, hour, minute } = this.getIstClock();
         
         // Skip weekends
         if (day === 0 || day === 6) {
             return false;
         }
         
-        const time = hours * 60 + minutes;
+        const time = hour * 60 + minute;
         
         // Market: 9:15 AM - 3:30 PM IST
         const marketOpen = 9 * 60 + 15;   // 555 minutes
@@ -133,17 +160,14 @@ export class MarketFeedSupervisor extends EventEmitter {
      * Check if in post-market auction session (3:30 PM - 4:00 PM IST)
      */
     private isPostMarketAuction(): boolean {
-        const now = new Date();
-        const hours = now.getHours();
-        const minutes = now.getMinutes();
-        const day = now.getDay();
+        const { day, hour, minute } = this.getIstClock();
         
         // Skip weekends
         if (day === 0 || day === 6) {
             return false;
         }
         
-        const time = hours * 60 + minutes;
+        const time = hour * 60 + minute;
         
         // Post-market: 3:30 PM - 4:00 PM IST
         const auctionStart = 15 * 60 + 30; // 930 minutes
