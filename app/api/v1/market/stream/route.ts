@@ -6,7 +6,11 @@ import { tickBus } from "@/lib/trading/tick-bus";
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // Required for EventEmitter and long-running connections
-const SSE_HEARTBEAT_INTERVAL = 15000;
+export const maxDuration = 300;
+
+const SSE_HEARTBEAT_INTERVAL_MS = 20000;
+const FLUSH_INTERVAL_MS = 25;
+const DEBUG_SSE = process.env.DEBUG_SSE === 'true';
 
 export async function GET(req: NextRequest) {
     const session = await auth();
@@ -16,7 +20,9 @@ export async function GET(req: NextRequest) {
 
     const encoder = new TextEncoder();
 
-    console.log('📡 SSE: New connection request (symbol-agnostic stream)');
+    if (DEBUG_SSE) {
+        console.log('📡 SSE: New connection request (symbol-agnostic stream)');
+    }
 
     // 🔥 CRITICAL INSTITUTIONAL RULE: SSE NEVER depends on symbols
     // Stream is permanent. Symbols are dynamic in supervisor.
@@ -33,11 +39,43 @@ export async function GET(req: NextRequest) {
             // ═══════════════════════════════════════════════════════════
             const globalAny = globalThis as any;
             globalAny.__SSE_COUNT = (globalAny.__SSE_COUNT || 0) + 1;
-            console.log("ACTIVE SSE:", globalAny.__SSE_COUNT);
+            if (DEBUG_SSE) {
+                console.log("ACTIVE SSE:", globalAny.__SSE_COUNT);
+            }
             
-            console.log('📡 SSE: Stream started for client');
-            // Send initial connection message
-            controller.enqueue(encoder.encode(`data: {"type":"connected"}\n\n`));
+            if (DEBUG_SSE) {
+                console.log('📡 SSE: Stream started for client');
+            }
+
+            let closed = false;
+            const latestTickPayloads = new Map<string, string>();
+            let flushTimer: NodeJS.Timeout | null = null;
+
+            const send = (payload: string) => {
+                if (closed) return;
+                try {
+                    controller.enqueue(encoder.encode(payload));
+                } catch {
+                    closed = true;
+                }
+            };
+
+            const flushLatestTicks = () => {
+                flushTimer = null;
+                if (closed || latestTickPayloads.size === 0) return;
+
+                const payloads = Array.from(latestTickPayloads.values());
+                latestTickPayloads.clear();
+
+                for (const payload of payloads) {
+                    send(`data: ${payload}\n\n`);
+                    if (closed) break;
+                }
+            };
+
+            // Send initial connection and client retry hint
+            send("retry: 3000\n");
+            send(`data: {"type":"connected"}\n\n`);
 
             // Listener for market ticks from unified TickBus
             const onTick = (tick: any) => {
@@ -50,14 +88,16 @@ export async function GET(req: NextRequest) {
                     volume: tick.volume,
                     close: tick.close
                 };
-                
-                // Log every 20th tick to avoid console spam
-                if (Math.random() < 0.05) {
-                    console.log('📤 SSE: Streaming tick:', tick.symbol, '@', tick.price);
+
+                // Coalesce bursts to latest-per-symbol so one hot symbol does not starve others.
+                const symbolKey = typeof quote.symbol === "string" && quote.symbol.length > 0
+                    ? quote.symbol
+                    : "__unknown__";
+                latestTickPayloads.set(symbolKey, JSON.stringify({ type: 'tick', data: quote }));
+
+                if (!flushTimer) {
+                    flushTimer = setTimeout(flushLatestTicks, FLUSH_INTERVAL_MS);
                 }
-                
-                const payload = JSON.stringify({ type: 'tick', data: quote });
-                controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
             };
 
             // Subscribe to unified TickBus (receives ticks from all sources)
@@ -65,8 +105,8 @@ export async function GET(req: NextRequest) {
 
             // 🔥 CRITICAL: Send heartbeat for tab sleep detection
             const heartbeat = setInterval(() => {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'heartbeat' })}\n\n`));
-            }, 10000); // Every 10s
+                send(`data: {"type":"heartbeat"}\n\n`);
+            }, SSE_HEARTBEAT_INTERVAL_MS);
 
             // Cleanup on close
             req.signal.addEventListener('abort', () => {
@@ -75,11 +115,18 @@ export async function GET(req: NextRequest) {
                 // ═══════════════════════════════════════════════════════════
                 const globalAny = globalThis as any;
                 globalAny.__SSE_COUNT = (globalAny.__SSE_COUNT || 0) - 1;
-                
+                closed = true;
+
                 clearInterval(heartbeat);
+                if (flushTimer) {
+                    clearTimeout(flushTimer);
+                }
+                latestTickPayloads.clear();
                 tickBus.off('tick', onTick);
                 controller.close();
-                console.log('🔴 SSE: Client disconnected, cleaned up TickBus subscription');
+                if (DEBUG_SSE) {
+                    console.log('🔴 SSE: Client disconnected, cleaned up TickBus subscription');
+                }
             });
         }
     });
@@ -89,6 +136,7 @@ export async function GET(req: NextRequest) {
             'Content-Type': 'text/event-stream',
             'Cache-Control': 'no-cache, no-transform',
             'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
         },
     });
 }

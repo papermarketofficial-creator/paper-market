@@ -436,7 +436,7 @@ export class UpstoxService {
                     // Live candles start at current time, creating a visual gap
                     // Solution: Fetch today's intraday data and merge it with historical data
                     const today = this.todayIST(); // 🔥 FIX: Use IST consistently
-                    const shouldMergeIntraday = interval === "1" && toDate === today;
+                    const shouldMergeIntraday = unit === "minutes" && interval === "1" && toDate === today;
                     
                     console.log('🔍 Intraday Merge Check:', { interval, toDate, today, shouldMergeIntraday });
                     

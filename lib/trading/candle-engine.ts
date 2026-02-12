@@ -109,9 +109,10 @@ export class CandleEngine extends EventEmitter {
         // 🛠️ TIMESTAMP NORMALIZATION: Ensure seconds
         // ═══════════════════════════════════════════════════════════
         let tickTimeSeconds = tick.timestamp;
-        if (tickTimeSeconds.toString().length === 13) {
-            tickTimeSeconds = Math.floor(tickTimeSeconds / 1000);
-        }
+        if (tickTimeSeconds > 1e12) {
+    tickTimeSeconds = Math.floor(tickTimeSeconds / 1000);
+}
+
 
         // ═══════════════════════════════════════════════════════════
         // 🛠️ BUCKET ALIGNMENT: Align to interval boundary

@@ -91,17 +91,19 @@ class TickBus {
         // ═══════════════════════════════════════════════════════════
         // 🚨 PHASE 0: Tick Throughput Logging (Baseline Visibility)
         // ═══════════════════════════════════════════════════════════
-        if (!globalThis.__TPS) {
-            globalThis.__TPS = 0;
-        }
-        if (!globalThis.__TPS_INTERVAL) {
-            globalThis.__TPS_INTERVAL = setInterval(() => {
-                const tps = (globalThis.__TPS || 0) / 5;
-                console.log("TICKS/SEC:", tps.toFixed(1));
+        if (process.env.DEBUG_MARKET === 'true') {
+            if (!globalThis.__TPS) {
                 globalThis.__TPS = 0;
-            }, 5000);
+            }
+            if (!globalThis.__TPS_INTERVAL) {
+                globalThis.__TPS_INTERVAL = setInterval(() => {
+                    const tps = (globalThis.__TPS || 0) / 5;
+                    console.log("TICKS/SEC:", tps.toFixed(1));
+                    globalThis.__TPS = 0;
+                }, 5000);
+            }
+            globalThis.__TPS = (globalThis.__TPS || 0) + 1;
         }
-        globalThis.__TPS = (globalThis.__TPS || 0) + 1;
         
         this.tickCount++;
         
@@ -190,7 +192,7 @@ if (process.env.NODE_ENV !== 'production') {
 // 🚨 PHASE 0: Memory Logging (Baseline Visibility)
 // ═══════════════════════════════════════════════════════════
 // Initialize memory monitoring on module load (runs once per Node process)
-if (typeof process !== 'undefined' && process.memoryUsage && !globalThis.__MEMORY_INTERVAL) {
+if (process.env.DEBUG_MARKET === 'true' && typeof process !== 'undefined' && process.memoryUsage && !globalThis.__MEMORY_INTERVAL) {
     globalThis.__MEMORY_INTERVAL = setInterval(() => {
         const m = process.memoryUsage();
         console.log("HEAP MB:", (m.heapUsed / 1024 / 1024).toFixed(1));

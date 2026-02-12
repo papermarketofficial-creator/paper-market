@@ -1,129 +1,128 @@
-
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePositionsStore } from '@/stores/trading/positions.store';
 import { useMarketStore } from '@/stores/trading/market.store';
 import { tickBus } from '@/lib/trading/tick-bus';
-import { getMarketStream } from '@/lib/sse'; // Import Singleton
+import { getMarketStream } from '@/lib/sse';
+import { isMarketOpenIST } from '@/lib/market-hours';
+
+const ISIN_LIKE = /^[A-Z]{2}[A-Z0-9]{8,14}$/i;
+
+function resolveTradingSymbol(rawSymbol: unknown): string {
+    if (typeof rawSymbol !== 'string') return '';
+
+    const input = rawSymbol.trim();
+    if (!input) return '';
+
+    // Common case: already tradingsymbol (e.g. "ITC")
+    if (!input.includes('|') && !ISIN_LIKE.test(input)) {
+        return input;
+    }
+
+    const symbolPart = input.includes('|') ? (input.split('|')[1] || input) : input;
+
+    // Some feeds send NSE_EQ|ITC. Use direct symbol if RHS is not ISIN-like.
+    if (!ISIN_LIKE.test(symbolPart) && symbolPart) {
+        return symbolPart;
+    }
+
+    // Fallback: resolve from currently loaded instruments/watchlist.
+    const state = useMarketStore.getState();
+    const all = [...state.stocks, ...state.indices, ...state.futures, ...state.options];
+    const match = all.find((item) =>
+        item.instrumentToken === input ||
+        item.instrumentToken === symbolPart ||
+        item.instrumentToken?.endsWith(`|${symbolPart}`)
+    );
+
+    return match?.symbol || symbolPart || input;
+}
 
 export const useMarketStream = () => {
     const { updateAllPositionsPrices } = usePositionsStore();
-    const { updateStockPrice, instruments: allInstruments, indices: allIndices, updateLiveCandle } = useMarketStore();
+    const { updateStockPrice, updateLiveCandle } = useMarketStore();
     const [isConnected, setIsConnected] = useState(false);
 
     useEffect(() => {
-        // ═══════════════════════════════════════════════════════════
-        // 📡 TRANSPORT LAYER: Singleton Connection
-        // ═══════════════════════════════════════════════════════════
-        // We ask the singleton for the active stream.
-        // We do NOT create a new one every time.
         const eventSource = getMarketStream();
-        
-        // Update local state based on current readiness
-        if (eventSource.readyState === 1) {
+
+        if (eventSource.readyState === EventSource.OPEN) {
             setIsConnected(true);
         }
 
-        // ═══════════════════════════════════════════════════════════
-        // 📨 MESSAGE HANDLING
-        // ═══════════════════════════════════════════════════════════
-        // We attach our listener to the singleton.
-        // NOTE: If multiple components use this, they sort of fight for onmessage.
-        // ideally use addEventListener, but for now we follow the pattern.
-        
-        eventSource.onmessage = (event) => {
-             // console.log('📨 RAW SSE Event:', event.data); 
-             try {
-                if (event.data.startsWith(':')) return; // Heartbeat/Ping
+        const handleMessage = (event: MessageEvent) => {
+            try {
+                if (typeof event.data !== 'string' || event.data.length === 0) return;
+                if (event.data[0] !== '{') return;
+
                 const message = JSON.parse(event.data);
-                
+
                 if (message.type === 'connected') {
                     setIsConnected(true);
                     return;
                 }
 
-                if (message.type === 'tick') {
-                    const quote = message.data;
-                    // console.log('📊 SSE Tick:', quote.symbol, quote.price);
-                    
-                    let tradingSymbol = quote.symbol;
+                if (message.type !== 'tick' || !message.data) {
+                    return;
+                }
 
-                    const matchedInstrument = allInstruments.find(i => 
-                        i.instrumentToken === quote.symbol || 
-                        i.instrumentToken?.includes(quote.symbol)
-                    ) || allIndices.find(i => 
-                        i.instrumentToken === quote.symbol || 
-                        i.instrumentToken?.includes(quote.symbol)
-                    );
+                const quote = message.data;
+                const tradingSymbol = resolveTradingSymbol(quote.symbol);
+                if (!tradingSymbol) return;
 
-                    if (matchedInstrument) {
-                        // Handle potential structural differences (WatchlistInstrument vs Stock)
-                        // 'tradingsymbol' is in WatchlistInstrument, 'symbol' is in Stock
-                        tradingSymbol = (matchedInstrument as any).tradingsymbol || (matchedInstrument as any).symbol || quote.symbol;
-                    }
+                if (!isMarketOpenIST()) {
+                    // Keep watchlist/chart aligned to historical close outside market hours.
+                    return;
+                }
 
-                    // ═══════════════════════════════════════════════════════════
-                    // 🚌 HIGH-PERFORMANCE PATH: Emit to Client TickBus
-                    // ═══════════════════════════════════════════════════════════
-                    tickBus.emitTick({
-                        symbol: tradingSymbol,
-                        price: quote.price,
-                        volume: quote.volume || 0,
-                        timestamp: quote.timestamp ? Math.floor(quote.timestamp / 1000) : Math.floor(Date.now() / 1000),
-                        exchange: 'NSE',
-                        close: quote.close
-                    });
+                const price = Number(quote.price);
+                if (!Number.isFinite(price) || price <= 0) return;
 
-                    // ═══════════════════════════════════════════════════════════
-                    // 📊 LEGACY PATH: Update stores for watchlist/positions
-                    // ═══════════════════════════════════════════════════════════
-                    // These are fast Zustand updates
-                    updateAllPositionsPrices({ [tradingSymbol]: quote.price });
-                    updateStockPrice(tradingSymbol, quote.price, quote.close);
-                    
-                    // Update candle (if relevant)
-                    const tickTime = quote.timestamp ? Math.floor(quote.timestamp / 1000) : Math.floor(Date.now() / 1000);
-                    updateLiveCandle({
-                        price: quote.price,
+                const tickTime = quote.timestamp
+                    ? Math.floor(quote.timestamp / 1000)
+                    : Math.floor(Date.now() / 1000);
+
+                tickBus.emitTick({
+                    symbol: tradingSymbol,
+                    price,
+                    volume: quote.volume || 0,
+                    timestamp: tickTime,
+                    exchange: 'NSE',
+                    close: quote.close
+                });
+
+                updateAllPositionsPrices({ [tradingSymbol]: price });
+                updateStockPrice(tradingSymbol, price, quote.close);
+                updateLiveCandle(
+                    {
+                        price,
                         volume: quote.volume,
                         time: tickTime
-                    }, tradingSymbol);
-                }
+                    },
+                    tradingSymbol
+                );
             } catch (err) {
-                console.error("Failed to parse SSE message", err);
+                console.error('Failed to parse SSE message', err);
             }
         };
 
-        eventSource.onopen = () => {
-             console.log("✅ Market Stream Connected (Hook)");
-             setIsConnected(true);
+        const handleOpen = () => {
+            setIsConnected(true);
         };
 
-        eventSource.onerror = (err) => {
-            console.error("❌ Market Stream Error (Hook view)", err);
-            // Don't close, let singleton/browser retry
+        const handleError = () => {
             setIsConnected(false);
         };
 
-        // ═══════════════════════════════════════════════════════════
-        // 🧹 CLEANUP: Do NOT close connection
-        // ═══════════════════════════════════════════════════════════
+        eventSource.addEventListener('message', handleMessage as EventListener);
+        eventSource.addEventListener('open', handleOpen);
+        eventSource.addEventListener('error', handleError);
+
         return () => {
-            console.log("🧘 Hook unmounting - detaching listeners but KEEPING connection");
-            // We ideally should remove listeners if we used addEventListener.
-            // With onmessage, setting it to null stops updates for this hook instance.
-            // eventSource.onmessage = null; 
-            // BUT: If other components rely on this singleton, clearing it kills their updates too.
-            // Since we assume this hook is used once (Layout), this is acceptable.
-            // If moved to provider, this logic changes slightly.
-            
-            // For now, we leave it or clear it?
-            // "Singleton owns lifecycle"
-            // If we clear onmessage, we stop processing ticks. 
-            // If we navigate away, we probably WANT to stop processing ticks to save CPU.
-            // So:
-            eventSource.onmessage = null; 
+            eventSource.removeEventListener('message', handleMessage as EventListener);
+            eventSource.removeEventListener('open', handleOpen);
+            eventSource.removeEventListener('error', handleError);
         };
-    }, []); // ✅ FIX: No dependencies = Connect ONCE
+    }, [updateAllPositionsPrices, updateLiveCandle, updateStockPrice]);
 
     return { isConnected };
 };

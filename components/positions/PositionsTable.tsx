@@ -290,13 +290,13 @@ if (!hasFetched) {
                           </TableCell>
                           <TableCell className="text-right">
                             <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => setClosingPosition(position)}
-                            disabled={closingPositionId !== null}
-                            className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:bg-destructive hover:text-destructive-foreground"
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => setClosingPosition(position)}
+                              disabled={closingPositionId !== null}
+                              className="h-8 px-3 whitespace-nowrap"
                             >
-                              {closingPositionId === position.id ? 'Closing...' : <X className="h-4 w-4" />}
+                              {closingPositionId === position.id ? 'Closing...' : "Exit Position"}
                             </Button>
                           </TableCell>
                         </TableRow>

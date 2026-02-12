@@ -31,7 +31,7 @@ class RealTimeMarketService extends EventEmitter {
     
     private ws: UpstoxWebSocket;
     private prices: Map<string, Quote> = new Map();
-    private subscribers: Set<string> = new Set();
+    private subscribers: Map<string, number> = new Map();
     private initialized: boolean = false;
     private isInitializing: boolean = false; // Guard against concurrent initialization
     private instrumentPrefix = "NSE_EQ|";
@@ -127,6 +127,35 @@ class RealTimeMarketService extends EventEmitter {
     }
 
     /**
+     * Resolve a user-facing symbol into the feed key used internally.
+     */
+    private resolveFeedKey(symbol: string): string {
+        const pureSymbol = symbol.includes("|") ? symbol.split("|")[1] : symbol;
+
+        const isIndex =
+            pureSymbol.includes('NIFTY') ||
+            pureSymbol.includes('SENSEX') ||
+            pureSymbol.includes('BANKEX');
+
+        let prefix = this.instrumentPrefix;
+        let finalSymbol = pureSymbol;
+
+        if (isIndex) {
+            prefix = "NSE_INDEX|";
+            finalSymbol = pureSymbol
+                .toLowerCase()
+                .split(' ')
+                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                .join(' ');
+        }
+
+        const fullSymbolKey = symbol.includes("|") ? symbol : `${prefix}${finalSymbol}`;
+        const isinKey = this.isinMap.get(pureSymbol) || this.isinMap.get(fullSymbolKey);
+
+        return isinKey || fullSymbolKey;
+    }
+
+    /**
      * Subscribe to instruments for real-time updates
      * @param symbols List of trading symbols (e.g. "RELIANCE")
      */
@@ -134,49 +163,21 @@ class RealTimeMarketService extends EventEmitter {
         // Ensure initialized to have maps ready
         if (!this.initialized) await this.initialize();
 
-        const keysToSubscribe: string[] = [];
+        const keysToSubscribe = Array.from(new Set(symbols.map((s) => this.resolveFeedKey(s))));
+        if (keysToSubscribe.length === 0) return;
 
-        symbols.forEach(s => {
-            // Normalize symbol
-            const pureSymbol = s.includes("|") ? s.split("|")[1] : s;
-
-            // 🔥 FIX: Detect indices and use correct prefix AND Title Case for Upstox
-            const isIndex = pureSymbol.includes('NIFTY') || pureSymbol.includes('SENSEX') || pureSymbol.includes('BANKEX');
-            let prefix = this.instrumentPrefix;
-            let finalSymbol = pureSymbol;
-
-            if (isIndex) {
-                prefix = "NSE_INDEX|";
-                // Convert "NIFTY 50" -> "Nifty 50", "NIFTY BANK" -> "Nifty Bank"
-                // Simple title casing
-                finalSymbol = pureSymbol
-                    .toLowerCase()
-                    .split(' ')
-                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                    .join(' ');
-                
-                // Special case correction if needed (e.g. if any specifics differ)
-            }
-            
-            const fullSymbolKey = s.includes("|") ? s : `${prefix}${finalSymbol}`;
-            
-            // Resolve to ISIN if possible
-            const isinKey = this.isinMap.get(pureSymbol) || this.isinMap.get(fullSymbolKey);
-            const finalKey = isinKey || fullSymbolKey;
-
-            if (!this.subscribers.has(finalKey)) {
-                this.subscribers.add(finalKey);
-                keysToSubscribe.push(finalKey);
-            }
+        // Local ref-count mirrors high-level consumer demand.
+        // MarketFeedSupervisor has its own ref-count and is the execution authority.
+        keysToSubscribe.forEach((key) => {
+            const count = this.subscribers.get(key) ?? 0;
+            this.subscribers.set(key, count + 1);
         });
 
-        if (keysToSubscribe.length > 0) {
-            console.log(`📡 RealTimeMarketService: Subscribing to ${keysToSubscribe.length} symbols via MarketFeedSupervisor`);
-            
-            // 🔥 CRITICAL: Delegate to MarketFeedSupervisor
-            // It handles ref-counting, batching, and health monitoring
-            marketFeedSupervisor.subscribe(keysToSubscribe);
-        }
+        console.log(`📡 RealTimeMarketService: Subscribing to ${keysToSubscribe.length} symbols via MarketFeedSupervisor`);
+        
+        // 🔥 CRITICAL: Delegate to MarketFeedSupervisor
+        // It handles ref-counting, batching, and health monitoring
+        marketFeedSupervisor.subscribe(keysToSubscribe);
     }
 
     /**
@@ -185,18 +186,26 @@ class RealTimeMarketService extends EventEmitter {
     async unsubscribe(symbols: string[]): Promise<void> {
         if (!this.initialized) return;
 
-        console.log(`📡 RealTimeMarketService: Unsubscribing from ${symbols.length} symbols`);
-        
-        // Delegate to MarketFeedSupervisor (which handles ref-counting)
-        marketFeedSupervisor.unsubscribe(symbols);
+        const keysToUnsubscribe = symbols.map(s => this.resolveFeedKey(s));
+        const uniqueKeys = Array.from(new Set(keysToUnsubscribe));
 
-        // Update local set
-        symbols.forEach(s => {
-            // We don't remove from this.subscribers immediately because 
-            // supervisor might still have other subscribers for these symbols.
-            // But we should probably keep local state in sync if we want strict tracking.
-            // For now, let's trust supervisor.
+        const approvedKeys: string[] = [];
+        uniqueKeys.forEach(key => {
+            const count = this.subscribers.get(key) ?? 0;
+            if (count <= 0) return;
+
+            if (count === 1) {
+                this.subscribers.delete(key);
+            } else {
+                this.subscribers.set(key, count - 1);
+            }
+            approvedKeys.push(key);
         });
+
+        if (approvedKeys.length === 0) return;
+
+        console.log(`📡 RealTimeMarketService: Unsubscribing from ${approvedKeys.length} symbols`);
+        marketFeedSupervisor.unsubscribe(approvedKeys);
     }
 
     /**

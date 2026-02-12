@@ -79,6 +79,16 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     // Reset interaction on symbol change
     useAnalysisStore.getState().cancelDrawing();
     stopSimulation();
+
+    // Clear previous symbol candles immediately so stale geometry never flashes.
+    useMarketStore.setState((state: any) => ({
+      historicalData: [],
+      volumeData: [],
+      isFetchingHistory: true,
+      isInitialLoad: true,
+      simulatedSymbol: symbol,
+      currentRequestId: (state.currentRequestId || 0) + 1,
+    }));
     
     // 🛡️ DEBOUNCED Subscribe (250ms protection)
     // Rapid symbol switching: RELIANCE → INFY → TCS → HDFC
@@ -323,7 +333,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
             onScreenshot={handleScreenshot}
             onMaximize={handleMaximize}
             onSearchClick={onSearchClick}
-            isLoading={isFetchingHistory && !isInitialLoad} // 🔥 Show spinner in header only during pagination
+            isLoading={isFetchingHistory && isInitialLoad} // Show loading only during initial chart load
           />
 
           <div className="flex flex-1 relative min-h-0">

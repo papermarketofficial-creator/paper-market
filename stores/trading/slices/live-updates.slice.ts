@@ -71,8 +71,8 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
     // Normalize symbols for comparison (remove exchange prefix if present)
     const normalizeSymbol = (s: string) => {
       if (!s) return '';
-      // Remove NSE_EQ:, NSE_FO:, etc.
-      return s.replace(/^[A-Z_]+:/, '');
+      // Remove exchange prefix variants: NSE_EQ:ITC, NSE_EQ|ITC, etc.
+      return s.replace(/^[A-Z_]+[:|]/, '');
     };
     
     const tickSymbol = normalizeSymbol(symbol);

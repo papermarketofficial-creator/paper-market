@@ -28,7 +28,9 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
   intervalId: null,
   activeInterval: '1m', // Default
   isFetchingHistory: false,
+  isInitialLoad: false,
   hasMoreHistory: true,
+  currentRequestId: 0,
 
   // ─────────────────────────────────────────────────────────────────
   // 📈 Chart Data Actions
@@ -44,11 +46,17 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
           return;
       }
 
-      set({ isFetchingHistory: true });
+      // Pagination fetch: never treated as initial load.
+      set({ isFetchingHistory: true, isInitialLoad: false });
 
       try {
-          // Calculate toDate from endTime (which is unix timestamp)
-          const toDateStr = new Date(endTime * 1000).toISOString().slice(0, 19);
+          // Use strict Upstox V3 date format (YYYY-MM-DD) in IST for pagination cursor.
+          const toDateStr = new Intl.DateTimeFormat('en-CA', {
+              timeZone: 'Asia/Kolkata',
+              year: 'numeric',
+              month: '2-digit',
+              day: '2-digit'
+          }).format(new Date(endTime * 1000));
           
           let queryParams = `symbol=${symbol}`;
           if (range) queryParams += `&range=${range}`;
@@ -65,7 +73,7 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
               
               // 🔥 CRITICAL: Broker returned empty → no more history
               if (candles.length === 0) {
-                  set({ isFetchingHistory: false, hasMoreHistory: false });
+                  set({ isFetchingHistory: false, isInitialLoad: false, hasMoreHistory: false });
                   console.log('📊 No more history available');
                   return; 
               }
@@ -100,7 +108,7 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
                   console.log(`📊 Loaded ${uniqueCandles.length} new candles. Total: ${merged.length}`);
               } else {
                   console.log('📊 No new unique candles, setting hasMoreHistory=false');
-                  set({ hasMoreHistory: false }); // No new unique candles
+                  set({ hasMoreHistory: false, isInitialLoad: false }); // No new unique candles
               }
           } else {
               console.error('📊 API returned error:', data.error);
@@ -108,7 +116,7 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
       } catch (e) {
           console.error("Fetch More History Failed", e);
       } finally {
-          set({ isFetchingHistory: false });
+          set({ isFetchingHistory: false, isInitialLoad: false });
       }
   },
 
@@ -128,11 +136,16 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
     };
     const detectedInterval = range ? (rangeToInterval[range] || '1d') : timeframe;
     
+    const requestId = get().currentRequestId + 1;
+
     // 1. Set Loading FIRST to prevent empty-state flash
-    set({ 
+    set({
+        currentRequestId: requestId,
         isFetchingHistory: true, 
+        isInitialLoad: true,
         historicalData: [], 
         volumeData: [],
+        simulatedSymbol: symbol,
         activeInterval: detectedInterval, // 🔥 Store for dynamic tick boundaries
         hasMoreHistory: true // 🔥 Reset pagination flag
     }); 
@@ -146,6 +159,11 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
         
         const res = await fetch(`/api/v1/market/history?${queryParams}`);
         const data = await res.json();
+
+        // Ignore stale response from an older request.
+        if (get().currentRequestId !== requestId) {
+            return;
+        }
 
         if (data.success) {
             const { candles, volume } = data.data;
@@ -161,6 +179,11 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
             // Infinite scroll will handle loading older data progressively
             const lastClose = sortedCandles.length > 0 ? sortedCandles[sortedCandles.length - 1].close : 0;
             
+            // Ignore stale response from an older request.
+            if (get().currentRequestId !== requestId) {
+                return;
+            }
+
             set({
                 historicalData: sortedCandles,
                 volumeData: sortedVolume,
@@ -175,7 +198,9 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
     } catch (e) {
         console.error("Chart data fetch error", e);
     } finally {
-        set({ isFetchingHistory: false });
+        if (get().currentRequestId === requestId) {
+            set({ isFetchingHistory: false, isInitialLoad: false });
+        }
     }
   },
 

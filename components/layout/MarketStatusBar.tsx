@@ -11,8 +11,7 @@ import { Badge } from '@/components/ui/badge';
 const INDEX_SYMBOLS = ['NIFTY 50', 'NIFTY BANK', 'NIFTY FIN SERVICE'] as const;
 
 export function MarketStatusBar() {
-    const { isMarketOpen, selectedSymbol } = useGlobalStore();
-    const { updateStockPrice } = useMarketStore();
+    const { selectedSymbol } = useGlobalStore();
     const balance = useWalletStore((state) => state.balance);
     const [indexPrices, setIndexPrices] = useState({
         'NIFTY 50': 0,
@@ -109,7 +108,11 @@ export function MarketStatusBar() {
                         console.log('📊 Initial index prices loaded:', newPrices);
                     }
                 } else {
-                    console.error('❌ Quotes fetch failed:', quotesRes.status, await quotesRes.text());
+                    console.warn(
+                        '⚠️ Quotes bootstrap unavailable, waiting for live ticks:',
+                        quotesRes.status,
+                        await quotesRes.text()
+                    );
                 }
             } catch (error) {
                 console.error('Failed to subscribe to indices:', error);

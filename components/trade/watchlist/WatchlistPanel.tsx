@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -30,7 +30,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   const [isCreating, setIsCreating] = useState(false);
   const [newWatchlistName, setNewWatchlistName] = useState('');
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
-  const subscribedSymbolsRef = useRef<string[]>([]);
+  const lastAppliedQuerySnapshotRef = useRef<string>('');
 
   // 🔥 NEW: TanStack Query hooks for data fetching
   const { data: watchlists = [], isLoading: isLoadingWatchlists } = useWatchlists();
@@ -54,40 +54,37 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   
   // Sync query data to Zustand store (for SSE price updates)
   useEffect(() => {
-    // 🔥 FIX: Prevent infinite loop by checking if data actually changed
-    if (!isLoadingInstruments && queryInstruments) {
-      const currentIds = queryInstruments.map(s => s.instrumentToken).sort().join(',');
-      const storeIds = instruments.map(s => s.instrumentToken).sort().join(',');
-      
-      if (currentIds !== storeIds) {
-        setStocks(queryInstruments);
-      }
-    }
-  }, [queryInstruments, isLoadingInstruments, setStocks, instruments]);
+    if (isLoadingInstruments || !queryInstruments) return;
+
+    // Only apply when query payload itself changed.
+    // Do NOT compare against live store state; SSE updates would be overwritten.
+    const querySnapshot = queryInstruments
+      .map(s => `${s.instrumentToken}:${Number(s.price || 0).toFixed(2)}`)
+      .sort()
+      .join(',');
+
+    if (querySnapshot === lastAppliedQuerySnapshotRef.current) return;
+
+    setStocks(queryInstruments);
+    lastAppliedQuerySnapshotRef.current = querySnapshot;
+  }, [queryInstruments, isLoadingInstruments, setStocks]);
   
   const activeWatchlist = watchlists.find(w => w.id === activeWatchlistId);
   const isFetchingWatchlistData = isLoadingWatchlists || isLoadingInstruments;
 
   // Show all instruments (use props for live-updated prices from Zustand)
   const localMatches = instruments;
+  const watchlistSymbolsKey = useMemo(() => {
+    const uniqueSymbols = Array.from(new Set(instruments.map((stock) => stock.symbol)));
+    return uniqueSymbols.sort().join(',');
+  }, [instruments]);
 
   // ═══════════════════════════════════════════════════════════
   // 🔥 SUBSCRIBE TO ALL WATCHLIST STOCKS FOR REAL-TIME UPDATES
   // ═══════════════════════════════════════════════════════════
   useEffect(() => {
-    if (instruments.length === 0) return;
-
-    // Subscribe to all watchlist stocks
-    const symbols = instruments.map(stock => stock.symbol);
-    
-    // 🔥 FIX: Create stable key for comparison
-    const symbolsKey = symbols.sort().join(',');
-    const currentKey = subscribedSymbolsRef.current.sort().join(',');
-    
-    // 🔥 FIX: If already subscribed to these exact symbols, skip completely
-    if (symbolsKey === currentKey) {
-      return; // No cleanup needed - already subscribed
-    }
+    if (!watchlistSymbolsKey) return;
+    const symbols = watchlistSymbolsKey.split(',');
 
     console.log('📡 Subscribing to', symbols.length, 'watchlist stocks:', symbols);
 
@@ -97,18 +94,16 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
       body: JSON.stringify({ symbols, action: 'subscribe' })
     }).catch(err => console.error('Failed to subscribe to watchlist:', err));
 
-    subscribedSymbolsRef.current = symbols;
-
     // Cleanup: Unsubscribe when watchlist changes or component unmounts
     return () => {
       console.log('🔕 Unsubscribing from', symbols.length, 'watchlist stocks');
       fetch('/api/v1/market/subscribe', {
-        method: 'POST',
+        method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols, action: 'unsubscribe' })
+        body: JSON.stringify({ symbols })
       }).catch(err => console.error('Failed to unsubscribe from watchlist:', err));
     };
-  }, [activeWatchlistId, instruments]); // 🔥 FIX: Re-run when instruments data arrives
+  }, [activeWatchlistId, watchlistSymbolsKey]);
 
   const handleCreateWatchlist = async () => {
     if (!newWatchlistName.trim()) return;
@@ -219,7 +214,8 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
       {/* List Content */}
       <ScrollArea className="flex-1">
         <div className="flex flex-col">
-          {localMatches.map((stock, i) => (
+          {localMatches.map((stock, i) => {
+            return (
             <div
               key={`${stock.symbol}-${i}`}
               onClick={() => onSelect(stock)}
@@ -288,7 +284,8 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
                 )}
               </div>
             </div>
-          ))}
+            );
+          })}
           
           {!isFetchingWatchlistData && localMatches.length === 0 && (
             <div className="p-4 text-center text-xs text-muted-foreground">

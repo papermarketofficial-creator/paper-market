@@ -17,7 +17,7 @@ export default function TradePage() {
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
 
-  // 🔥 CRITICAL: No direct SSE here - managed by MarketStreamProvider in dashboard layout
+  // SSE stream is managed at dashboard layout level via useMarketStream().
   // 🔥 CRITICAL: Watchlists fetched automatically by TanStack Query in WatchlistPanel
 
   // Initial Load & Parallel Fetching

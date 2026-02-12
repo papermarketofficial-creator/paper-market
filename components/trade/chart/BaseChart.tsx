@@ -53,6 +53,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<any>[]>>(new Map()); // Map ID to Array of Series
   const isFetchingRef = useRef(false); // Throttle
+  const previousLogicalRangeRef = useRef<{ from: number; to: number } | null>(null); // Avoid initial auto-pagination
   const chartControllerRef = useRef<ChartController | null>(null); // Chart controller for direct updates
   
   // 🔥 FIX: Use ref for onLoadMore to prevent chart remounting when callback changes
@@ -215,23 +216,32 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     // Infinite Scroll Monitor
     console.log('📊 Setting up infinite scroll listener');
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
-        // 🔥 Trigger when user scrolls near left edge (matching old working version)
-        if (range && range.from < 10 && !isFetchingRef.current) {
-             console.log(`📊 Infinite scroll triggered: range.from=${range.from}, isFetching=${isFetchingRef.current}`);
-             // 🔥 FIX: Use ref instead of direct callback to prevent chart remounting
-             if (onLoadMoreRef.current) {
-                 // Throttle locally to prevent spam
-                 isFetchingRef.current = true;
-                 console.log('📊 Calling onLoadMore callback...');
-                 onLoadMoreRef.current();
-                 // 2s cooldown (matching old working version)
-                 setTimeout(() => {
-                     isFetchingRef.current = false;
-                     console.log('📊 Infinite scroll cooldown complete');
-                 }, 2000);
-             } else {
-                 console.warn('⚠️ Infinite scroll triggered but no onLoadMore callback');
-             }
+        if (!range) return;
+
+        const currentRange = {
+          from: Number(range.from),
+          to: Number(range.to),
+        };
+
+        const previousRange = previousLogicalRangeRef.current;
+        previousLogicalRangeRef.current = currentRange;
+
+        // Skip first range event fired during initial chart/data setup.
+        if (!previousRange) return;
+
+        // Only fetch more when user actually scrolls LEFT near the boundary.
+        const movedLeft = currentRange.from < previousRange.from;
+        const nearLeftEdge = currentRange.from < 10;
+        if (!movedLeft || !nearLeftEdge || isFetchingRef.current) return;
+
+        if (onLoadMoreRef.current) {
+            isFetchingRef.current = true;
+            onLoadMoreRef.current();
+            setTimeout(() => {
+                isFetchingRef.current = false;
+            }, 2000);
+        } else {
+            console.warn('Infinite scroll triggered but no onLoadMore callback');
         }
     });
 
@@ -272,16 +282,6 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     chartRegistry.register(symbol, controller);
     console.log(`✅ ChartController registered in registry for ${symbol}`);
 
-    // ═══════════════════════════════════════════════════════════
-    // 🔥 ELITE PATTERN: Load data DIRECTLY into controller
-    // ═══════════════════════════════════════════════════════════
-    // Do NOT wait for React/Zustand - inject immediately
-    if (data && data.length > 0) {
-      console.log(`🔥 ChartController: Loading ${data.length} candles directly on init`);
-      controller.setData(data);
-    } else {
-      console.log(`⏸️ ChartController: No initial data to load (data.length=${data?.length || 0})`);
-    }
 
     console.log(`✅ ChartController initialized and registered for ${symbol}`);
 

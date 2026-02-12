@@ -16,6 +16,7 @@
 
 import { UpstoxService } from "@/services/upstox.service";
 import { subDays, subMonths, subWeeks, subYears } from "date-fns";
+import { toUnixSeconds } from "./time";
 
 export interface CandleFetchParams {
     instrumentKey: string;
@@ -46,6 +47,7 @@ export interface CandleResult {
 
 export class CandleOrchestrator {
     private static readonly TIMEZONE = 'Asia/Kolkata';
+    private static readonly MARKET_OPEN_MINUTES = 9 * 60 + 15;
 
     /**
      * Main Entrypoint: Fetch and format candles
@@ -77,19 +79,27 @@ export class CandleOrchestrator {
             console.log(`🎻 Orchestrator: First ${rawCandles[0][0]}, Last ${rawCandles[rawCandles.length-1][0]}`);
         }
 
-        const formattedCandles: FormattedCandle[] = rawCandles.map(c => ({
-            time: new Date(c[0]).getTime() / 1000,
-            open: c[1],
-            high: c[2],
-            low: c[3],
-            close: c[4],
-        }));
+       const formattedCandles: FormattedCandle[] = [];
+const formattedVolume: FormattedVolume[] = [];
 
-        const formattedVolume: FormattedVolume[] = rawCandles.map(c => ({
-            time: new Date(c[0]).getTime() / 1000,
-            value: c[5],
-            color: c[4] >= c[1] ? '#22C55E' : '#EF4444' // Green if bullish
-        }));
+for (const c of rawCandles) {
+    const time = toUnixSeconds(c[0]);
+
+    formattedCandles.push({
+        time,
+        open: c[1],
+        high: c[2],
+        low: c[3],
+        close: c[4],
+    });
+
+    formattedVolume.push({
+        time,
+        value: c[5],
+        color: c[4] >= c[1] ? '#22C55E' : '#EF4444'
+    });
+}
+
 
         return {
             candles: formattedCandles,
@@ -129,15 +139,15 @@ export class CandleOrchestrator {
                         fromDateObj = subDays(anchorDate, 7);
                         toDateStr = this.formatDateIST(anchorDate);
                     } else {
-                        // 🔥 CRITICAL FIX: Fetch last 3 days to ensure we get at least 1 full trading day
-                        // This handles:
-                        // - Market closed (after hours)
-                        // - Weekends
-                        // - Holidays
-                        // - Intraday endpoint returning empty data
-                        // The historical endpoint will return whatever trading days exist in this range
-                        fromDateObj = subDays(anchorDate, 3);
-                        toDateStr = this.formatDateIST(anchorDate);
+                        // For 1D initial load, prefer today's intraday session to avoid cross-session jumps.
+                        // Fallback to last few days only when today's session is not yet available (e.g., weekend/pre-open).
+                        if (this.hasSessionStartedTodayIST(anchorDate)) {
+                            fromDateObj = anchorDate;
+                            toDateStr = this.formatDateIST(anchorDate);
+                        } else {
+                            fromDateObj = subDays(anchorDate, 3);
+                            toDateStr = this.formatDateIST(anchorDate);
+                        }
                     }
                     break;
                 
@@ -294,5 +304,28 @@ export class CandleOrchestrator {
             day: '2-digit'
         });
         return formatter.format(date);
+    }
+
+    /**
+     * Returns true when today's trading session has started in IST (Mon-Fri, >= 09:15).
+     * Used to keep 1D charts scoped to the current session when available.
+     */
+    private static hasSessionStartedTodayIST(now: Date): boolean {
+        const parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: this.TIMEZONE,
+            weekday: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        }).formatToParts(now);
+
+        const weekday = parts.find((p) => p.type === 'weekday')?.value || '';
+        if (weekday === 'Sat' || weekday === 'Sun') return false;
+
+        const hour = Number(parts.find((p) => p.type === 'hour')?.value || '0');
+        const minute = Number(parts.find((p) => p.type === 'minute')?.value || '0');
+        const totalMinutes = hour * 60 + minute;
+
+        return totalMinutes >= this.MARKET_OPEN_MINUTES;
     }
 }
