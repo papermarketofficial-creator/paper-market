@@ -1,5 +1,6 @@
 import { MarketSlice } from '../types';
-
+import { isMarketOpenIST } from '@/lib/market-hours';
+import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normalization';
 
 // Helper to add color to volume based on candle open/close
 const enrichVolumeWithColor = (volume: any[], candles: any[]) => {
@@ -25,6 +26,7 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
   historicalData: [], // CandlestickData[]
   volumeData: [],    // HistogramData[]
   simulatedSymbol: null,
+  simulatedInstrumentKey: null,
   intervalId: null,
   activeInterval: '1m', // Default
   isFetchingHistory: false,
@@ -121,6 +123,14 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
   },
 
   initializeSimulation: async (symbol: string, timeframe = '1d', range?: string) => {
+    const canonicalSymbol = toCanonicalSymbol(symbol);
+    const state = get();
+    const knownInstrument =
+      state.stocksBySymbol?.[canonicalSymbol]?.instrumentToken ||
+      state.stocks?.find((item: any) => toCanonicalSymbol(item.symbol) === canonicalSymbol)?.instrumentToken ||
+      state.indices?.find((item: any) => toCanonicalSymbol(item.symbol) === canonicalSymbol)?.instrumentToken ||
+      null;
+    const resolvedInstrumentKey = toInstrumentKey(knownInstrument || canonicalSymbol);
     // 🔥 Detect interval from range or timeframe
     const rangeToInterval: Record<string, string> = {
         '1d': '1m',       // 1D range -> 1 minute candles
@@ -145,17 +155,18 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
         isInitialLoad: true,
         historicalData: [], 
         volumeData: [],
-        simulatedSymbol: symbol,
+        simulatedSymbol: canonicalSymbol,
+        simulatedInstrumentKey: resolvedInstrumentKey,
         activeInterval: detectedInterval, // 🔥 Store for dynamic tick boundaries
         hasMoreHistory: true // 🔥 Reset pagination flag
     }); 
     
     try {
-        let queryParams = `symbol=${symbol}`;
+        let queryParams = `symbol=${canonicalSymbol}`;
         if (range) queryParams += `&range=${range}`;
         else queryParams += `&timeframe=${timeframe}`;
 
-        console.log(`📊 Fetching history: ${symbol}, range=${range || timeframe}, interval=${detectedInterval}`);
+        console.log(`📊 Fetching history: ${canonicalSymbol}, range=${range || timeframe}, interval=${detectedInterval}`);
         
         const res = await fetch(`/api/v1/market/history?${queryParams}`);
         const data = await res.json();
@@ -177,7 +188,28 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
 
             // 🔥 NO CAPPING: Allow unlimited candles for proper historical display
             // Infinite scroll will handle loading older data progressively
-            const lastClose = sortedCandles.length > 0 ? sortedCandles[sortedCandles.length - 1].close : 0;
+            let finalCandles = sortedCandles;
+            let lastClose = sortedCandles.length > 0 ? sortedCandles[sortedCandles.length - 1].close : 0;
+
+            // Keep chart close aligned with watchlist snapshot/live price outside market hours.
+            // This avoids visible mismatch when latest tick stream is unavailable.
+            if (!isMarketOpenIST() && sortedCandles.length > 0) {
+                const state = get();
+                const quoteKey = toInstrumentKey(state.simulatedInstrumentKey || resolvedInstrumentKey || canonicalSymbol);
+                const snapshotPrice = Number(state.quotesByInstrument?.[quoteKey]?.price);
+                if (Number.isFinite(snapshotPrice) && snapshotPrice > 0) {
+                    const lastIdx = sortedCandles.length - 1;
+                    const last = sortedCandles[lastIdx];
+                    finalCandles = [...sortedCandles];
+                    finalCandles[lastIdx] = {
+                        ...last,
+                        close: snapshotPrice,
+                        high: Math.max(Number(last.high), snapshotPrice),
+                        low: Math.min(Number(last.low), snapshotPrice),
+                    };
+                    lastClose = snapshotPrice;
+                }
+            }
             
             // Ignore stale response from an older request.
             if (get().currentRequestId !== requestId) {
@@ -185,12 +217,13 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
             }
 
             set({
-                historicalData: sortedCandles,
+                historicalData: finalCandles,
                 volumeData: sortedVolume,
                 livePrice: lastClose,
-                simulatedSymbol: symbol
+                simulatedSymbol: canonicalSymbol,
+                simulatedInstrumentKey: resolvedInstrumentKey
             });
-            
+
             console.log(`📊 Initial load: ${sortedCandles.length} candles`);
         } else {
             console.error("Failed to fetch history:", data.error);

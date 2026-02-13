@@ -14,6 +14,11 @@ export interface UpstoxConfig {
   redirectUri: string;
 }
 
+export interface SystemQuoteDetail {
+  lastPrice: number;
+  closePrice: number | null;
+}
+
 export class UpstoxService {
   private static config: UpstoxConfig = {
     apiKey: process.env.UPSTOX_API_KEY || "",
@@ -30,6 +35,41 @@ export class UpstoxService {
   private static expiry = 0;
   // 🔥 CRITICAL: promise lock to prevent stampedes
   private static tokenPromise: Promise<string | null> | null = null;
+
+  static invalidateSystemToken(reason = "unspecified"): void {
+    this.cachedToken = null;
+    this.expiry = 0;
+    this.tokenPromise = null;
+    logger.warn({ reason }, "Invalidated cached Upstox system token");
+  }
+
+  private static normalizeSymbolKey(value: string): string {
+    return value.replace(/\s+/g, "").toUpperCase();
+  }
+
+  private static canonicalizeUnderlyingSymbol(raw: string): string {
+    const trimmed = String(raw || "").trim();
+    const normalized = this.normalizeSymbolKey(trimmed);
+    const indexAliases: Record<string, string> = {
+      NIFTY: "NIFTY 50",
+      NIFTY50: "NIFTY 50",
+      NIFTY_50: "NIFTY 50",
+      BANKNIFTY: "NIFTY BANK",
+      NIFTYBANK: "NIFTY BANK",
+      FINNIFTY: "NIFTY FIN SERVICE",
+      NIFTYFINSERVICE: "NIFTY FIN SERVICE",
+    };
+
+    return indexAliases[normalized] || trimmed.toUpperCase();
+  }
+
+  private static toIndexInstrumentSuffix(symbol: string): string {
+    return symbol
+      .toLowerCase()
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  }
 
   /**
    * Generate the Authorization URL for user login
@@ -136,11 +176,17 @@ export class UpstoxService {
    * Get ANY valid token for system-wide background tasks (Stream)
    * 🚨 PHASE 3: Cached to prevent DB hits on reconnect
    */
-  static async getSystemToken(): Promise<string | null> {
+  static async getSystemToken(forceRefresh = false): Promise<string | null> {
     const now = Date.now();
 
+    if (forceRefresh) {
+      this.cachedToken = null;
+      this.expiry = 0;
+      this.tokenPromise = null;
+    }
+
     // Return cached token if still valid (with 5min buffer)
-    if (this.cachedToken && now < this.expiry - 300000) {
+    if (!forceRefresh && this.cachedToken && now < this.expiry - 300000) {
       return this.cachedToken;
     }
 
@@ -150,27 +196,33 @@ export class UpstoxService {
     }
 
     this.tokenPromise = (async () => {
+      try {
         // Fetch from DB
         const [record] = await db
-        .select()
-        .from(upstoxTokens)
-        .where(gt(upstoxTokens.expiresAt, new Date())) // Must be valid
-        .orderBy(desc(upstoxTokens.updatedAt)) // Get most recently used
-        .limit(1);
+          .select()
+          .from(upstoxTokens)
+          .where(gt(upstoxTokens.expiresAt, new Date())) // Must be valid
+          .orderBy(desc(upstoxTokens.updatedAt)) // Get most recently used
+          .limit(1);
 
         if (!record) {
-        this.cachedToken = null;
-        this.expiry = 0;
-        this.tokenPromise = null;
-        return null;
+          this.cachedToken = null;
+          this.expiry = 0;
+          return null;
         }
 
         // Cache the token
         this.cachedToken = record.accessToken;
         this.expiry = new Date(record.expiresAt).getTime();
-        this.tokenPromise = null; // Clear promise when done
-
         return this.cachedToken;
+      } catch (error) {
+        logger.error({ err: error }, "Failed to resolve Upstox system token");
+        this.cachedToken = null;
+        this.expiry = 0;
+        return null;
+      } finally {
+        this.tokenPromise = null; // Always clear lock
+      }
     })();
 
     return this.tokenPromise;
@@ -203,6 +255,21 @@ export class UpstoxService {
   }
 
   /**
+   * Fetch full quotes using system token (includes close price when available).
+   */
+  static async getSystemQuoteDetails(
+      instrumentKeys: string[]
+  ): Promise<Record<string, SystemQuoteDetail>> {
+      const token = await this.getSystemToken();
+      if (!token) {
+          logger.warn("No system token available for detailed snapshot fetch");
+          return {};
+      }
+
+      return this.fetchQuoteDetailsWithToken(token, instrumentKeys);
+  }
+
+  /**
    * Internal: Fetch quotes with a given token
    */
   private static async fetchQuotesWithToken(token: string, instrumentKeys: string[]): Promise<Record<string, number>> {
@@ -215,33 +282,151 @@ export class UpstoxService {
       const url = `${UPSTOX_API_URL}/market-quote/ltp?instrument_key=${symbolList}`;
  
       try {
-          await upstoxRateLimiter.waitForToken("market-quote");
-          const response = await fetch(url, {
-              headers: {
-                  Authorization: `Bearer ${token}`,
-                  Accept: "application/json",
-              },
-          });
+          const fetchOnce = async (
+              currentToken: string
+          ): Promise<{ quotes: Record<string, number>; unauthorized: boolean }> => {
+              await upstoxRateLimiter.waitForToken("market-quote");
+              const response = await fetch(url, {
+                  headers: {
+                      Authorization: `Bearer ${currentToken}`,
+                      Accept: "application/json",
+                  },
+              });
 
-          const data = await response.json();
+              const data = await response.json().catch(() => ({}));
+              if (response.status === 401) {
+                  return { quotes: {}, unauthorized: true };
+              }
 
-          if (data.status === "error") {
-             throw new Error(data.message);
+              if (!response.ok || data?.status === "error") {
+                  throw new Error(data?.message || `Upstox LTP failed: ${response.status}`);
+              }
+
+              const quotes: Record<string, number> = {};
+              if (data?.data) {
+                  for (const [key, value] of Object.entries(data.data as Record<string, any>)) {
+                      const lastPrice = Number((value as any)?.last_price);
+                      if (Number.isFinite(lastPrice)) {
+                          quotes[key] = lastPrice;
+                      }
+                  }
+              }
+
+              return { quotes, unauthorized: false };
+          };
+
+          const first = await fetchOnce(token);
+          if (!first.unauthorized) {
+              logger.info({ count: Object.keys(first.quotes).length }, "Fetched snapshot quotes");
+              return first.quotes;
           }
 
-          const quotes: Record<string, number> = {};
-          if (data.data) {
-             for (const [key, value] of Object.entries(data.data as Record<string, any>)) {
-                 quotes[key] = value.last_price;
-             }
+          this.invalidateSystemToken("ltp_quote_401");
+          const refreshed = await this.getSystemToken(true);
+          if (!refreshed) {
+              logger.warn("No refreshed system token after LTP quote 401");
+              return {};
           }
-           
-          logger.info({ count: Object.keys(quotes).length }, "Fetched snapshot quotes");
-          return quotes;
 
+          const retry = await fetchOnce(refreshed);
+          if (retry.unauthorized) {
+              this.invalidateSystemToken("ltp_quote_401_retry");
+              logger.warn("Unauthorized after LTP quote retry");
+              return {};
+          }
+
+          logger.info({ count: Object.keys(retry.quotes).length }, "Fetched snapshot quotes (retry)");
+          return retry.quotes;
       } catch (error: any) {
           logger.error({ err: error }, "Failed to fetch market quotes");
           return {};
+      }
+  }
+
+  /**
+   * Internal: Fetch full quotes (last + close) with a given token
+   */
+  private static async fetchQuoteDetailsWithToken(
+      token: string,
+      instrumentKeys: string[]
+  ): Promise<Record<string, SystemQuoteDetail>> {
+      if (instrumentKeys.length === 0) return {};
+
+      const symbolList = instrumentKeys.map((k) => encodeURIComponent(k)).join(",");
+      const url = `${UPSTOX_API_URL}/market-quote/quotes?instrument_key=${symbolList}`;
+
+      try {
+          const fetchOnce = async (
+              currentToken: string
+          ): Promise<{ quotes: Record<string, SystemQuoteDetail>; unauthorized: boolean }> => {
+              await upstoxRateLimiter.waitForToken("market-quote");
+              const response = await fetch(url, {
+                  headers: {
+                      Authorization: `Bearer ${currentToken}`,
+                      Accept: "application/json",
+                  },
+              });
+
+              const payload = await response.json().catch(() => ({}));
+              if (response.status === 401) {
+                  return { quotes: {}, unauthorized: true };
+              }
+
+              if (!response.ok || payload?.status === "error") {
+                  throw new Error(payload?.message || `Upstox quotes failed: ${response.status}`);
+              }
+
+              const data = payload?.data as Record<string, any> | undefined;
+              if (!data || typeof data !== "object") {
+                  return { quotes: {}, unauthorized: false };
+              }
+
+              const quotes: Record<string, SystemQuoteDetail> = {};
+              for (const [key, value] of Object.entries(data)) {
+                  const lastPrice = Number((value as any)?.last_price);
+                  if (!Number.isFinite(lastPrice) || lastPrice <= 0) continue;
+
+                  const close = Number((value as any)?.close_price);
+                  quotes[key] = {
+                      lastPrice,
+                      closePrice: Number.isFinite(close) && close > 0 ? close : null,
+                  };
+              }
+
+              return { quotes, unauthorized: false };
+          };
+
+          const first = await fetchOnce(token);
+          if (!first.unauthorized) {
+              logger.info({ count: Object.keys(first.quotes).length }, "Fetched detailed snapshot quotes");
+              return first.quotes;
+          }
+
+          this.invalidateSystemToken("detailed_quote_401");
+          const refreshed = await this.getSystemToken(true);
+          if (!refreshed) {
+              logger.warn("No refreshed system token after detailed quote 401");
+              return {};
+          }
+
+          const retry = await fetchOnce(refreshed);
+          if (retry.unauthorized) {
+              this.invalidateSystemToken("detailed_quote_401_retry");
+              logger.warn("Unauthorized after detailed quote retry");
+              return {};
+          }
+
+          logger.info({ count: Object.keys(retry.quotes).length }, "Fetched detailed snapshot quotes (retry)");
+          return retry.quotes;
+      } catch (error: any) {
+          logger.error({ err: error }, "Failed to fetch detailed market quotes");
+          // Fallback to LTP-only path so daily update does not fail completely.
+          const ltpQuotes = await this.fetchQuotesWithToken(token, instrumentKeys);
+          const out: Record<string, SystemQuoteDetail> = {};
+          for (const [key, lastPrice] of Object.entries(ltpQuotes)) {
+              out[key] = { lastPrice, closePrice: lastPrice };
+          }
+          return out;
       }
   }
 
@@ -562,8 +747,10 @@ export class UpstoxService {
      * 🚨 PHASE 4: Memory Cache to prevent DB spam
      */
     static async resolveInstrumentKey(symbol: string): Promise<string> {
+        const canonicalSymbol = this.canonicalizeUnderlyingSymbol(symbol);
+
         // 1. Check Cache (24h TTL)
-        const cacheKey = CacheKeys.instrumentKey(symbol);
+        const cacheKey = CacheKeys.instrumentKey(canonicalSymbol);
         const cached = cache.get(cacheKey) as string;
         if (cached) {
             // logger.debug({ symbol }, "Instrument Key resolved from CACHE");
@@ -575,7 +762,7 @@ export class UpstoxService {
             const [instrument] = await db
                 .select({ token: instruments.instrumentToken })
                 .from(instruments)
-                .where(eq(instruments.tradingsymbol, symbol))
+                .where(eq(instruments.tradingsymbol, canonicalSymbol))
                 .limit(1);
             
             if (instrument) {
@@ -588,7 +775,16 @@ export class UpstoxService {
         }
         
         // 4. Fallback
-        return `NSE_EQ|${symbol}`;
+        const isIndex =
+          canonicalSymbol.includes("NIFTY") ||
+          canonicalSymbol.includes("SENSEX") ||
+          canonicalSymbol.includes("BANKEX");
+
+        if (isIndex) {
+          return `NSE_INDEX|${this.toIndexInstrumentSuffix(canonicalSymbol)}`;
+        }
+
+        return `NSE_EQ|${canonicalSymbol}`;
     }
 
     /**

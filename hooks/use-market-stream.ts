@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
-import { usePositionsStore } from '@/stores/trading/positions.store';
 import { useMarketStore } from '@/stores/trading/market.store';
 import { tickBus } from '@/lib/trading/tick-bus';
 import { getMarketStream } from '@/lib/sse';
-import { isMarketOpenIST } from '@/lib/market-hours';
+import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normalization';
 
 const ISIN_LIKE = /^[A-Z]{2}[A-Z0-9]{8,14}$/i;
 
@@ -38,16 +37,12 @@ function resolveTradingSymbol(rawSymbol: unknown): string {
 }
 
 export const useMarketStream = () => {
-    const { updateAllPositionsPrices } = usePositionsStore();
-    const { updateStockPrice, updateLiveCandle } = useMarketStore();
+    const { applyTick, hydrateQuotes, updateLiveCandle } = useMarketStore();
     const [isConnected, setIsConnected] = useState(false);
 
     useEffect(() => {
-        const eventSource = getMarketStream();
-
-        if (eventSource.readyState === EventSource.OPEN) {
-            setIsConnected(true);
-        }
+        let eventSource: EventSource | null = null;
+        let cancelled = false;
 
         const handleMessage = (event: MessageEvent) => {
             try {
@@ -66,13 +61,14 @@ export const useMarketStream = () => {
                 }
 
                 const quote = message.data;
-                const tradingSymbol = resolveTradingSymbol(quote.symbol);
+                const instrumentKey = toInstrumentKey(
+                    quote.instrumentKey || quote.instrument_key || quote.symbol
+                );
+                const tradingSymbol = toCanonicalSymbol(
+                    resolveTradingSymbol(quote.symbol || quote.instrumentKey || quote.instrument_key)
+                );
+                if (!instrumentKey) return;
                 if (!tradingSymbol) return;
-
-                if (!isMarketOpenIST()) {
-                    // Keep watchlist/chart aligned to historical close outside market hours.
-                    return;
-                }
 
                 const price = Number(quote.price);
                 if (!Number.isFinite(price) || price <= 0) return;
@@ -82,6 +78,7 @@ export const useMarketStream = () => {
                     : Math.floor(Date.now() / 1000);
 
                 tickBus.emitTick({
+                    instrumentKey,
                     symbol: tradingSymbol,
                     price,
                     volume: quote.volume || 0,
@@ -90,15 +87,21 @@ export const useMarketStream = () => {
                     close: quote.close
                 });
 
-                updateAllPositionsPrices({ [tradingSymbol]: price });
-                updateStockPrice(tradingSymbol, price, quote.close);
+                applyTick({
+                    instrumentKey,
+                    symbol: tradingSymbol,
+                    price,
+                    close: quote.close,
+                    timestamp: quote.timestamp,
+                });
                 updateLiveCandle(
                     {
                         price,
                         volume: quote.volume,
                         time: tickTime
                     },
-                    tradingSymbol
+                    tradingSymbol,
+                    instrumentKey
                 );
             } catch (err) {
                 console.error('Failed to parse SSE message', err);
@@ -113,16 +116,43 @@ export const useMarketStream = () => {
             setIsConnected(false);
         };
 
-        eventSource.addEventListener('message', handleMessage as EventListener);
-        eventSource.addEventListener('open', handleOpen);
-        eventSource.addEventListener('error', handleError);
+        const connect = async () => {
+            try {
+                const snapshotRes = await fetch('/api/v1/market/snapshot', {
+                    cache: 'no-store',
+                });
+                if (snapshotRes.ok) {
+                    const snapshot = await snapshotRes.json();
+                    if (snapshot?.success && Array.isArray(snapshot?.data?.quotes) && snapshot.data.quotes.length > 0) {
+                        hydrateQuotes(snapshot.data.quotes);
+                    }
+                }
+            } catch {
+                // Best effort hydration only.
+            }
+
+            if (cancelled) return;
+
+            eventSource = getMarketStream();
+            if (eventSource.readyState === EventSource.OPEN) {
+                setIsConnected(true);
+            }
+
+            eventSource.addEventListener('message', handleMessage as EventListener);
+            eventSource.addEventListener('open', handleOpen);
+            eventSource.addEventListener('error', handleError);
+        };
+
+        connect();
 
         return () => {
+            cancelled = true;
+            if (!eventSource) return;
             eventSource.removeEventListener('message', handleMessage as EventListener);
             eventSource.removeEventListener('open', handleOpen);
             eventSource.removeEventListener('error', handleError);
         };
-    }, [updateAllPositionsPrices, updateLiveCandle, updateStockPrice]);
+    }, [applyTick, hydrateQuotes, updateLiveCandle]);
 
     return { isConnected };
 };

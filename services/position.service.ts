@@ -127,7 +127,12 @@ export class PositionService {
             const userPositions = await db
                 .select({
                     position: positions,
-                    instrument: instruments
+                    instrument: {
+                        instrumentToken: instruments.instrumentToken,
+                        instrumentType: instruments.instrumentType,
+                        expiry: instruments.expiry,
+                        lotSize: instruments.lotSize,
+                    }
                 })
                 .from(positions)
                 .leftJoin(instruments, eq(positions.symbol, instruments.tradingsymbol))
@@ -135,29 +140,16 @@ export class PositionService {
 
             return userPositions.map(({ position, instrument }) => {
                 const avgPrice = parseFloat(position.averagePrice);
-                
-                // Don't use marketSimulation here - let frontend handle ALL live price updates
-                // Backend just provides the position structure with entryPrice
-                // Frontend will update currentPrice from SSE stream
-                const currentPrice = 0; // Always 0 from backend, frontend updates from live ticks
+                const currentPrice = 0;
 
                 // Calculate PnL: (Current - Avg) * SignedQuantity
                 const quantity = position.quantity;
-                const unrealizedPnL = 0; // Will be calculated on frontend with live prices
-
-                // Debug logging
-                console.log('Position mapping:', {
-                    symbol: position.symbol,
-                    averagePriceRaw: position.averagePrice,
-                    avgPriceParsed: avgPrice,
-                    currentPrice,
-                    quantity,
-                    unrealizedPnL
-                });
+                const unrealizedPnL = (currentPrice - avgPrice) * quantity;
 
                 const mappedPosition = {
                     id: position.id,
                     symbol: position.symbol,
+                    instrumentToken: instrument?.instrumentToken || undefined,
                     name: position.symbol, // Use symbol as name for now
                     quantity: Math.abs(quantity), // Frontend expects absolute
                     side: quantity > 0 ? "BUY" : "SELL" as "BUY" | "SELL",
@@ -174,8 +166,6 @@ export class PositionService {
                     leverage: 1, // Default
                     timestamp: position.createdAt || new Date()
                 };
-
-                console.log('Mapped position:', mappedPosition);
                 return mappedPosition;
             });
         } catch (error) {

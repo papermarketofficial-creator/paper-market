@@ -51,23 +51,21 @@ export class ExecutionService {
      * Try to execute a single order based on market conditions.
      */
     static async tryExecuteOrder(order: typeof orders.$inferSelect): Promise<boolean> {
-        // Get current market price
         // Get current market price (Priority: Real-Time > Simulation)
-        let quote = realTimeMarketService.getQuote(order.symbol);
-        
-        if (!quote) {
-            // Fallback to simulation if real-time data is unavailable
-            quote = marketSimulation.getQuote(order.symbol);
+        let marketPrice = realTimeMarketService.getQuote(order.symbol)?.price ?? null;
+
+        if (!Number.isFinite(marketPrice) || (marketPrice as number) <= 0) {
+            marketPrice = marketSimulation.getQuote(order.symbol)?.price ?? null;
         }
-        if (!quote) {
+
+        if (!Number.isFinite(marketPrice) || (marketPrice as number) <= 0) {
             logger.debug({ orderId: order.id, symbol: order.symbol }, "No market price available");
             return false;
         }
-
-        const marketPrice = quote.price;
+        const resolvedPrice = Number(marketPrice);
 
         // Check if execution conditions are met
-        const shouldExecute = this.shouldExecute(order, marketPrice);
+        const shouldExecute = this.shouldExecute(order, resolvedPrice);
         if (!shouldExecute) {
             return false;
         }
@@ -77,7 +75,7 @@ export class ExecutionService {
             await db.transaction(async (tx) => {
                 // Get instrument for margin calculation
                 // Calculate actual execution cost
-                const executionCost = marketPrice * order.quantity;
+                const executionCost = resolvedPrice * order.quantity;
 
                 // Define newTrade before Promise.all
                 const newTrade: NewTrade = {
@@ -86,7 +84,7 @@ export class ExecutionService {
                     symbol: order.symbol,
                     side: order.side,
                     quantity: order.quantity,
-                    price: marketPrice.toString(),
+                    price: resolvedPrice.toString(),
                     executedAt: new Date(),
                 };
 
@@ -95,7 +93,7 @@ export class ExecutionService {
                     tx.update(orders)
                         .set({
                             status: "FILLED",
-                            executionPrice: marketPrice.toString(),
+                            executionPrice: resolvedPrice.toString(),
                             executedAt: new Date(),
                             updatedAt: new Date(),
                         })
@@ -117,7 +115,7 @@ export class ExecutionService {
                             'TRADE',
                             trade.id,
                             tx,
-                            `Buy ${order.symbol} (${order.quantity} @ ${marketPrice})`
+                            `Buy ${order.symbol} (${order.quantity} @ ${resolvedPrice})`
                         )
                     );
                 } else {
@@ -128,7 +126,7 @@ export class ExecutionService {
                             executionCost,
                             trade.id,
                             tx,
-                            `Sell ${order.symbol} (${order.quantity} @ ${marketPrice})`
+                            `Sell ${order.symbol} (${order.quantity} @ ${resolvedPrice})`
                         )
                     );
                 }
@@ -145,7 +143,7 @@ export class ExecutionService {
                     symbol: order.symbol,
                     side: order.side,
                     quantity: order.quantity,
-                    price: marketPrice,
+                    price: resolvedPrice,
                 },
                 "Order executed"
             );

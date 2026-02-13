@@ -157,7 +157,6 @@ export class InstrumentService {
                             exchangeToken: sql.raw(`excluded."exchangeToken"`),
                             tradingsymbol: sql.raw(`excluded."tradingsymbol"`),
                             name: sql.raw(`excluded."name"`),
-                            lastPrice: sql.raw(`excluded."lastPrice"`),
                             expiry: sql.raw(`excluded."expiry"`),
                             strike: sql.raw(`excluded."strike"`),
                             tickSize: sql.raw(`excluded."tickSize"`),

@@ -16,18 +16,6 @@ function sanitizeInstrumentKeys(input: unknown): string[] {
     return Array.from(new Set(keys));
 }
 
-function toFallbackQuoteMap(prices: Record<string, number>): UpstoxQuoteMap {
-    const map: UpstoxQuoteMap = {};
-    for (const [key, price] of Object.entries(prices)) {
-        const safePrice = Number(price) || 0;
-        map[key] = {
-            last_price: safePrice,
-            close_price: safePrice,
-        };
-    }
-    return map;
-}
-
 function parseJsonSafe(text: string): any | null {
     if (!text) return null;
     try {
@@ -43,6 +31,56 @@ function normalizeErrorMessage(error: unknown): string {
         if (msg.length > 0) return msg;
     }
     return "Failed to fetch quotes";
+}
+
+function buildQuoteLookup(quotes: UpstoxQuoteMap): Map<string, { last: number; close: number }> {
+    const out = new Map<string, { last: number; close: number }>();
+
+    for (const [key, quote] of Object.entries(quotes || {})) {
+        const last = Number(quote?.last_price);
+        if (!Number.isFinite(last) || last <= 0) continue;
+
+        const closeRaw = Number(quote?.close_price);
+        const close = Number.isFinite(closeRaw) && closeRaw > 0 ? closeRaw : last;
+
+        out.set(key, { last, close });
+        out.set(key.replace(":", "|"), { last, close });
+        out.set(key.replace("|", ":"), { last, close });
+
+        const sep = key.includes(":") ? ":" : key.includes("|") ? "|" : "";
+        const suffix = sep ? key.split(sep)[1] || "" : key;
+        if (suffix) {
+            out.set(`suffix:${suffix.toUpperCase()}`, { last, close });
+        }
+    }
+
+    return out;
+}
+
+function toRequestedKeyPayload(
+    instrumentKeys: string[],
+    lookup: Map<string, { last: number; close: number }>
+): UpstoxQuoteMap {
+    const out: UpstoxQuoteMap = {};
+
+    for (const key of instrumentKeys) {
+        const sep = key.includes(":") ? ":" : key.includes("|") ? "|" : "";
+        const suffix = sep ? key.split(sep)[1] || "" : key;
+        const quote =
+            lookup.get(key) ||
+            lookup.get(key.replace("|", ":")) ||
+            lookup.get(key.replace(":", "|")) ||
+            (suffix ? lookup.get(`suffix:${suffix.toUpperCase()}`) : undefined);
+
+        if (!quote) continue;
+
+        out[key] = {
+            last_price: quote.last,
+            close_price: quote.close,
+        };
+    }
+
+    return out;
 }
 
 export async function POST(req: NextRequest) {
@@ -78,20 +116,22 @@ export async function POST(req: NextRequest) {
         const rawText = await response.text();
         const upstream = parseJsonSafe(rawText);
         const upstreamStatus = upstream?.status;
-        const upstreamData: UpstoxQuoteMap = upstream?.data || {};
+        const upstreamData = (upstream?.data || {}) as UpstoxQuoteMap;
 
-        // Primary path: full quote payload (includes close_price).
         if (response.ok && upstreamStatus !== "error" && Object.keys(upstreamData).length > 0) {
-            return NextResponse.json({
-                success: true,
-                data: upstreamData,
-                count: Object.keys(upstreamData).length,
-                source: "quotes",
-                timestamp: new Date().toISOString(),
-            });
+            const lookup = buildQuoteLookup(upstreamData);
+            const payload = toRequestedKeyPayload(instrumentKeys, lookup);
+            if (Object.keys(payload).length > 0) {
+                return NextResponse.json({
+                    success: true,
+                    data: payload,
+                    count: Object.keys(payload).length,
+                    source: "quotes",
+                    timestamp: new Date().toISOString(),
+                });
+            }
         }
 
-        // Fallback path: LTP endpoint is usually more resilient for some instruments.
         logger.warn(
             {
                 status: response.status,
@@ -103,13 +143,24 @@ export async function POST(req: NextRequest) {
         );
 
         const prices = await UpstoxService.getSystemQuotes(instrumentKeys);
-        const fallbackData = toFallbackQuoteMap(prices);
+        const ltpAsQuotes: UpstoxQuoteMap = {};
+        for (const [key, price] of Object.entries(prices)) {
+            const last = Number(price);
+            if (!Number.isFinite(last) || last <= 0) continue;
+            ltpAsQuotes[key] = {
+                last_price: last,
+                close_price: last,
+            };
+        }
 
-        if (Object.keys(fallbackData).length > 0) {
+        const ltpLookup = buildQuoteLookup(ltpAsQuotes);
+        const fallbackPayload = toRequestedKeyPayload(instrumentKeys, ltpLookup);
+
+        if (Object.keys(fallbackPayload).length > 0) {
             return NextResponse.json({
                 success: true,
-                data: fallbackData,
-                count: Object.keys(fallbackData).length,
+                data: fallbackPayload,
+                count: Object.keys(fallbackPayload).length,
                 source: "ltp-fallback",
                 timestamp: new Date().toISOString(),
             });

@@ -79,9 +79,10 @@ export async function GET(req: NextRequest) {
 
             // Listener for market ticks from unified TickBus
             const onTick = (tick: any) => {
-                // TickBus emits NormalizedTick { symbol, price, timestamp (seconds), volume, exchange, close }
+                // TickBus emits NormalizedTick { instrumentKey, symbol, price, timestamp (seconds), volume, exchange, close }
                 // Convert to format expected by frontend
                 const quote = {
+                    instrumentKey: tick.instrumentKey,
                     symbol: tick.symbol,
                     price: tick.price,
                     timestamp: tick.timestamp * 1000, // Convert seconds to milliseconds
@@ -89,11 +90,11 @@ export async function GET(req: NextRequest) {
                     close: tick.close
                 };
 
-                // Coalesce bursts to latest-per-symbol so one hot symbol does not starve others.
-                const symbolKey = typeof quote.symbol === "string" && quote.symbol.length > 0
-                    ? quote.symbol
+                // Coalesce bursts to latest-per-instrument so one hot symbol does not starve others.
+                const instrumentKey = typeof quote.instrumentKey === "string" && quote.instrumentKey.length > 0
+                    ? quote.instrumentKey
                     : "__unknown__";
-                latestTickPayloads.set(symbolKey, JSON.stringify({ type: 'tick', data: quote }));
+                latestTickPayloads.set(instrumentKey, JSON.stringify({ type: 'tick', data: quote }));
 
                 if (!flushTimer) {
                     flushTimer = setTimeout(flushLatestTicks, FLUSH_INTERVAL_MS);

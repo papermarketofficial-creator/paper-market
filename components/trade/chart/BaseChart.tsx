@@ -5,6 +5,7 @@ import { IndicatorConfig } from '@/stores/trading/analysis.store';
 import { DrawingManager } from './overlays/DrawingManager';
 import { ChartController } from '@/lib/trading/chart-controller';
 import { chartRegistry } from '@/lib/trading/chart-registry';
+import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normalization';
 
 interface BaseChartProps {
   data: CandlestickData[];
@@ -26,6 +27,7 @@ interface BaseChartProps {
   height?: number;
   autoResize?: boolean;
   symbol: string;
+  instrumentKey?: string;
   range?: string; // ✅ Add range prop for dynamic formatting
   onChartReady?: (api: IChartApi) => void;
   onLoadMore?: () => void; // ✅ New Prop
@@ -43,6 +45,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   height = 400,
   autoResize = true,
   symbol,
+  instrumentKey,
   range, // ✅ Extract range prop
   onChartReady,
   onLoadMore 
@@ -266,11 +269,13 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   // ═══════════════════════════════════════════════════════════
   useEffect(() => {
     if (!candleSeriesRef.current || !symbol) return;
+    const registrySymbol = toCanonicalSymbol(symbol);
+    const registryInstrumentKey = toInstrumentKey(instrumentKey || registrySymbol);
 
-    console.log(`🎨 Initializing ChartController for ${symbol}`);
+    console.log(`🎨 Initializing ChartController for ${registryInstrumentKey}`);
     
     // Create instance-based controller for this chart
-    const controller = new ChartController(`chart-${symbol}`);
+    const controller = new ChartController(`chart-${registryInstrumentKey}`);
     controller.setSeries(candleSeriesRef.current);
     chartControllerRef.current = controller;
 
@@ -279,21 +284,21 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     // ═══════════════════════════════════════════════════════════
     // This enables CandleEngine → ChartRegistry → ChartController
     // Direct updates bypass React/Zustand entirely
-    chartRegistry.register(symbol, controller);
-    console.log(`✅ ChartController registered in registry for ${symbol}`);
+    chartRegistry.register(registryInstrumentKey, controller);
+    console.log(`✅ ChartController registered in registry for ${registryInstrumentKey}`);
 
 
-    console.log(`✅ ChartController initialized and registered for ${symbol}`);
+    console.log(`✅ ChartController initialized and registered for ${registryInstrumentKey}`);
 
     // Cleanup
     return () => {
-      console.log(`🗑️ ChartController cleanup starting for ${symbol}`);
-      chartRegistry.unregister(symbol);
+      console.log(`🗑️ ChartController cleanup starting for ${registryInstrumentKey}`);
+      chartRegistry.unregister(registryInstrumentKey);
       controller.destroy();
       chartControllerRef.current = null;
-      console.log(`🗑️ ChartController destroyed for ${symbol}`);
+      console.log(`🗑️ ChartController destroyed for ${registryInstrumentKey}`);
     };
-  }, [symbol]); // 🔥 CRITICAL FIX: Only depend on symbol, NOT data!
+  }, [symbol, instrumentKey]); // 🔥 CRITICAL FIX: Only depend on symbol identity, NOT data!
   // Controller mounts once per symbol, never rebuilds
   
   // ═══════════════════════════════════════════════════════════

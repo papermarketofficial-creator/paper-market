@@ -58,6 +58,7 @@ export class UpstoxWebSocket {
     private subscriptions: Set<string> = new Set();
     private isConnected: boolean = false;
     private reconnectAttempts: number = 0;
+    private authCooldownUntilMs: number = 0;
 
     private readonly RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000]; // Exponential backoff
 
@@ -79,6 +80,18 @@ export class UpstoxWebSocket {
         return global.__upstoxWebSocketInstance;
     }
 
+    isSocketConnected(): boolean {
+        return this.isConnected;
+    }
+
+    hasActiveSubscriptions(): boolean {
+        return this.subscriptions.size > 0;
+    }
+
+    getAuthCooldownRemainingMs(): number {
+        return Math.max(0, this.authCooldownUntilMs - Date.now());
+    }
+
     /**
      * Connect to Upstox WebSocket using SDK
      */
@@ -89,6 +102,15 @@ export class UpstoxWebSocket {
         if (this.isConnected) {
             console.log("⚠️ UpstoxWebSocket: Already connected");
             this.onUpdate = onUpdate; // Update callback
+            return;
+        }
+
+        const authCooldownRemainingMs = this.getAuthCooldownRemainingMs();
+        if (authCooldownRemainingMs > 0) {
+            logger.warn(
+                { cooldownMs: authCooldownRemainingMs },
+                "Skipping Upstox WebSocket connect during auth cooldown"
+            );
             return;
         }
 
@@ -157,15 +179,18 @@ export class UpstoxWebSocket {
             this.streamer.connect();
 
         } catch (error: any) {
-            console.log("❌ STEP FAIL:", error.message);
-            logger.error({ err: error.message }, "Failed to start Upstox Streamer");
-            
-            // ═══════════════════════════════════════════════════════════
-            // 🛠️ EXPONENTIAL BACKOFF: Retry with increasing delays
-            // ═══════════════════════════════════════════════════════════
-            // ═══════════════════════════════════════════════════════════
-            // 🛠️ INFINITE RECONNECT: Exponential backoff (capped at 30s)
-            // ═══════════════════════════════════════════════════════════
+            const message = String(error?.message || "");
+            const isUnauthorized = message.includes("401") || message.toLowerCase().includes("unauthorized");
+            console.log("STEP FAIL:", message);
+            logger.error({ err: message }, "Failed to start Upstox Streamer");
+
+            if (isUnauthorized) {
+                UpstoxService.invalidateSystemToken("websocket_connect_401");
+                this.authCooldownUntilMs = Date.now() + 60_000;
+                logger.warn("Upstox connect unauthorized; cooldown applied");
+                return;
+            }
+
             const delay = this.RECONNECT_DELAYS[Math.min(this.reconnectAttempts, this.RECONNECT_DELAYS.length - 1)] || 30000;
             this.reconnectAttempts++;
             
@@ -288,8 +313,17 @@ export class UpstoxWebSocket {
     }
 
     private handleError(error: any): void {
-        console.log("❌ ERROR:", JSON.stringify(error));
+        console.log("ERROR:", JSON.stringify(error));
         logger.error({ err: error }, "Upstox Streamer Error");
+
+        const message = String(error?.message || "");
+        const isUnauthorized = message.includes("401") || message.toLowerCase().includes("unauthorized");
+        if (isUnauthorized) {
+            UpstoxService.invalidateSystemToken("websocket_runtime_401");
+            this.authCooldownUntilMs = Date.now() + 60_000;
+            this.isConnected = false;
+            logger.warn("Upstox runtime unauthorized; cached token invalidated");
+        }
     }
 
     private handleClose(): void {
@@ -298,3 +332,5 @@ export class UpstoxWebSocket {
         logger.info("Upstox Streamer Disconnected");
     }
 }
+
+

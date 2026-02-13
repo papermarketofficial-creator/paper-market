@@ -3,6 +3,7 @@ import { instruments, InstrumentType } from "@/lib/db/schema";
 import { and, eq, ilike, gte, asc } from "drizzle-orm";
 import { marketSimulation } from "@/services/market-simulation.service";
 import { OptionChainInput } from "@/lib/validation/option-chain";
+import { UpstoxService } from "@/services/upstox.service";
 
 export class OptionChainService {
     static async getOptionChain(input: OptionChainInput) {
@@ -40,6 +41,10 @@ export class OptionChainService {
         // 3. Filter by Expiry
         const chainOptions = options.filter(o => o.expiry?.toISOString() === targetExpiry);
 
+        const tokenQuotes = await UpstoxService.getSystemQuotes(
+            chainOptions.map((opt) => opt.instrumentToken)
+        );
+
         // 4. Group by Strike
         const strikeMap = new Map<number, { strike: number, ce?: any, pe?: any }>();
 
@@ -55,7 +60,13 @@ export class OptionChainService {
 
             // Get Real-time Price
             const quote = marketSimulation.getQuote(opt.tradingsymbol);
-            const ltp = quote ? quote.price : parseFloat(opt.lastPrice || "0");
+            const ltpFromUpstox =
+                Number(tokenQuotes[opt.instrumentToken]) ||
+                Number(tokenQuotes[opt.instrumentToken.replace("|", ":")]) ||
+                0;
+            const ltp =
+                quote?.price ||
+                (Number.isFinite(ltpFromUpstox) && ltpFromUpstox > 0 ? ltpFromUpstox : 0);
 
             // Parse Type (CE/PE) - crude check
             const isCE = opt.tradingsymbol.endsWith("CE");

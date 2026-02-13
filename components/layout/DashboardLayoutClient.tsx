@@ -2,23 +2,18 @@
 import { ReactNode, useEffect, useState } from 'react';
 import { Sidebar } from './Sidebar';
 
-import { useMarketSimulation } from '@/hooks/use-market-simulation';
 import { useWalletStore } from '@/stores/wallet.store';
 import { usePositionsStore } from '@/stores/trading/positions.store';
-import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
 import { useMarketStream } from '@/hooks/use-market-stream'; // New Hook
+import { MarketStatusBar } from '@/components/layout/MarketStatusBar';
 
 export default function DashboardLayoutClient({ children }: { children: ReactNode }) {
-  // 1. Activate Market Simulation (Legacy - removed to ensure real data consistency)
-  // useMarketSimulation();
+  
 
-  // 2. Activate Real-Time Stream (Primary)
   useMarketStream();
 
-  // 3. Fetch Initial Data (Wallet & Positions)
   const fetchWallet = useWalletStore((state) => state.fetchWallet);
   const fetchPositions = usePositionsStore((state) => state.fetchPositions);
-  // fetchOrders will be added later if needed globally, usually fetched on specific pages
 
   useEffect(() => {
     fetchWallet();
@@ -32,11 +27,7 @@ export default function DashboardLayoutClient({ children }: { children: ReactNod
   );
 }
 
-// Internal wrapper to manage state without making the refined Sidebar too complex
-// ... imports
-import { MarketStatusBar } from '@/components/layout/MarketStatusBar';
 
-// ... (existing code)
 
 function DashboardContentWrapper({ children }: { children: ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

@@ -81,7 +81,7 @@ async function main() {
     
     // Ensure we have RELIANCE exists (EQUITY)
     const SYMBOL = "RELIANCE";
-    let instrument = await db.query.instruments.findFirst({
+    const instrument = await db.query.instruments.findFirst({
         where: ilike(instruments.tradingsymbol, SYMBOL)
     });
 
@@ -93,7 +93,6 @@ async function main() {
             exchangeToken: "123456",
             tradingsymbol: SYMBOL,
             name: "RELIANCE INDUSTRIES",
-            lastPrice: "250000", // 2500.00
             expiry: null,
             strike: null,
             tickSize: "0.05",

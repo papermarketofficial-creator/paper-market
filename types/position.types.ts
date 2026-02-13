@@ -3,6 +3,7 @@ import { ProductType, Side, InstrumentMode } from './general.types';
 export interface Position {
   id: string;
   symbol: string;
+  instrumentToken?: string;
   name: string;
   side: Side;
   quantity: number;

@@ -22,7 +22,7 @@ function initializeCandleEngineSubscription() {
             // ═══════════════════════════════════════════════════════════
             // CandleEngine → ChartRegistry → ChartController
             // Bypasses React/Zustand entirely for live updates
-            const controller = chartRegistry.get(tick.symbol);
+            const controller = chartRegistry.get(candleUpdate.instrumentKey);
             if (controller) {
                 controller.updateCandle(candleUpdate.candle);
             }

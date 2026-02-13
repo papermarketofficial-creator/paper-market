@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -24,10 +24,12 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Position } from '@/types/position.types';
 import { usePositionsStore } from '@/stores/trading/positions.store';
+import { useMarketStore } from '@/stores/trading/market.store';
 import { cn } from '@/lib/utils';
 import { X, TrendingUp, TrendingDown } from 'lucide-react';
 import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
 import Spinner from '@/components/ui/spinner';
+import { toInstrumentKey } from '@/lib/market/symbol-normalization';
 
 interface PositionsTableProps {
   loading?: boolean;
@@ -38,11 +40,19 @@ export function PositionsTable({ loading: parentLoading = false }: PositionsTabl
   const fetchPositions = usePositionsStore((state) => state.fetchPositions);
   const isLoading = usePositionsStore((state) => state.isLoading);
   const closePosition = usePositionsStore((state) => state.closePosition);
+  const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
   
   const loading = parentLoading || isLoading;
   
   const [closingPosition, setClosingPosition] = useState<Position | null>(null);
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null); // Track which position is closing
+  const subscribedPositionSymbolsRef = useRef<string[]>([]);
+  const positionSymbolsKey = useMemo(() => {
+    const uniqueSymbols = Array.from(
+      new Set(positions.map((position) => position.instrumentToken || position.symbol))
+    );
+    return uniqueSymbols.sort().join(',');
+  }, [positions]);
 
   useEffect(() => {
     fetchPositions();
@@ -50,6 +60,43 @@ export function PositionsTable({ loading: parentLoading = false }: PositionsTabl
     const interval = setInterval(() => fetchPositions(true), 30000);
     return () => clearInterval(interval);
   }, [fetchPositions]);
+
+  useEffect(() => {
+    const symbols = positionSymbolsKey ? positionSymbolsKey.split(',') : [];
+    const previousSymbols = subscribedPositionSymbolsRef.current;
+
+    const toSubscribe = symbols.filter((symbol) => !previousSymbols.includes(symbol));
+    const toUnsubscribe = previousSymbols.filter((symbol) => !symbols.includes(symbol));
+
+    if (toSubscribe.length > 0) {
+      fetch('/api/v1/market/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: toSubscribe }),
+      }).catch((error) => console.error('Failed to subscribe position symbols:', error));
+    }
+
+    if (toUnsubscribe.length > 0) {
+      fetch('/api/v1/market/subscribe', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: toUnsubscribe }),
+      }).catch((error) => console.error('Failed to unsubscribe position symbols:', error));
+    }
+
+    subscribedPositionSymbolsRef.current = symbols;
+  }, [positionSymbolsKey]);
+
+  useEffect(() => {
+    return () => {
+      if (subscribedPositionSymbolsRef.current.length === 0) return;
+      fetch('/api/v1/market/subscribe', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: subscribedPositionSymbolsRef.current }),
+      }).catch((error) => console.error('Failed to unsubscribe position symbols on unmount:', error));
+    };
+  }, []);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -59,20 +106,24 @@ export function PositionsTable({ loading: parentLoading = false }: PositionsTabl
     }).format(value);
   };
 
-  const calculatePnL = (position: Position) => {
-    // Don't calculate if no current price yet
-    if (position.currentPrice === 0) return 0;
-    
-    return position.side === 'BUY'
-      ? (position.currentPrice - position.entryPrice) * position.quantity
-      : (position.entryPrice - position.currentPrice) * position.quantity;
+  const getLivePrice = (position: Position) => {
+    const key = toInstrumentKey(position.instrumentToken || position.symbol);
+    return quotesByInstrument[key]?.price ?? 0;
   };
 
-  // Use the store's calculated P&L for display
+  const hasLivePrice = (position: Position) => getLivePrice(position) > 0;
+
+  const calculatePnL = (position: Position, currentPrice: number) => {
+    if (currentPrice === 0) return 0;
+
+    return position.side === 'BUY'
+      ? (currentPrice - position.entryPrice) * position.quantity
+      : (position.entryPrice - currentPrice) * position.quantity;
+  };
+
   const getPositionPnL = (position: Position) => {
-    // If currentPrice is 0, don't show P&L yet
-    if (position.currentPrice === 0) return 0;
-    return position.currentPnL || calculatePnL(position);
+    const livePrice = getLivePrice(position);
+    return calculatePnL(position, livePrice);
   };
 
 
@@ -132,6 +183,8 @@ if (!hasFetched) {
               {/* Mobile Card View */}
               <div className="sm:hidden space-y-3">
                 {positions.map((position) => {
+                  const livePrice = getLivePrice(position);
+                  const hasQuote = hasLivePrice(position);
                   const pnl = getPositionPnL(position);
                   const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
 
@@ -167,16 +220,22 @@ if (!hasFetched) {
                         </div>
                         <div>
                           <p className="text-muted-foreground text-xs">Current</p>
-                          <p className="font-medium">{formatCurrency(position.currentPrice)}</p>
+                          <p className="font-medium">{hasQuote ? formatCurrency(livePrice) : '--'}</p>
                         </div>
                         <div className="col-span-2">
                           <p className="text-muted-foreground text-xs">P&L</p>
                           <div className={cn(
                             'font-semibold flex items-center gap-2',
-                            pnl >= 0 ? 'text-profit' : 'text-loss'
+                            hasQuote ? (pnl >= 0 ? 'text-profit' : 'text-loss') : 'text-muted-foreground'
                           )}>
-                            <span>{pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}</span>
-                            <span className="text-xs font-normal">({pnl >= 0 ? '+' : ''}{pnlPercent}%)</span>
+                            {hasQuote ? (
+                              <>
+                                <span>{pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}</span>
+                                <span className="text-xs font-normal">({pnl >= 0 ? '+' : ''}{pnlPercent}%)</span>
+                              </>
+                            ) : (
+                              <span>--</span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -214,6 +273,8 @@ if (!hasFetched) {
                   </TableHeader>
                   <TableBody>
                     {positions.map((position) => {
+                      const livePrice = getLivePrice(position);
+                      const hasQuote = hasLivePrice(position);
                       const pnl = getPositionPnL(position);
                       const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
 
@@ -276,18 +337,22 @@ if (!hasFetched) {
                             {formatCurrency(position.entryPrice)}
                           </TableCell>
                           <TableCell className="text-right text-foreground">
-                            {formatCurrency(position.currentPrice)}
+                            {hasQuote ? formatCurrency(livePrice) : '--'}
                           </TableCell>
                           <TableCell className={cn(
                             'text-right font-semibold',
-                            pnl >= 0 ? 'text-profit' : 'text-loss'
+                            hasQuote ? (pnl >= 0 ? 'text-profit' : 'text-loss') : 'text-muted-foreground'
                           )}>
-                            <div className="animate-pulse-glow">
-                              {pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}
-                              <p className="text-xs font-normal">
-                                ({pnl >= 0 ? '+' : ''}{pnlPercent}%)
-                              </p>
-                            </div>
+                            {hasQuote ? (
+                              <div className="animate-pulse-glow">
+                                {pnl >= 0 ? '+' : ''}{formatCurrency(pnl)}
+                                <p className="text-xs font-normal">
+                                  ({pnl >= 0 ? '+' : ''}{pnlPercent}%)
+                                </p>
+                              </div>
+                            ) : (
+                              <span>--</span>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             <Button
@@ -325,9 +390,13 @@ if (!hasFetched) {
                 <span>Current P&L:</span>
                 <span className={cn(
                   "font-semibold",
-                  closingPosition && getPositionPnL(closingPosition) >= 0 ? "text-trade-buy" : "text-trade-sell"
+                  closingPosition && hasLivePrice(closingPosition)
+                    ? (getPositionPnL(closingPosition) >= 0 ? "text-trade-buy" : "text-trade-sell")
+                    : "text-muted-foreground"
                 )}>
-                  {closingPosition && formatCurrency(getPositionPnL(closingPosition))}
+                  {closingPosition && hasLivePrice(closingPosition)
+                    ? formatCurrency(getPositionPnL(closingPosition))
+                    : '--'}
                 </span>
               </div>
             </div>

@@ -9,6 +9,7 @@ import { tickBus } from "@/lib/trading/tick-bus";
 import { UpstoxAdapter } from "@/lib/integrations/upstox/upstox-adapter";
 import "@/lib/trading/init-realtime"; // Auto-wire TickBus subscriptions
 import { marketFeedSupervisor } from "@/lib/trading/market-feed-supervisor";
+import { toInstrumentKey } from "@/lib/market/symbol-normalization";
 
 // ═══════════════════════════════════════════════════════════
 // 🛠️ SINGLETON PATTERN: Global declaration for Next.js hot reload
@@ -18,7 +19,9 @@ declare global {
 }
 
 interface Quote {
+    instrumentKey: string;
     symbol: string;
+    key?: string; // deprecated alias for transition
     price: number;
     close?: number; // Previous Close for Change Calculation
     timestamp?: number; // Unix timestamp in milliseconds from Upstox ltt field
@@ -31,6 +34,7 @@ class RealTimeMarketService extends EventEmitter {
     
     private ws: UpstoxWebSocket;
     private prices: Map<string, Quote> = new Map();
+    private quotesByInstrument: Map<string, Quote> = new Map();
     private subscribers: Map<string, number> = new Map();
     private initialized: boolean = false;
     private isInitializing: boolean = false; // Guard against concurrent initialization
@@ -39,6 +43,39 @@ class RealTimeMarketService extends EventEmitter {
     private isinMap: Map<string, string> = new Map(); // Trading Symbol -> ISIN
     private reverseIsinMap: Map<string, string> = new Map(); // ISIN -> Trading Symbol
     private adapter: UpstoxAdapter | null = null; // Broker adapter
+    private snapshotWarmupPromise: Promise<void> | null = null;
+
+    private normalizeSymbolKey(value: string): string {
+        return value.replace(/\s+/g, "").toUpperCase();
+    }
+
+    private canonicalizeSymbol(raw: string): string {
+        const trimmed = String(raw || "").trim();
+        const normalized = this.normalizeSymbolKey(trimmed);
+        const indexAliases: Record<string, string> = {
+            NIFTY: "NIFTY 50",
+            NIFTY50: "NIFTY 50",
+            NIFTY_50: "NIFTY 50",
+            BANKNIFTY: "NIFTY BANK",
+            NIFTYBANK: "NIFTY BANK",
+            FINNIFTY: "NIFTY FIN SERVICE",
+            NIFTYFINSERVICE: "NIFTY FIN SERVICE",
+        };
+
+        return indexAliases[normalized] || trimmed.toUpperCase();
+    }
+
+    private resolveSymbolFromFeedKey(feedKey: string): string {
+        const raw = String(feedKey || "").trim();
+        if (!raw) return "";
+
+        const rhs = raw.includes("|") ? (raw.split("|")[1] || raw) : raw;
+        const fromIsin =
+            this.reverseIsinMap.get(rhs) ||
+            this.reverseIsinMap.get(raw);
+
+        return this.canonicalizeSymbol(fromIsin || rhs || raw);
+    }
 
     // ═══════════════════════════════════════════════════════════
     // 🛠️ PRIVATE CONSTRUCTOR: Prevent direct instantiation
@@ -130,27 +167,33 @@ class RealTimeMarketService extends EventEmitter {
      * Resolve a user-facing symbol into the feed key used internally.
      */
     private resolveFeedKey(symbol: string): string {
-        const pureSymbol = symbol.includes("|") ? symbol.split("|")[1] : symbol;
+        const pureSymbol = symbol.includes("|") ? (symbol.split("|")[1] || symbol) : symbol;
+        const canonicalSymbol = this.canonicalizeSymbol(pureSymbol);
 
         const isIndex =
-            pureSymbol.includes('NIFTY') ||
-            pureSymbol.includes('SENSEX') ||
-            pureSymbol.includes('BANKEX');
+            canonicalSymbol.includes('NIFTY') ||
+            canonicalSymbol.includes('SENSEX') ||
+            canonicalSymbol.includes('BANKEX');
 
         let prefix = this.instrumentPrefix;
-        let finalSymbol = pureSymbol;
+        let finalSymbol = canonicalSymbol;
 
         if (isIndex) {
             prefix = "NSE_INDEX|";
-            finalSymbol = pureSymbol
+            finalSymbol = canonicalSymbol
                 .toLowerCase()
                 .split(' ')
                 .map(word => word.charAt(0).toUpperCase() + word.slice(1))
                 .join(' ');
         }
 
-        const fullSymbolKey = symbol.includes("|") ? symbol : `${prefix}${finalSymbol}`;
-        const isinKey = this.isinMap.get(pureSymbol) || this.isinMap.get(fullSymbolKey);
+        const fullSymbolKey = symbol.includes("|")
+            ? `${prefix}${finalSymbol}`
+            : `${prefix}${finalSymbol}`;
+        const isinKey =
+            this.isinMap.get(pureSymbol) ||
+            this.isinMap.get(canonicalSymbol) ||
+            this.isinMap.get(fullSymbolKey);
 
         return isinKey || fullSymbolKey;
     }
@@ -218,51 +261,43 @@ class RealTimeMarketService extends EventEmitter {
      */
     private async seedSnapshotPrices(instrumentKeys: string[]): Promise<void> {
         try {
-            // ─────────────────────────────────────────────────────────────────
-            // 🛠️ ISIN MAPPING (Required for REST SNAPSHOT)
-            // WebSocket uses "NSE_EQ|RELIANCE"
-            // REST uses "NSE_EQ|INE002A01018"
-            // We map known symbols here for verification. 
-            // In production, fetch this from DB/Instruments API.
-            // ─────────────────────────────────────────────────────────────────
-            // ─────────────────────────────────────────────────────────────────
-            const mappedKeys: string[] = [];
-
-            instrumentKeys.forEach(key => {
-                // key is likely an ISIN key based on subscribe()
-                // Just use it directly
-                mappedKeys.push(key);
-            });
-
+            const mappedKeys = Array.from(
+                new Set(instrumentKeys.map((key) => String(key || "").trim()).filter(Boolean))
+            );
             if (mappedKeys.length === 0) return;
 
-            // Dynamic import to avoid circular dependencies
             const { UpstoxService } = await import("@/services/upstox.service");
-            const quotes = await UpstoxService.getSystemQuotes(mappedKeys);
+            const quotes = await UpstoxService.getSystemQuoteDetails(mappedKeys);
+            const now = Date.now();
 
-            for (const [isinKey, price] of Object.entries(quotes)) {
-                if (price > 0) {
-                    // Map back ISIN -> Symbol (e.g. NSE_EQ|INE... -> NSE_EQ|RELIANCE)
-                    // Map back ISIN -> Symbol
-                    const originalKey = isinKey;
-                    const pureIsin = isinKey.split("|")[1] || isinKey;
-                    const tradingSymbol = this.reverseIsinMap.get(pureIsin) || pureIsin;
-                    
-                    const pureSymbol = tradingSymbol.split("|")[1] || tradingSymbol;
-                    
-                    const quote: Quote = {
-                        symbol: pureSymbol,
-                        price: Number(price),
-                        lastUpdated: new Date()
-                    };
-                    this.prices.set(pureSymbol, quote);
-                    this.prices.set(originalKey, quote);
-                    
-                    // Emit tick to populate UI immediately
-                    this.emit('tick', quote);
-                }
+            for (const [feedKey, detail] of Object.entries(quotes)) {
+                const price = Number(detail?.lastPrice);
+                if (!Number.isFinite(price) || price <= 0) continue;
+
+                const closePrice = Number(detail?.closePrice);
+                const canonicalSymbol = this.resolveSymbolFromFeedKey(feedKey);
+                if (!canonicalSymbol) continue;
+                const instrumentKey = toInstrumentKey(feedKey);
+
+                const quote: Quote = {
+                    instrumentKey,
+                    symbol: canonicalSymbol,
+                    key: instrumentKey,
+                    price,
+                    close: Number.isFinite(closePrice) && closePrice > 0 ? closePrice : undefined,
+                    timestamp: now,
+                    lastUpdated: new Date(now),
+                };
+
+                this.prices.set(canonicalSymbol, quote);
+                this.prices.set(instrumentKey, quote);
+                this.quotesByInstrument.set(instrumentKey, quote);
             }
-            logger.info({ count: Object.keys(quotes).length, mapped: mappedKeys.length }, "Snapshot prices seeded to cache (ISIN Mapped)");
+
+            logger.info(
+                { requested: mappedKeys.length, hydrated: Object.keys(quotes).length },
+                "Snapshot prices seeded from Upstox"
+            );
         } catch (error) {
             logger.error({ err: error }, "Failed to seed snapshot prices");
         }
@@ -301,16 +336,26 @@ class RealTimeMarketService extends EventEmitter {
         // 🚌 TICK BUS EMISSION: Distribute to all subscribers
         // ═══════════════════════════════════════════════════════════
         for (const tick of ticks) {
+            const canonicalSymbol = this.canonicalizeSymbol(tick.symbol || "");
+            const instrumentKey = toInstrumentKey(tick.instrumentKey || "");
+            if (!instrumentKey) continue;
             // Update local cache for legacy compatibility
             const quote: Quote = {
-                symbol: tick.symbol,
+                instrumentKey,
+                symbol: canonicalSymbol,
+                key: instrumentKey,
                 price: tick.price,
                 close: tick.close,
                 timestamp: tick.timestamp * 1000, // Convert back to ms for Quote interface
                 volume: tick.volume,
                 lastUpdated: new Date()
             };
-            this.prices.set(tick.symbol, quote);
+            if (tick.symbol) {
+                this.prices.set(tick.symbol, quote);
+            }
+            this.prices.set(quote.symbol, quote);
+            this.prices.set(instrumentKey, quote);
+            this.quotesByInstrument.set(instrumentKey, quote);
 
             // Emit to TickBus (new architecture)
             tickBus.emitTick(tick);
@@ -320,7 +365,7 @@ class RealTimeMarketService extends EventEmitter {
 
             // Sample logging (1% of ticks)
             if (process.env.DEBUG_MARKET === 'true' && Math.random() < 0.01) {
-                console.log(`📩 TICK: ${tick.symbol} @ ${tick.price} (${new Date(tick.timestamp * 1000).toISOString()})`);
+                console.log(`📩 TICK: ${instrumentKey} @ ${tick.price} (${new Date(tick.timestamp * 1000).toISOString()})`);
             }
         }
     }
@@ -329,7 +374,18 @@ class RealTimeMarketService extends EventEmitter {
      * Get latest quote from cache
      */
     getQuote(symbol: string): Quote | null {
-        return this.prices.get(symbol) || null;
+        const instrumentKey = toInstrumentKey(symbol);
+        const direct = this.prices.get(instrumentKey || symbol);
+        if (direct) return direct;
+
+        const canonical = this.canonicalizeSymbol(symbol);
+        const key = this.normalizeSymbolKey(canonical);
+        for (const quote of this.quotesByInstrument.values()) {
+            if (this.normalizeSymbolKey(quote.symbol) === key) {
+                return quote;
+            }
+        }
+        return null;
     }
 
     /**
@@ -348,10 +404,83 @@ class RealTimeMarketService extends EventEmitter {
      */
     getAllQuotes(): Record<string, number> {
         const quotes: Record<string, number> = {};
-        for (const [symbol, quote] of this.prices.entries()) {
-            quotes[symbol] = quote.price;
+        for (const [key, quote] of this.quotesByInstrument.entries()) {
+            quotes[key] = quote.price;
         }
         return quotes;
+    }
+
+    async warmSnapshotForSymbols(symbols: string[]): Promise<void> {
+        const uniqueSymbols = Array.from(
+            new Set(symbols.map((s) => String(s || "").trim()).filter(Boolean))
+        );
+        if (uniqueSymbols.length === 0) return;
+
+        if (!this.initialized) {
+            await this.initialize();
+        }
+
+        if (this.snapshotWarmupPromise) {
+            await this.snapshotWarmupPromise;
+        }
+
+        const missingSymbols = uniqueSymbols.filter((symbol) => {
+            const quote = this.getQuote(symbol);
+            return !(quote && Number.isFinite(quote.price) && quote.price > 0);
+        });
+
+        if (missingSymbols.length === 0) return;
+
+        const feedKeys = Array.from(
+            new Set(missingSymbols.map((symbol) => this.resolveFeedKey(symbol)))
+        );
+
+        const warmupTask = this.seedSnapshotPrices(feedKeys);
+        this.snapshotWarmupPromise = warmupTask;
+        try {
+            await warmupTask;
+        } finally {
+            if (this.snapshotWarmupPromise === warmupTask) {
+                this.snapshotWarmupPromise = null;
+            }
+        }
+    }
+
+    getSnapshotForSymbols(symbols: string[]): Array<{
+        instrumentKey: string;
+        symbol: string;
+        key: string;
+        price: number;
+        close?: number;
+        timestamp?: number;
+    }> {
+        const uniqueSymbols = Array.from(new Set(symbols.map((s) => String(s || "").trim()).filter(Boolean)));
+        const snapshot: Array<{
+            instrumentKey: string;
+            symbol: string;
+            key: string;
+            price: number;
+            close?: number;
+            timestamp?: number;
+        }> = [];
+        const seen = new Set<string>();
+
+        for (const symbol of uniqueSymbols) {
+            const quote = this.getQuote(symbol);
+            if (!quote || !Number.isFinite(quote.price) || quote.price <= 0) continue;
+            if (seen.has(quote.instrumentKey)) continue;
+            seen.add(quote.instrumentKey);
+            snapshot.push({
+                instrumentKey: quote.instrumentKey,
+                symbol: quote.symbol,
+                key: quote.instrumentKey,
+                price: quote.price,
+                close: quote.close,
+                timestamp: quote.timestamp,
+            });
+        }
+
+        return snapshot;
     }
 
     /**

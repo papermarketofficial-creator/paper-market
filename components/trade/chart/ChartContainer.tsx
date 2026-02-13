@@ -12,6 +12,7 @@ import { ChartOverlayLegend } from './ChartOverlayLegend';
 import { ChartTradingPanel } from './ChartTradingPanel';
 import { ChartLoadingIndicator } from './ChartLoadingIndicator';
 import { debounce } from '@/lib/utils/debounce';
+import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normalization';
 
 // Dynamic imports to avoid SSR issues with LWC
 const BaseChart = dynamic(() => import('./BaseChart').then(mod => mod.BaseChart), { ssr: false });
@@ -26,6 +27,7 @@ interface ChartContainerProps {
 
 
 export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
+  const canonicalSymbol = toCanonicalSymbol(symbol);
   const {
     isAnalysisMode,
     activeTool,
@@ -38,6 +40,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   const {
     historicalData,
     volumeData,
+    stocksBySymbol,
     initializeSimulation,
     startSimulation,
     stopSimulation,
@@ -46,6 +49,11 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     fetchMoreHistory,
     updateLiveCandle
   } = useMarketStore();
+  const resolvedInstrumentKey = useMemo(
+    () => toInstrumentKey(stocksBySymbol?.[canonicalSymbol]?.instrumentToken || canonicalSymbol),
+    [stocksBySymbol, canonicalSymbol]
+  );
+  const selectedQuote = useMarketStore((state) => state.quotesByInstrument[resolvedInstrumentKey]);
 
   const indicators = getIndicators(symbol);
   const drawings = getDrawings(symbol);
@@ -111,17 +119,51 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
       volumeData: [],
       isFetchingHistory: true,
       isInitialLoad: true,
-      simulatedSymbol: symbol,
+      simulatedSymbol: canonicalSymbol,
+      simulatedInstrumentKey: resolvedInstrumentKey,
       currentRequestId: (state.currentRequestId || 0) + 1,
     }));
 
     debouncedInitRef.current(symbol, timeframe, range);
-  }, [symbol, timeframe, range]);
+  }, [symbol, timeframe, range, canonicalSymbol, resolvedInstrumentKey]);
 
   // Live candle updates are applied by use-market-stream.ts.
   useEffect(() => {
     // No action needed here - SSE hook handles it automatically
   }, [symbol, updateLiveCandle]);
+
+  // Keep selected chart last price aligned with the same quote source used by watchlist/status bar.
+  useEffect(() => {
+    const quotePrice = Number(selectedQuote?.price);
+    if (!Number.isFinite(quotePrice) || quotePrice <= 0) return;
+
+    const state = useMarketStore.getState();
+    if (state.simulatedInstrumentKey !== resolvedInstrumentKey || state.historicalData.length === 0) return;
+
+    const lastIndex = state.historicalData.length - 1;
+    const lastCandle = state.historicalData[lastIndex];
+    if (!lastCandle) return;
+
+    const currentClose = Number(lastCandle.close);
+    if (Number.isFinite(currentClose) && Math.abs(currentClose - quotePrice) < 0.0001) {
+      if (Number(state.livePrice) !== quotePrice) {
+        useMarketStore.setState({ livePrice: quotePrice });
+      }
+      return;
+    }
+
+    const patchedCandle = {
+      ...lastCandle,
+      close: quotePrice,
+      high: Math.max(Number(lastCandle.high), quotePrice),
+      low: Math.min(Number(lastCandle.low), quotePrice),
+    };
+
+    useMarketStore.setState({
+      historicalData: [...state.historicalData.slice(0, -1), patchedCandle],
+      livePrice: quotePrice,
+    });
+  }, [resolvedInstrumentKey, selectedQuote?.price]);
   // ... (Indicators calc remains same) ...
   // Indictor logic omitted for brevity in replace, only targeting Data Fetching block?
   // No, I need to keep the file valid. I will target the top part only.
@@ -394,6 +436,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
                      {...chartProps} 
                      height={500}
                      symbol={symbol} 
+                     instrumentKey={resolvedInstrumentKey}
                      range={range} // ✅ Pass range for dynamic X-axis formatting
                      onChartReady={setChartApi}
                      onLoadMore={handleLoadMore}
@@ -410,7 +453,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
       {/* Analysis Overlay View */}
       {isAnalysisMode && (
         <AnalysisOverlay symbol={symbol}>
-          <BaseChart {...chartProps} height={window.innerHeight - 60} symbol={symbol} />
+          <BaseChart {...chartProps} height={window.innerHeight - 60} symbol={symbol} instrumentKey={resolvedInstrumentKey} />
         </AnalysisOverlay>
       )}
     </div>

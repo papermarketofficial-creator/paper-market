@@ -1,24 +1,56 @@
-import { Stock } from '@/types/equity.types';
-import { MarketSlice } from '../types';
-import { chartRegistry } from '@/lib/trading/chart-registry';
-import { candleEngine } from '@/lib/trading/candle-engine';
+import { MarketSlice, Quote } from "../types";
+import { chartRegistry } from "@/lib/trading/chart-registry";
+import { candleEngine } from "@/lib/trading/candle-engine";
+import { toCanonicalSymbol, toInstrumentKey, toSymbolKey } from "@/lib/market/symbol-normalization";
+
+const toFiniteNumber = (value: unknown): number =>
+  Number.isFinite(Number(value)) ? Number(value) : 0;
+
+function buildQuoteFromTick(
+  previousQuote: Quote | undefined,
+  tick: { instrumentKey: string; symbol?: string; price: number; close?: number; timestamp?: number }
+): Quote | null {
+  const instrumentKey = toInstrumentKey(tick.instrumentKey || tick.symbol || "");
+  const canonicalSymbol = toCanonicalSymbol(tick.symbol || "");
+  const price = toFiniteNumber(tick.price);
+  if (!instrumentKey || price <= 0) return null;
+
+  const previousClose =
+    previousQuote && Number.isFinite(previousQuote.close) && previousQuote.close > 0
+      ? previousQuote.close
+      : 0;
+
+  const incomingClose = toFiniteNumber(tick.close);
+  const close = incomingClose > 0 ? incomingClose : previousClose;
+  const change = close > 0 ? price - close : 0;
+  const changePercent = close > 0 ? (change / close) * 100 : 0;
+
+  return {
+    instrumentKey,
+    symbol: canonicalSymbol || previousQuote?.symbol,
+    key: instrumentKey,
+    price,
+    close,
+    change,
+    changePercent,
+    timestamp:
+      Number.isFinite(tick.timestamp) && Number(tick.timestamp) > 0
+        ? Number(tick.timestamp)
+        : Date.now(),
+  };
+}
 
 export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
-  // ─────────────────────────────────────────────────────────────────
-  // 📊 Initial State
-  // ─────────────────────────────────────────────────────────────────
   livePrice: 0,
+  quotesByInstrument: {},
+  quotesByKey: {},
   optionChain: null,
   isFetchingChain: false,
 
-  // ─────────────────────────────────────────────────────────────────
-  // ⚡ Live Update Actions
-  // ─────────────────────────────────────────────────────────────────
-  
   fetchOptionChain: async (symbol: string, expiry?: string) => {
     set({ isFetchingChain: true });
     try {
-      const expiryParam = expiry ? `&expiry=${expiry}` : '';
+      const expiryParam = expiry ? `&expiry=${expiry}` : "";
       const res = await fetch(`/api/v1/market/option-chain?symbol=${symbol}${expiryParam}`);
       const data = await res.json();
 
@@ -32,143 +64,153 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
     }
   },
 
-  updateStockPrice: (symbol: string, price: number, close?: number) => {
+  applyTick: (tick: { instrumentKey: string; symbol?: string; price: number; close?: number; timestamp?: number }) => {
     set((state: any) => {
-      // Update Watchlist/Stock List only
-      const updateStock = (stock: Stock) => {
-        if (stock.symbol !== symbol) return stock;
-        
-        let change = stock.change;
-        let changePercent = stock.changePercent;
-
-        if (close && close > 0) {
-           change = price - close;
-           changePercent = (change / close) * 100;
-        }
-        
-        return { ...stock, price, change, changePercent };
+      const seed = buildQuoteFromTick(undefined, tick);
+      if (!seed) return state;
+      const nextQuote = buildQuoteFromTick(state.quotesByInstrument[seed.instrumentKey], tick);
+      if (!nextQuote) return state;
+      const nextQuotesByInstrument = {
+        ...state.quotesByInstrument,
+        [nextQuote.instrumentKey]: nextQuote,
       };
-
-      const updateList = (list: Stock[]) => {
-        const index = list.findIndex((item) => item.symbol === symbol);
-        if (index < 0) return list;
-        const next = [...list];
-        next[index] = updateStock(list[index]);
-        return next;
-      };
-
-      // Debug only indices if needed
-      const isIndex = symbol.includes('NIFTY') || symbol.includes('SENSEX');
-      if (isIndex && process.env.NODE_ENV === 'development') {
-          console.log(`🆙 Updating Index ${symbol}: ${price} (${close})`);
-      }
-
-      let stocksBySymbol = state.stocksBySymbol;
-      if (stocksBySymbol?.[symbol]) {
-        stocksBySymbol = {
-          ...stocksBySymbol,
-          [symbol]: updateStock(stocksBySymbol[symbol]),
-        };
-      }
 
       return {
-        stocksBySymbol,
-        stocks: updateList(state.stocks),
-        futures: updateList(state.futures),
-        options: updateList(state.options),
-        indices: updateList(state.indices),
-        livePrice: price
+        quotesByInstrument: nextQuotesByInstrument,
+        quotesByKey: nextQuotesByInstrument,
+        livePrice: nextQuote.price,
       };
     });
   },
 
-  updateLiveCandle: (tick: { price: number; volume?: number; time: number }, symbol: string) => {
-    const { historicalData, volumeData, simulatedSymbol, activeInterval } = get();
-    
-    // Normalize symbols for comparison (remove exchange prefix if present)
-    const normalizeSymbol = (s: string) => {
-      if (!s) return '';
-      // Remove exchange prefix variants: NSE_EQ:ITC, NSE_EQ|ITC, etc.
-      return s.replace(/^[A-Z_]+[:|]/, '');
-    };
-    
-    const tickSymbol = normalizeSymbol(symbol);
-    const chartSymbol = normalizeSymbol(simulatedSymbol || '');
-    
-    // 🔥 HARD GUARD: Silently reject cross-symbol ticks
-    if (tickSymbol !== chartSymbol) {
+  hydrateQuotes: (
+    quotes: Array<{ instrumentKey: string; symbol?: string; price: number; close?: number; timestamp?: number }>
+  ) => {
+    if (!Array.isArray(quotes) || quotes.length === 0) return;
+
+    set((state: any) => {
+      const nextByKey: Record<string, Quote> = { ...state.quotesByInstrument };
+      let latestPrice = state.livePrice;
+
+      for (const tick of quotes) {
+        const seed = buildQuoteFromTick(undefined, tick);
+        if (!seed) continue;
+        const nextQuote = buildQuoteFromTick(nextByKey[seed.instrumentKey], tick);
+        if (!nextQuote) continue;
+        nextByKey[nextQuote.instrumentKey] = nextQuote;
+        latestPrice = nextQuote.price;
+      }
+
+      return {
+        quotesByInstrument: nextByKey,
+        quotesByKey: nextByKey,
+        livePrice: latestPrice,
+      };
+    });
+  },
+
+  selectQuote: (instrumentKeyOrSymbol: string) => {
+    const instrumentKey = toInstrumentKey(instrumentKeyOrSymbol);
+    if (instrumentKey) {
+      const byInstrument = get().quotesByInstrument[instrumentKey];
+      if (byInstrument) return byInstrument;
+    }
+
+    const symbolKey = toSymbolKey(toCanonicalSymbol(instrumentKeyOrSymbol));
+    if (!symbolKey) return null;
+    const allQuotes = Object.values(get().quotesByInstrument) as Quote[];
+    return (
+      allQuotes.find((quote) => toSymbolKey(toCanonicalSymbol(quote.symbol || "")) === symbolKey) || null
+    );
+  },
+
+  selectPrice: (instrumentKeyOrSymbol: string) => {
+    const quote = get().selectQuote(instrumentKeyOrSymbol);
+    return quote?.price ?? 0;
+  },
+
+  // Backward-compatible wrapper. New SSE flow should call applyTick directly.
+  updateStockPrice: (symbol: string, price: number, close?: number) => {
+    get().applyTick({
+      instrumentKey: symbol,
+      symbol,
+      price,
+      close,
+      timestamp: Date.now(),
+    });
+  },
+
+  updateLiveCandle: (
+    tick: { price: number; volume?: number; time: number },
+    symbol: string,
+    instrumentKey?: string
+  ) => {
+    const { historicalData, simulatedSymbol, simulatedInstrumentKey, activeInterval } = get();
+
+    const normalizeForChart = (value: string) =>
+      toCanonicalSymbol(String(value || "").replace(/^[A-Z_]+[:|]/, ""));
+
+    const tickSymbol = normalizeForChart(symbol);
+    const chartSymbol = normalizeForChart(simulatedSymbol || "");
+    const tickKey = toInstrumentKey(instrumentKey || symbol);
+    const chartKey = toInstrumentKey(simulatedInstrumentKey || simulatedSymbol || "");
+
+    if (!chartKey || !tickKey || tickKey !== chartKey) {
+      const tickSymbolKey = toSymbolKey(tickSymbol);
+      const chartSymbolKey = toSymbolKey(chartSymbol);
+      if (!tickSymbolKey || !chartSymbolKey || tickSymbolKey !== chartSymbolKey) {
         return;
+      }
     }
 
     if (!historicalData || historicalData.length === 0) return;
 
-    // ═══════════════════════════════════════════════════════════
-    // 🏭 ONE WRITER RULE: Delegate to CandleEngine
-    // ═══════════════════════════════════════════════════════════
-    // Convert activeInterval to seconds
     const intervalMap: Record<string, number> = {
-        '1m': 60,
-        '5m': 300,
-        '15m': 900,
-        '30m': 1800,
-        '1h': 3600,
-        '1d': 86400
+      "1m": 60,
+      "5m": 300,
+      "15m": 900,
+      "30m": 1800,
+      "1h": 3600,
+      "1d": 86400,
     };
-    
+
     const intervalSeconds = intervalMap[activeInterval] || 60;
-    
-    // Process tick through CandleEngine (THE ONLY candle creator)
+
     const normalizedTick = {
-        symbol: chartSymbol,
-        price: tick.price,
-        volume: tick.volume || 0,
-        timestamp: tick.time, // Already in seconds
-        exchange: 'NSE' // Default exchange
+      instrumentKey: chartKey,
+      symbol: chartSymbol,
+      price: tick.price,
+      volume: tick.volume || 0,
+      timestamp: tick.time,
+      exchange: "NSE",
     };
-    
+
     const candleUpdate = candleEngine.processTick(normalizedTick, intervalSeconds);
-    
     if (!candleUpdate) {
-        // Stale tick or invalid - engine rejected it
-        return;
+      return;
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // ✅ IMMUTABLE STATE UPDATES: No mutations allowed
-    // ═══════════════════════════════════════════════════════════
-    if (candleUpdate.type === 'new') {
-        console.log('📝 NEW Candle:', candleUpdate.candle, 'Total candles:', historicalData.length + 1);
-        
-        // ✅ CORRECT: Immutable array update
-        set(state => ({
-            historicalData: [...state.historicalData, candleUpdate.candle],
-            livePrice: tick.price
-        }));
-        
-        // Trigger ChartController update
-        const controller = chartRegistry.get(chartSymbol);
-        if (controller) {
-          controller.updateCandle(candleUpdate.candle as any);
-        }
-        
-    } else {
-        // Update existing candle
-        // console.log('📈 UPDATE Candle:', candleUpdate.candle, 'Price:', tick.price);
-        
-        // ✅ CORRECT: Immutable array update (replace last element)
-        set(state => ({
-            historicalData: [
-                ...state.historicalData.slice(0, -1),
-                candleUpdate.candle
-            ],
-            livePrice: tick.price
-        }));
-        
-        // Trigger ChartController update
-        const controller = chartRegistry.get(chartSymbol);
-        if (controller) {
-          controller.updateCandle(candleUpdate.candle as any);
-        }
+    if (candleUpdate.type === "new") {
+      set((state: any) => ({
+        historicalData: [...state.historicalData, candleUpdate.candle],
+        livePrice: tick.price,
+      }));
+
+      const controller = chartRegistry.get(chartKey);
+      if (controller) {
+        controller.updateCandle(candleUpdate.candle as any);
+      }
+      return;
+    }
+
+    set((state: any) => ({
+      historicalData: [...state.historicalData.slice(0, -1), candleUpdate.candle],
+      livePrice: tick.price,
+    }));
+
+    const controller = chartRegistry.get(chartKey);
+    if (controller) {
+      controller.updateCandle(candleUpdate.candle as any);
     }
   },
 });

@@ -72,7 +72,7 @@ export class OrderService {
             }
 
             // Calculate required margin
-            const requiredMargin = MarginService.calculateRequiredMargin(payload, instrument);
+            const requiredMargin = await MarginService.calculateRequiredMargin(payload, instrument);
             logger.info({ userId, symbol: payload.symbol, requiredMargin }, "Margin calculated");
 
             // 🎯 PAPER TRADING: Simple balance check using wallet

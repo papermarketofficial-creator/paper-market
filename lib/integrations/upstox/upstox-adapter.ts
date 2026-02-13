@@ -58,6 +58,7 @@ export class UpstoxAdapter {
             const parts = key.split('|');
             const exchange = parts[0] || 'NSE';
             const isin = parts[1] || key;
+            const instrumentKey = key.replace(':', '|');
             
             // Resolve ISIN to trading symbol (e.g., INE002A01018 → RELIANCE)
             const symbol = this.isinMap.get(isin) || isin;
@@ -75,6 +76,7 @@ export class UpstoxAdapter {
             }
             
             const tick: NormalizedTick = {
+                instrumentKey,
                 symbol,
                 price: ltpc.ltp,
                 volume: ltpc.vol || 0,

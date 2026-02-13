@@ -16,10 +16,20 @@ export interface WatchlistInstrument {
   instrumentToken: string;
   tradingsymbol: string;
   name: string;
-  lastPrice: string;
   lotSize: number;
   exchange: string;
   segment: string;
+}
+
+export interface Quote {
+  instrumentKey: string;
+  symbol?: string;
+  key?: string; // deprecated: use instrumentKey
+  price: number;
+  close: number;
+  change: number;
+  changePercent: number;
+  timestamp: number;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -56,6 +66,7 @@ export interface ChartDataSlice {
   historicalData: any[]; // CandlestickData[]
   volumeData: any[];    // HistogramData[]
   simulatedSymbol: string | null;
+  simulatedInstrumentKey: string | null;
   intervalId: NodeJS.Timeout | null;
   activeInterval: string;
   isFetchingHistory: boolean;
@@ -73,12 +84,34 @@ export interface ChartDataSlice {
 export interface LiveUpdatesSlice {
   // State
   livePrice: number;
+  quotesByInstrument: Record<string, Quote>;
+  quotesByKey: Record<string, Quote>; // deprecated alias to avoid transition breakage
   optionChain: { underlying: string; underlyingPrice?: number; expiry?: string; strikes: any[] } | null;
   isFetchingChain: boolean;
 
   // Actions
+  applyTick: (tick: {
+    instrumentKey: string;
+    symbol?: string;
+    price: number;
+    close?: number;
+    timestamp?: number;
+  }) => void;
+  hydrateQuotes: (quotes: Array<{
+    instrumentKey: string;
+    symbol?: string;
+    price: number;
+    close?: number;
+    timestamp?: number;
+  }>) => void;
+  selectQuote: (instrumentKeyOrSymbol: string) => Quote | null;
+  selectPrice: (instrumentKeyOrSymbol: string) => number;
   updateStockPrice: (symbol: string, price: number, close?: number) => void;
-  updateLiveCandle: (tick: { price: number; volume?: number; time: number }, symbol: string) => void;
+  updateLiveCandle: (
+    tick: { price: number; volume?: number; time: number },
+    symbol: string,
+    instrumentKey?: string
+  ) => void;
   fetchOptionChain: (symbol: string, expiry?: string) => Promise<void>;
 }
 

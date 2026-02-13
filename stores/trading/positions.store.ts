@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { Position } from '@/types/position.types';
 import { useTradeExecutionStore } from './tradeExecution.store';
 import { toast } from 'sonner';
+import { toCanonicalSymbol, toSymbolKey } from '@/lib/market/symbol-normalization';
 
 interface PositionsState {
   positions: Position[];
@@ -47,25 +48,9 @@ export const usePositionsStore = create<PositionsState>((set, get) => ({
       const data = await res.json();
 
       if (data.success) {
-        const currentPositions = get().positions;
-        
-        // Preserve live SSE prices as source of truth.
-        // Polling is only for structural hydration/recovery.
-        const mergedPositions = (data.data || []).map((newPos: Position) => {
-          const existingPos = currentPositions.find(p => p.id === newPos.id);
-
-          if (existingPos && existingPos.currentPrice > 0) {
-            return {
-              ...newPos,
-              currentPrice: existingPos.currentPrice,
-              currentPnL: existingPos.currentPnL
-            };
-          }
-          
-          return newPos;
-        });
-        
-        set({ positions: mergedPositions });
+        // Polling refresh is for structural position fields only.
+        // Live current price is rendered from market quote SSE state.
+        set({ positions: data.data || [] });
       } else {
         set({ error: data.error || 'Failed to fetch positions' });
       }
@@ -92,9 +77,14 @@ export const usePositionsStore = create<PositionsState>((set, get) => ({
   },
 
   updateAllPositionsPrices: (priceUpdates) => {
+    const normalizedUpdates: Record<string, number> = {};
+    for (const [symbol, price] of Object.entries(priceUpdates)) {
+      normalizedUpdates[toSymbolKey(toCanonicalSymbol(symbol))] = price;
+    }
+
     set((state) => ({
       positions: state.positions.map((position) => {
-        const newPrice = priceUpdates[position.symbol];
+        const newPrice = normalizedUpdates[toSymbolKey(toCanonicalSymbol(position.symbol))];
         if (newPrice !== undefined && newPrice !== position.currentPrice) {
           const pnl = calculatePnL(position, newPrice);
           return { ...position, currentPrice: newPrice, currentPnL: pnl };

@@ -34,7 +34,6 @@ export const instruments = pgTable('instruments', {
     exchangeToken: text('exchangeToken').notNull(),
     tradingsymbol: text('tradingsymbol').notNull(),
     name: text('name').notNull(),
-    lastPrice: numeric('lastPrice', { precision: 10, scale: 2 }).notNull().default('0'),
     expiry: timestamp('expiry'),
     strike: numeric('strike', { precision: 10, scale: 2 }),
     tickSize: numeric('tickSize', { precision: 8, scale: 4 }).notNull().default('0.05'),

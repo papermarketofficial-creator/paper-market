@@ -64,22 +64,37 @@ const { handlers, auth: nextAuth, signIn, signOut } = NextAuth({
             }
             return true;
         },
-        async jwt({ token, user, trigger, session }) {
-            // console.log("🔒 JWT Callback Triggered. Email:", token.email);
-            if (token.email) {
+        async jwt({ token, user }) {
+            // On initial sign-in, trust the resolved user id immediately.
+            if (user?.id) {
+                token.sub = user.id;
+                return token;
+            }
+
+            // For existing sessions, avoid DB hits unless id is missing.
+            if (token.sub) {
+                return token;
+            }
+
+            if (!token.email) {
+                return token;
+            }
+
+            try {
                 const [dbUser] = await db
-                    .select()
+                    .select({ id: users.id })
                     .from(users)
                     .where(eq(users.email, token.email))
                     .limit(1);
-                
-                if (dbUser) {
-                    // console.log("✅ Found DB User for JWT. ID:", dbUser.id);
+
+                if (dbUser?.id) {
                     token.sub = dbUser.id;
-                } else {
-                    console.log("❌ No DB User found for email:", token.email);
                 }
+            } catch (error) {
+                // Fail-soft: keep existing token data so transient DB issues don't drop session.
+                console.warn("JWT DB lookup failed, keeping current token:", error);
             }
+
             return token;
         },
     },

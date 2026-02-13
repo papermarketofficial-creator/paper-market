@@ -118,7 +118,7 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
         const results = data.data.map((item: any) => ({
           symbol: item.tradingsymbol, // Fixed: Database returns tradingsymbol
           name: item.name,
-          price: parseFloat(item.lastPrice),
+          price: Number(item.price ?? item.lastPrice ?? 0),
           change: 0,
           changePercent: 0,
           volume: 0,

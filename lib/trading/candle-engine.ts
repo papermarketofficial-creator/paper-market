@@ -9,7 +9,8 @@ interface CandleContext {
     currentCandle: CandlestickData | null;
     lastBucket: number;      // Last time bucket processed
     interval: number;        // Interval in seconds (60, 300, 900, etc.)
-    symbol: string;
+    instrumentKey: string;
+    symbol?: string;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -18,7 +19,8 @@ interface CandleContext {
 export interface CandleUpdate {
     type: 'new' | 'update';
     candle: CandlestickData;
-    symbol: string;
+    instrumentKey: string;
+    symbol?: string;
     interval: number;
 }
 
@@ -47,21 +49,21 @@ export class CandleEngine extends EventEmitter {
     /**
      * Reset candle context for a symbol (used when switching timeframes)
      */
-    reset(symbol: string, interval?: number) {
+    reset(instrumentKey: string, interval?: number) {
         if (interval) {
-            const key = `${symbol}:${interval}`;
+            const key = `${instrumentKey}:${interval}`;
             this.contexts.delete(key);
             if (process.env.DEBUG_MARKET === 'true') console.log(`🔄 Reset candle context: ${key}`);
         } else {
             // Reset all intervals for this symbol
             let count = 0;
             for (const key of this.contexts.keys()) {
-                if (key.startsWith(`${symbol}:`)) {
+                if (key.startsWith(`${instrumentKey}:`)) {
                     this.contexts.delete(key);
                     count++;
                 }
             }
-            if (process.env.DEBUG_MARKET === 'true') console.log(`🔄 Reset ${count} candle contexts for ${symbol}`);
+            if (process.env.DEBUG_MARKET === 'true') console.log(`🔄 Reset ${count} candle contexts for ${instrumentKey}`);
         }
     }
 
@@ -72,7 +74,10 @@ export class CandleEngine extends EventEmitter {
         // ═══════════════════════════════════════════════════════════
         // 🛠️ CONTEXT ISOLATION: Per-symbol+interval
         // ═══════════════════════════════════════════════════════════
-        const key = `${tick.symbol}:${interval}`;
+        const identityKey = tick.instrumentKey || tick.symbol || '';
+        if (!identityKey) return null;
+        const displaySymbol = tick.symbol || identityKey;
+        const key = `${identityKey}:${interval}`;
         let ctx = this.contexts.get(key);
 
         // ═══════════════════════════════════════════════════════════
@@ -89,7 +94,7 @@ export class CandleEngine extends EventEmitter {
              
              if (tick.timestamp < candleStartTime) {
                  if (process.env.DEBUG_MARKET === 'true') {
-                     console.warn(`⚠️ Stale tick ignored: ${tick.symbol} @ ${tick.timestamp} < ${candleStartTime}`);
+                     console.warn(`⚠️ Stale tick ignored: ${displaySymbol} @ ${tick.timestamp} < ${candleStartTime}`);
                  }
                  return null;
              }
@@ -100,6 +105,7 @@ export class CandleEngine extends EventEmitter {
                 currentCandle: null,
                 lastBucket: 0,
                 interval,
+                instrumentKey: identityKey,
                 symbol: tick.symbol
             };
             this.contexts.set(key, ctx);
@@ -133,7 +139,7 @@ export class CandleEngine extends EventEmitter {
             // Check if gap is too large (market was closed)
             const timeDiff = tickTimeSeconds - (ctx.lastBucket * interval);
             if (timeDiff >= MAX_GAP) {
-                if (process.env.DEBUG_MARKET === 'true') console.log(`⚠️ Large gap detected for ${tick.symbol}: ${timeDiff}s (market was closed)`);
+                if (process.env.DEBUG_MARKET === 'true') console.log(`⚠️ Large gap detected for ${displaySymbol}: ${timeDiff}s (market was closed)`);
             }
             isNewCandle = true;
         }
@@ -155,12 +161,13 @@ export class CandleEngine extends EventEmitter {
 
             // Sample logging (10% of new candles)
             if (process.env.DEBUG_MARKET === 'true' && Math.random() < 0.1) {
-                console.log(`✅ NEW Candle: ${tick.symbol} @ ${new Date(alignedTime * 1000).toISOString()}`);
+                console.log(`✅ NEW Candle: ${displaySymbol} @ ${new Date(alignedTime * 1000).toISOString()}`);
             }
 
             const result: CandleUpdate = {
                 type: 'new',
                 candle: newCandle,
+                instrumentKey: identityKey,
                 symbol: tick.symbol,
                 interval
             };
@@ -184,12 +191,13 @@ export class CandleEngine extends EventEmitter {
 
             // Sample logging (1% of updates to avoid spam)
             if (process.env.DEBUG_MARKET === 'true' && Math.random() < 0.01) {
-                console.log(`📈 UPDATE: ${tick.symbol} O${updated.open} H${updated.high} L${updated.low} C${updated.close}`);
+                console.log(`📈 UPDATE: ${displaySymbol} O${updated.open} H${updated.high} L${updated.low} C${updated.close}`);
             }
 
             const result: CandleUpdate = {
                 type: 'update',
                 candle: updated,
+                instrumentKey: identityKey,
                 symbol: tick.symbol,
                 interval
             };
@@ -204,8 +212,8 @@ export class CandleEngine extends EventEmitter {
     /**
      * Get current candle for a symbol+interval
      */
-    getCurrentCandle(symbol: string, interval: number = 60): CandlestickData | null {
-        const key = `${symbol}:${interval}`;
+    getCurrentCandle(instrumentKey: string, interval: number = 60): CandlestickData | null {
+        const key = `${instrumentKey}:${interval}`;
         const ctx = this.contexts.get(key);
         return ctx?.currentCandle || null;
     }

@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { instruments } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { eq } from "drizzle-orm";
+import { UpstoxService } from "@/services/upstox.service";
 
 interface PriceData {
     price: number;
@@ -31,13 +32,22 @@ class MarketSimulationService {
             const activeInstruments = await db
                 .select({
                     tradingsymbol: instruments.tradingsymbol,
-                    lastPrice: instruments.lastPrice,
+                    instrumentToken: instruments.instrumentToken,
                 })
                 .from(instruments)
                 .where(eq(instruments.isActive, true));
 
+            const tokens = activeInstruments.map((instrument) => instrument.instrumentToken);
+            const quoteMap = await UpstoxService.getSystemQuotes(tokens);
+
             for (const instrument of activeInstruments) {
-                const price = parseFloat(instrument.lastPrice);
+                const direct = Number(quoteMap[instrument.instrumentToken]);
+                const alt = Number(quoteMap[instrument.instrumentToken.replace("|", ":")]);
+                const price = Number.isFinite(direct) && direct > 0
+                    ? direct
+                    : Number.isFinite(alt) && alt > 0
+                        ? alt
+                        : 0;
                 if (!isNaN(price) && price > 0) {
                     this.prices.set(instrument.tradingsymbol, {
                         price,

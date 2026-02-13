@@ -11,7 +11,8 @@ declare global {
 }
 
 export interface NormalizedTick {
-    symbol: string;          // Trading symbol (e.g., "RELIANCE")
+    instrumentKey: string;   // Canonical instrument identity (e.g., "NSE_EQ|INE002A01018")
+    symbol?: string;         // Display symbol only (e.g., "RELIANCE")
     price: number;           // Last traded price
     volume: number;          // Volume (if available)
     timestamp: number;       // Unix timestamp in SECONDS (not milliseconds)
@@ -108,12 +109,13 @@ class TickBus {
         this.tickCount++;
         
         // Track per-symbol counts
-        const count = this.symbolCounts.get(tick.symbol) || 0;
-        this.symbolCounts.set(tick.symbol, count + 1);
+        const identityKey = tick.instrumentKey || tick.symbol || "__unknown__";
+        const count = this.symbolCounts.get(identityKey) || 0;
+        this.symbolCounts.set(identityKey, count + 1);
 
         // 🔥 BACKPRESSURE: Keep only latest tick per symbol
         // During volatility spikes (20x tick rate), this prevents memory explosion
-        this.latestTicks.set(tick.symbol, tick);
+        this.latestTicks.set(identityKey, tick);
 
         if (this.processing) return; // Drop old ticks, only emit latest
 

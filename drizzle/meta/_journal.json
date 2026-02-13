@@ -36,6 +36,27 @@
       "when": 1770710405111,
       "tag": "0004_cuddly_blink",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1771012800000,
+      "tag": "0005_market_snapshot_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1771199200000,
+      "tag": "0006_drop_instrument_price_columns",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1770906055873,
+      "tag": "0007_spicy_wolfsbane",
+      "breakpoints": true
     }
   ]
 }

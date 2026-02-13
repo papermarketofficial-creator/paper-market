@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { instruments, InstrumentType } from "@/lib/db/schema";
-import { ilike, or, and, eq, desc, inArray } from "drizzle-orm";
+import { ilike, or, and, eq, desc, inArray, sql } from "drizzle-orm";
 import { InstrumentSearchInput } from "@/lib/validation/search";
 import { TRADING_UNIVERSE } from "@/lib/trading-universe";
 
@@ -40,7 +40,7 @@ export class SearchService {
                 strike: instruments.strike,
                 lotSize: instruments.lotSize,
                 exchange: instruments.exchange,
-                lastPrice: instruments.lastPrice
+                lastPrice: sql<string>`'0'`
             })
             .from(instruments)
             .where(and(...whereConditions))

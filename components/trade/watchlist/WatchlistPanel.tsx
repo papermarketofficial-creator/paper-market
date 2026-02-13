@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import { WatchlistItemMenu } from './WatchlistItemMenu';
 import { WatchlistSkeleton } from './WatchlistSkeleton';
 import { useWatchlists, useWatchlistInstruments, useCreateWatchlist } from '@/hooks/queries/use-watchlists';
+import { toCanonicalSymbol, toInstrumentKey, toSymbolKey } from '@/lib/market/symbol-normalization';
 
 interface WatchlistPanelProps {
   instruments: Stock[];
@@ -30,28 +31,44 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   const [isCreating, setIsCreating] = useState(false);
   const [newWatchlistName, setNewWatchlistName] = useState('');
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
+  const [preferredWatchlistId, setPreferredWatchlistId] = useState<string | null>(null);
   const lastAppliedQuerySnapshotRef = useRef<string>('');
+  const subscribedSymbolsRef = useRef<string[]>([]);
 
   // 🔥 NEW: TanStack Query hooks for data fetching
   const { data: watchlists = [], isLoading: isLoadingWatchlists } = useWatchlists();
   const createWatchlistMutation = useCreateWatchlist();
+
+  useEffect(() => {
+    const saved = typeof window !== 'undefined' ? localStorage.getItem('lastWatchlistId') : null;
+    if (saved) setPreferredWatchlistId(saved);
+  }, []);
   
   // Get active watchlist ID from Zustand (UI state only)
   const { activeWatchlistId, setActiveWatchlistId, prefetchInstrument, setStocks } = useMarketStore();
+  const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
+  const resolvedWatchlistId = useMemo(() => {
+    if (activeWatchlistId) return activeWatchlistId;
+    if (preferredWatchlistId) return preferredWatchlistId;
+    const defaultWatchlist = watchlists.find(w => w.isDefault) || watchlists[0];
+    return defaultWatchlist?.id ?? null;
+  }, [activeWatchlistId, preferredWatchlistId, watchlists]);
   
   // Set default watchlist on mount
   useEffect(() => {
-    if (!activeWatchlistId && watchlists.length > 0) {
-      const defaultWatchlist = watchlists.find(w => w.isDefault) || watchlists[0];
-      if (defaultWatchlist) {
-        setActiveWatchlistId(defaultWatchlist.id);
-      }
+    if (!activeWatchlistId && resolvedWatchlistId) {
+      setActiveWatchlistId(resolvedWatchlistId);
     }
-  }, [watchlists, activeWatchlistId, setActiveWatchlistId]);
+  }, [resolvedWatchlistId, activeWatchlistId, setActiveWatchlistId]);
+
+  useEffect(() => {
+    if (!resolvedWatchlistId) return;
+    localStorage.setItem('lastWatchlistId', resolvedWatchlistId);
+  }, [resolvedWatchlistId]);
   
   // Fetch instruments for active watchlist
-  const { data: queryInstruments = [], isLoading: isLoadingInstruments } = useWatchlistInstruments(activeWatchlistId);
-  
+  const { data: queryInstruments = [], isLoading: isLoadingInstruments } = useWatchlistInstruments(resolvedWatchlistId);
+
   // Sync query data to Zustand store (for SSE price updates)
   useEffect(() => {
     if (isLoadingInstruments || !queryInstruments) return;
@@ -59,7 +76,12 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
     // Only apply when query payload itself changed.
     // Do NOT compare against live store state; SSE updates would be overwritten.
     const querySnapshot = queryInstruments
-      .map(s => `${s.instrumentToken}:${Number(s.price || 0).toFixed(2)}`)
+      .map((s) => {
+        const price = Number(s.price || 0).toFixed(2);
+        const change = Number(s.change || 0).toFixed(2);
+        const changePercent = Number(s.changePercent || 0).toFixed(2);
+        return `${s.instrumentToken}:${price}:${change}:${changePercent}`;
+      })
       .sort()
       .join(',');
 
@@ -68,56 +90,65 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
     setStocks(queryInstruments);
     lastAppliedQuerySnapshotRef.current = querySnapshot;
   }, [queryInstruments, isLoadingInstruments, setStocks]);
-  
-  const activeWatchlist = watchlists.find(w => w.id === activeWatchlistId);
+
+  const activeWatchlist = watchlists.find(w => w.id === resolvedWatchlistId);
   const isFetchingWatchlistData = isLoadingWatchlists || isLoadingInstruments;
 
-  // Show all instruments (use props for live-updated prices from Zustand)
-  const localMatches = instruments;
+  // Render immediately from query data; switch to store-backed prices once available.
+  const localMatches = useMemo(() => {
+    if (instruments.length > 0) return instruments;
+    return queryInstruments;
+  }, [instruments, queryInstruments]);
+  const selectedSymbolKey = useMemo(
+    () => toSymbolKey(toCanonicalSymbol(selectedSymbol || "")),
+    [selectedSymbol]
+  );
   const watchlistSymbolsKey = useMemo(() => {
-    const uniqueSymbols = Array.from(new Set(instruments.map((stock) => stock.symbol)));
+    const uniqueSymbols = Array.from(
+      new Set(localMatches.map((stock) => stock.instrumentToken || stock.symbol))
+    );
     return uniqueSymbols.sort().join(',');
-  }, [instruments]);
+  }, [localMatches]);
 
   // ═══════════════════════════════════════════════════════════
   // 🔥 SUBSCRIBE TO ALL WATCHLIST STOCKS FOR REAL-TIME UPDATES
   // ═══════════════════════════════════════════════════════════
   useEffect(() => {
-    if (!watchlistSymbolsKey) return;
-    const symbols = watchlistSymbolsKey.split(',');
+    const symbols = watchlistSymbolsKey ? watchlistSymbolsKey.split(',') : [];
+    const previousSymbols = subscribedSymbolsRef.current;
 
-    console.log('Subscribing to', symbols.length, 'watchlist stocks:', symbols);
+    const toSubscribe = symbols.filter((symbol) => !previousSymbols.includes(symbol));
+    const toUnsubscribe = previousSymbols.filter((symbol) => !symbols.includes(symbol));
 
-    fetch('/api/v1/market/subscribe', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ symbols, action: 'subscribe' })
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const details = await res.text().catch(() => '');
-          throw new Error(`Subscribe failed (${res.status}) ${details}`);
-        }
-      })
-      .catch(err => console.error('Failed to subscribe to watchlist:', err));
+    if (toSubscribe.length > 0) {
+      fetch('/api/v1/market/subscribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: toSubscribe })
+      }).catch((err) => console.error('Failed to subscribe to watchlist:', err));
+    }
 
-    // Cleanup: Unsubscribe when watchlist changes or component unmounts
-    return () => {
-      console.log('Unsubscribing from', symbols.length, 'watchlist stocks');
+    if (toUnsubscribe.length > 0) {
       fetch('/api/v1/market/subscribe', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols })
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const details = await res.text().catch(() => '');
-            throw new Error(`Unsubscribe failed (${res.status}) ${details}`);
-          }
-        })
-        .catch(err => console.error('Failed to unsubscribe from watchlist:', err));
+        body: JSON.stringify({ symbols: toUnsubscribe })
+      }).catch((err) => console.error('Failed to unsubscribe from watchlist:', err));
+    }
+
+    subscribedSymbolsRef.current = symbols;
+  }, [watchlistSymbolsKey]);
+
+  useEffect(() => {
+    return () => {
+      if (subscribedSymbolsRef.current.length === 0) return;
+      fetch('/api/v1/market/subscribe', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbols: subscribedSymbolsRef.current })
+      }).catch((err) => console.error('Failed to unsubscribe from watchlist on unmount:', err));
     };
-  }, [activeWatchlistId, watchlistSymbolsKey]);
+  }, []);
   const handleCreateWatchlist = async () => {
     if (!newWatchlistName.trim()) return;
     
@@ -140,7 +171,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   // ═══════════════════════════════════════════════════════════
   // 💀 SKELETON LOADER: Show placeholders while fetching
   // ═══════════════════════════════════════════════════════════
-  if (isFetchingWatchlistData && instruments.length === 0) {
+  if (isFetchingWatchlistData && localMatches.length === 0) {
     return <WatchlistSkeleton />;
   }
 
@@ -228,10 +259,23 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
       <ScrollArea className="flex-1">
         <div className="flex flex-col">
           {localMatches.map((stock, i) => {
+            const quoteKey = toInstrumentKey(stock.instrumentToken || stock.symbol);
+            const quote = quotesByInstrument[quoteKey];
+            const livePrice = quote?.price ?? 0;
+            const liveChange = quote?.change ?? 0;
+            const liveChangePercent = quote?.changePercent ?? 0;
+            const hasQuote = Number.isFinite(livePrice) && livePrice > 0;
+            const renderedStock: Stock = {
+              ...stock,
+              price: livePrice,
+              change: liveChange,
+              changePercent: liveChangePercent,
+            };
+
             return (
             <div
               key={`${stock.symbol}-${i}`}
-              onClick={() => onSelect(stock)}
+              onClick={() => onSelect(renderedStock)}
               onMouseEnter={() => {
                 setHoveredSymbol(stock.symbol);
                 if (stock.instrumentToken) prefetchInstrument(stock.instrumentToken);
@@ -239,7 +283,8 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
               onMouseLeave={() => setHoveredSymbol(null)}
               className={cn(
                 "group flex items-center justify-between px-3 py-2.5 border-b border-border/40 cursor-pointer transition-colors hover:bg-accent/50",
-                selectedSymbol === stock.symbol && "bg-accent border-l-2 border-l-primary"
+                selectedSymbolKey === toSymbolKey(toCanonicalSymbol(stock.symbol)) &&
+                  "bg-accent border-l-2 border-l-primary"
               )}
             >
               {/* Left: Symbol + Name */}
@@ -255,12 +300,14 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
                   <div className="flex flex-col items-end gap-1">
                     <span 
                       className="text-sm font-mono font-semibold"
-                      style={{ color: stock.change >= 0 ? '#089981' : '#F23645' }}
+                      style={{ color: hasQuote ? (liveChange >= 0 ? '#089981' : '#F23645') : '#6b7280' }}
                     >
-                      {stock.price.toLocaleString('en-IN')}
+                      {hasQuote ? livePrice.toLocaleString('en-IN') : '--'}
                     </span>
                     <span className="text-xs font-mono text-gray-500">
-                      {stock.change >= 0 ? '+' : ''}{stock.change.toFixed(2)} ({stock.changePercent.toFixed(2)}%)
+                      {hasQuote
+                        ? `${liveChange >= 0 ? '+' : ''}${liveChange.toFixed(2)} (${liveChangePercent.toFixed(2)}%)`
+                        : '--'}
                     </span>
                   </div>
                 ) : (
@@ -271,7 +318,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
                       variant="outline"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onSelect(stock);
+                        onSelect(renderedStock);
                         (window as any).triggerTrade?.('BUY');
                       }}
                       className="h-7 px-3 text-xs font-bold border border-[#089981] text-[#089981] bg-transparent hover:bg-[#089981] hover:text-white transition-colors"
@@ -283,7 +330,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
                       variant="outline"
                       onClick={(e) => {
                         e.stopPropagation();
-                        onSelect(stock);
+                        onSelect(renderedStock);
                         (window as any).triggerTrade?.('SELL');
                       }}
                       className="h-7 px-3 text-xs font-bold border border-[#F23645] text-[#F23645] bg-transparent hover:bg-[#F23645] hover:text-white transition-colors"

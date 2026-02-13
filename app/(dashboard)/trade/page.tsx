@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { TradeLayout } from '@/components/trade/layout/TradeLayout';
 import { WatchlistPanel } from '@/components/trade/watchlist/WatchlistPanel';
 import { GlobalSearchModal } from '@/components/trade/search/GlobalSearchModal';
+import { PositionsTable } from '@/components/positions/PositionsTable';
+import { toCanonicalSymbol } from '@/lib/market/symbol-normalization';
 
 const CandlestickChartComponent = dynamic(
   () => import('@/components/trade/CandlestickChart').then((mod) => ({ default: mod.CandlestickChart })),
@@ -16,7 +18,7 @@ const CandlestickChartComponent = dynamic(
 );
 
 export default function TradePage() {
-  const { stocks, stocksBySymbol, initializeSimulation } = useMarketStore();
+  const { stocks, stocksBySymbol } = useMarketStore();
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedFallback, setSelectedFallback] = useState<Stock | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
@@ -25,48 +27,6 @@ export default function TradePage() {
     if (!selectedSymbol) return null;
     return stocksBySymbol[selectedSymbol] || selectedFallback;
   }, [selectedSymbol, selectedFallback, stocksBySymbol]);
-
-  useEffect(() => {
-    let active = true;
-
-    const init = async () => {
-      const lastSymbol = typeof window !== 'undefined' ? localStorage.getItem('lastTradeSymbol') : null;
-      if (!lastSymbol) return;
-
-      if (active) setSelectedSymbol(lastSymbol);
-
-      const existing = useMarketStore.getState().stocksBySymbol[lastSymbol];
-      if (!existing) {
-        try {
-          const res = await fetch(`/api/v1/instruments/search?q=${lastSymbol}`);
-          const data = await res.json();
-
-          if (active && data.success && data.data.length > 0) {
-            const match = data.data.find((i: any) => i.tradingsymbol === lastSymbol) || data.data[0];
-            setSelectedFallback({
-              symbol: match.tradingsymbol,
-              name: match.name,
-              price: parseFloat(match.lastPrice),
-              change: 0,
-              changePercent: 0,
-              volume: 0,
-              lotSize: match.lotSize || 1,
-              instrumentToken: match.instrumentToken,
-            });
-          }
-        } catch (e) {
-          console.error('Failed to restore stock details', e);
-        }
-      }
-
-      initializeSimulation(lastSymbol, '1d').catch(console.error);
-    };
-
-    init();
-    return () => {
-      active = false;
-    };
-  }, [initializeSimulation]);
 
   useEffect(() => {
     if (!selectedSymbol) return;
@@ -105,7 +65,7 @@ export default function TradePage() {
   }, []);
 
   const handleSelectStock = (stock: Stock) => {
-    setSelectedSymbol(stock.symbol);
+    setSelectedSymbol(toCanonicalSymbol(stock.symbol));
     setSelectedFallback(stock);
   };
 
@@ -141,7 +101,9 @@ export default function TradePage() {
                   </div>
                 </Suspense>
               ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">Select a stock to view chart</div>
+                <div className="h-full overflow-auto p-4">
+                  <PositionsTable />
+                </div>
               )}
             </div>
           }

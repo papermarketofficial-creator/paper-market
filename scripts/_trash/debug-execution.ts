@@ -31,7 +31,7 @@ async function debugSystem() {
         if (!inst) {
             console.error(`❌ Instrument NOT FOUND: ${sym}`);
         } else {
-            console.log(`   - ${sym}: ${inst.lastPrice} (Active: ${inst.isActive})`);
+            console.log(`   - ${sym}: instrument found (Active: ${inst.isActive})`);
         }
     }
 

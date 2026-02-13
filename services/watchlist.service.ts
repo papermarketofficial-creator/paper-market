@@ -7,7 +7,7 @@ import { db } from '@/lib/db';
 import { watchlists, watchlistItems, instruments, type Watchlist, type NewWatchlist } from '@/lib/db/schema';
 import { eq, and, sql, inArray } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
-import { getFromCache, setInCache, cache } from '@/lib/cache';
+import { cache } from '@/lib/cache';
 
 export class WatchlistService {
   /**
@@ -42,22 +42,6 @@ export class WatchlistService {
    */
   static async getWatchlistWithInstruments(watchlistId: string, userId: string) {
     try {
-      const cacheKey = `watchlist:${watchlistId}:instruments`;
-      
-      // 1. Check Cache
-      const cached = getFromCache<any>(cacheKey); // Using any to avoid complex type reconstruction for now
-      if (cached) {
-         // Verify ownership implicitly (cache key contains ID, but we should verify user matches? 
-         // Actually cache stores the result of THIS function.
-         // If we trust the cache key logic.
-         // But we passed userId to this function.
-         // If key is just watchlistId, multiple users shouldn't access same watchlistId unless shared.
-         // Watchlists are user-specific.
-         if (cached.userId === userId) {
-             return cached;
-         }
-      }
-
       // Verify ownership
       const watchlist = await db.query.watchlists.findFirst({
         where: and(
@@ -76,7 +60,6 @@ export class WatchlistService {
           instrumentToken: instruments.instrumentToken,
           tradingsymbol: instruments.tradingsymbol,
           name: instruments.name,
-          lastPrice: instruments.lastPrice,
           lotSize: instruments.lotSize,
           exchange: instruments.exchange,
           segment: instruments.segment,
@@ -91,9 +74,6 @@ export class WatchlistService {
         ...watchlist,
         instruments: items,
       };
-
-      // 2. Set Cache (5 mins)
-      setInCache(cacheKey, result, 1000 * 60 * 5);
 
       return result;
     } catch (error) {
