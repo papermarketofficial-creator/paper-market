@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { realTimeMarketService } from "@/services/realtime-market.service";
 import { auth } from "@/lib/auth";
 import { tickBus } from "@/lib/trading/tick-bus";
+import { db } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { instruments, positions, watchlistItems, watchlists } from "@/lib/db/schema";
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs'; // Required for EventEmitter and long-running connections
@@ -11,10 +14,58 @@ export const maxDuration = 300;
 const SSE_HEARTBEAT_INTERVAL_MS = 20000;
 const FLUSH_INTERVAL_MS = 25;
 const DEBUG_SSE = process.env.DEBUG_SSE === 'true';
+const INDEX_SYMBOLS = ["NIFTY 50", "NIFTY BANK", "NIFTY FIN SERVICE"] as const;
+
+async function resolveBootstrapSymbols(userId: string, req: NextRequest): Promise<string[]> {
+    const symbolSet = new Set<string>(INDEX_SYMBOLS);
+
+    // Optional explicit symbol bootstrap via query string:
+    // /api/v1/market/stream?symbols=RELIANCE,TCS
+    const requested = req.nextUrl.searchParams.get("symbols");
+    if (requested) {
+        requested
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .forEach((s) => symbolSet.add(s));
+    }
+
+    const [watchlistRows, positionRows] = await Promise.all([
+        db
+            .select({
+                symbol: instruments.tradingsymbol,
+                instrumentKey: instruments.instrumentToken,
+            })
+            .from(watchlists)
+            .innerJoin(watchlistItems, eq(watchlists.id, watchlistItems.watchlistId))
+            .innerJoin(instruments, eq(watchlistItems.instrumentToken, instruments.instrumentToken))
+            .where(eq(watchlists.userId, userId)),
+        db
+            .select({
+                symbol: positions.symbol,
+                instrumentKey: instruments.instrumentToken,
+            })
+            .from(positions)
+            .leftJoin(instruments, eq(positions.symbol, instruments.tradingsymbol))
+            .where(eq(positions.userId, userId)),
+    ]);
+
+    for (const row of watchlistRows) {
+        if (row.symbol) symbolSet.add(row.symbol);
+        if (row.instrumentKey) symbolSet.add(row.instrumentKey);
+    }
+
+    for (const row of positionRows) {
+        if (row.symbol) symbolSet.add(row.symbol);
+        if (row.instrumentKey) symbolSet.add(row.instrumentKey);
+    }
+
+    return Array.from(symbolSet);
+}
 
 export async function GET(req: NextRequest) {
     const session = await auth();
-    if (!session?.user) {
+    if (!session?.user?.id) {
         return new NextResponse("Unauthorized", { status: 401 });
     }
 
@@ -31,6 +82,13 @@ export async function GET(req: NextRequest) {
     // - chart loader  
     // - positions loader
     await realTimeMarketService.initialize();
+    const bootstrapSymbols = await resolveBootstrapSymbols(session.user.id, req);
+    if (bootstrapSymbols.length > 0) {
+        await realTimeMarketService.subscribe(bootstrapSymbols);
+        if (DEBUG_SSE) {
+            console.log(`📡 SSE: Bootstrapped ${bootstrapSymbols.length} symbols in stream invocation`);
+        }
+    }
 
     const stream = new ReadableStream({
         start(controller) {
@@ -124,6 +182,11 @@ export async function GET(req: NextRequest) {
                 }
                 latestTickPayloads.clear();
                 tickBus.off('tick', onTick);
+                if (bootstrapSymbols.length > 0) {
+                    void realTimeMarketService
+                        .unsubscribe(bootstrapSymbols)
+                        .catch((error) => console.error("SSE unsubscribe cleanup failed:", error));
+                }
                 controller.close();
                 if (DEBUG_SSE) {
                     console.log('🔴 SSE: Client disconnected, cleaned up TickBus subscription');
