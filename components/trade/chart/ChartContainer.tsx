@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { CandlestickData, HistogramData, Time } from 'lightweight-charts';
+import { CandlestickData, HistogramData, IChartApi, Time } from 'lightweight-charts';
 import { useAnalysisStore } from '@/stores/trading/analysis.store';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { SMA, RSI, MACD, EMA, BollingerBands } from 'technicalindicators';
@@ -46,6 +46,9 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     stopSimulation,
     isFetchingHistory,
     isInitialLoad,
+    hasMoreHistory,
+    currentRequestId,
+    simulatedSymbol,
     fetchMoreHistory,
     updateLiveCandle
   } = useMarketStore();
@@ -313,7 +316,141 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   const [showTradingPanel, setShowTradingPanel] = useState(false);
   
   // State for Chart API (for actions like screenshot)
-  const [chartApi, setChartApi] = useState<any>(null);
+  const [chartApi, setChartApi] = useState<IChartApi | null>(null);
+  const initialFrameRequestIdRef = useRef<number | null>(null);
+  const warmupRequestIdRef = useRef<number | null>(null);
+  const ONE_DAY_VISIBLE_FALLBACK_BARS = 220;
+  const ONE_DAY_TARGET_MULTIPLIER = 1.2;
+  const ONE_DAY_WARMUP_MAX_PAGES = 2;
+
+  const frameChartToLatest = useCallback(() => {
+    if (!chartApi) return false;
+    try {
+      const timeScale = chartApi.timeScale();
+      timeScale.fitContent();
+      timeScale.scrollToRealTime();
+      return true;
+    } catch (error) {
+      console.warn('Initial chart framing failed:', error);
+      return false;
+    }
+  }, [chartApi]);
+
+  // Frame once per request cycle after first dataset is ready.
+  useEffect(() => {
+    if (!chartApi || historicalData.length === 0 || currentRequestId <= 0) return;
+    if (initialFrameRequestIdRef.current === currentRequestId) return;
+
+    const timer = window.setTimeout(() => {
+      const framed = frameChartToLatest();
+      if (framed) {
+        initialFrameRequestIdRef.current = currentRequestId;
+        console.log(`Initial framing applied for request ${currentRequestId}`);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [chartApi, historicalData.length, currentRequestId, frameChartToLatest]);
+
+  // 1D warm-up: fetch limited older pages so left side does not look empty on first load.
+  useEffect(() => {
+    if (!chartApi || historicalData.length === 0 || currentRequestId <= 0) return;
+
+    const normalizedRange = (range || '1D').toUpperCase();
+    if (normalizedRange !== '1D') return;
+    if (!hasMoreHistory) return;
+    if (isFetchingHistory && isInitialLoad) return;
+    if (simulatedSymbol && toCanonicalSymbol(simulatedSymbol) !== canonicalSymbol) return;
+    if (warmupRequestIdRef.current === currentRequestId) return;
+
+    warmupRequestIdRef.current = currentRequestId;
+    let cancelled = false;
+
+    const warmup = async () => {
+      const logicalRange = chartApi.timeScale().getVisibleLogicalRange();
+      const visibleBars =
+        logicalRange &&
+        Number.isFinite(logicalRange.from) &&
+        Number.isFinite(logicalRange.to) &&
+        logicalRange.to > logicalRange.from
+          ? Math.ceil(logicalRange.to - logicalRange.from)
+          : ONE_DAY_VISIBLE_FALLBACK_BARS;
+      const targetCandles = Math.ceil(visibleBars * ONE_DAY_TARGET_MULTIPLIER);
+
+      let pagesLoaded = 0;
+      console.log(
+        `1D warm-up start: request=${currentRequestId}, visibleBars=${visibleBars}, targetCandles=${targetCandles}`
+      );
+
+      while (!cancelled) {
+        const marketState = useMarketStore.getState();
+        const analysisRange = (useAnalysisStore.getState().range || '1D').toUpperCase();
+        const activeSymbol = toCanonicalSymbol(marketState.simulatedSymbol || '');
+
+        if (marketState.currentRequestId !== currentRequestId) {
+          console.log(`1D warm-up aborted: request changed (${marketState.currentRequestId} != ${currentRequestId})`);
+          break;
+        }
+        if (analysisRange !== normalizedRange) {
+          console.log(`1D warm-up aborted: range changed (${analysisRange})`);
+          break;
+        }
+        if (activeSymbol && activeSymbol !== canonicalSymbol) {
+          console.log(`1D warm-up aborted: symbol changed (${activeSymbol} != ${canonicalSymbol})`);
+          break;
+        }
+        if (marketState.historicalData.length >= targetCandles) {
+          console.log(`1D warm-up done: target reached (${marketState.historicalData.length}/${targetCandles})`);
+          break;
+        }
+        if (!marketState.hasMoreHistory) {
+          console.log('1D warm-up done: no more history available');
+          break;
+        }
+        if (pagesLoaded >= ONE_DAY_WARMUP_MAX_PAGES) {
+          console.log(`1D warm-up done: max pages reached (${ONE_DAY_WARMUP_MAX_PAGES})`);
+          break;
+        }
+
+        const firstCandle = marketState.historicalData[0];
+        const firstCandleTime = Number(firstCandle?.time);
+        if (!Number.isFinite(firstCandleTime)) {
+          console.log('1D warm-up aborted: missing first candle time');
+          break;
+        }
+
+        pagesLoaded += 1;
+        console.log(
+          `1D warm-up fetch ${pagesLoaded}/${ONE_DAY_WARMUP_MAX_PAGES}: before ${new Date(firstCandleTime * 1000).toISOString()}`
+        );
+
+        await marketState.fetchMoreHistory(symbol, normalizedRange, firstCandleTime);
+      }
+
+      if (!cancelled) {
+        frameChartToLatest();
+        console.log(`1D warm-up complete: request=${currentRequestId}, pagesLoaded=${pagesLoaded}`);
+      }
+    };
+
+    void warmup();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    chartApi,
+    historicalData.length,
+    currentRequestId,
+    range,
+    symbol,
+    canonicalSymbol,
+    frameChartToLatest,
+    isFetchingHistory,
+    isInitialLoad,
+    hasMoreHistory,
+    simulatedSymbol,
+  ]);
 
   // Handlers
   const handleUndo = () => useAnalysisStore.getState().undoDrawing(symbol);
@@ -340,7 +477,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   };
 
   // Infinite Scroll Handler (Memoized to prevent BaseChart re-creation loop)
-  const handleLoadMore = useCallback(() => {
+  const handleLoadMore = useCallback(async () => {
     console.log(`🔄 handleLoadMore called: historicalData.length=${historicalData.length}`);
     
     // ✅ Removed isFetchingHistory check - store's fetchMoreHistory has internal guard
@@ -350,13 +487,13 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     }
     
     const firstCandle = historicalData[0];
-    const currentRange = range || '1d';
+    const currentRange = (range || '1D').toUpperCase();
     
     const firstCandleTime = new Date((firstCandle.time as number) * 1000).toISOString();
     console.log(`🔄 handleLoadMore: Loading more data before ${firstCandleTime}`);
     console.log(`🔄 handleLoadMore: Parameters - symbol=${symbol}, range=${currentRange}, endTime=${firstCandle.time}`);
     
-    fetchMoreHistory(symbol, currentRange, firstCandle.time as number);
+    await fetchMoreHistory(symbol, currentRange, firstCandle.time as number);
   }, [historicalData, symbol, range, fetchMoreHistory]); // ✅ Stable dependencies only
  
   return (

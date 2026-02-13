@@ -30,7 +30,7 @@ interface BaseChartProps {
   instrumentKey?: string;
   range?: string; // ✅ Add range prop for dynamic formatting
   onChartReady?: (api: IChartApi) => void;
-  onLoadMore?: () => void; // ✅ New Prop
+  onLoadMore?: () => Promise<void> | void; // ✅ Async-capable for robust lock release
 }
 
 export interface BaseChartRef {
@@ -50,6 +50,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   onChartReady,
   onLoadMore 
 }, ref) => {
+  const LEFT_EDGE_TRIGGER_BARS = 40;
+  const LOAD_MORE_LOCK_TIMEOUT_MS = 7000;
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
@@ -234,15 +236,38 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
         // Only fetch more when user actually scrolls LEFT near the boundary.
         const movedLeft = currentRange.from < previousRange.from;
-        const nearLeftEdge = currentRange.from < 10;
+        const nearLeftEdge = currentRange.from < LEFT_EDGE_TRIGGER_BARS;
         if (!movedLeft || !nearLeftEdge || isFetchingRef.current) return;
 
-        if (onLoadMoreRef.current) {
+        const loadMore = onLoadMoreRef.current;
+        if (loadMore) {
             isFetchingRef.current = true;
-            onLoadMoreRef.current();
-            setTimeout(() => {
+            let released = false;
+            const releaseLock = () => {
+                if (released) return;
+                released = true;
                 isFetchingRef.current = false;
-            }, 2000);
+            };
+
+            const lockTimeout = setTimeout(() => {
+                console.warn(`Infinite scroll lock timeout (${LOAD_MORE_LOCK_TIMEOUT_MS}ms). Releasing lock.`);
+                releaseLock();
+            }, LOAD_MORE_LOCK_TIMEOUT_MS);
+
+            try {
+                Promise.resolve(loadMore())
+                    .catch((error) => {
+                        console.error('Infinite scroll load-more failed:', error);
+                    })
+                    .finally(() => {
+                        clearTimeout(lockTimeout);
+                        releaseLock();
+                    });
+            } catch (error) {
+                clearTimeout(lockTimeout);
+                releaseLock();
+                console.error('Infinite scroll load-more threw synchronously:', error);
+            }
         } else {
             console.warn('Infinite scroll triggered but no onLoadMore callback');
         }
