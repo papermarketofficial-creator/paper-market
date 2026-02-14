@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Stock } from '@/types/equity.types';
-import { Plus, ChevronDown, Loader2 } from 'lucide-react';
+import { Plus, ChevronDown } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useMarketStore } from '@/stores/trading/market.store';
 import {
@@ -33,7 +33,6 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
   const [preferredWatchlistId, setPreferredWatchlistId] = useState<string | null>(null);
   const lastAppliedQuerySnapshotRef = useRef<string>('');
-  const subscribedSymbolsRef = useRef<string[]>([]);
 
   // 🔥 NEW: TanStack Query hooks for data fetching
   const { data: watchlists = [], isLoading: isLoadingWatchlists } = useWatchlists();
@@ -47,6 +46,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   // Get active watchlist ID from Zustand (UI state only)
   const { activeWatchlistId, setActiveWatchlistId, prefetchInstrument, setStocks } = useMarketStore();
   const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
+  const selectQuote = useMarketStore((state) => state.selectQuote);
   const resolvedWatchlistId = useMemo(() => {
     if (activeWatchlistId) return activeWatchlistId;
     if (preferredWatchlistId) return preferredWatchlistId;
@@ -103,52 +103,6 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
     () => toSymbolKey(toCanonicalSymbol(selectedSymbol || "")),
     [selectedSymbol]
   );
-  const watchlistSymbolsKey = useMemo(() => {
-    const uniqueSymbols = Array.from(
-      new Set(localMatches.map((stock) => stock.instrumentToken || stock.symbol))
-    );
-    return uniqueSymbols.sort().join(',');
-  }, [localMatches]);
-
-  // ═══════════════════════════════════════════════════════════
-  // 🔥 SUBSCRIBE TO ALL WATCHLIST STOCKS FOR REAL-TIME UPDATES
-  // ═══════════════════════════════════════════════════════════
-  useEffect(() => {
-    const symbols = watchlistSymbolsKey ? watchlistSymbolsKey.split(',') : [];
-    const previousSymbols = subscribedSymbolsRef.current;
-
-    const toSubscribe = symbols.filter((symbol) => !previousSymbols.includes(symbol));
-    const toUnsubscribe = previousSymbols.filter((symbol) => !symbols.includes(symbol));
-
-    if (toSubscribe.length > 0) {
-      fetch('/api/v1/market/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: toSubscribe })
-      }).catch((err) => console.error('Failed to subscribe to watchlist:', err));
-    }
-
-    if (toUnsubscribe.length > 0) {
-      fetch('/api/v1/market/subscribe', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: toUnsubscribe })
-      }).catch((err) => console.error('Failed to unsubscribe from watchlist:', err));
-    }
-
-    subscribedSymbolsRef.current = symbols;
-  }, [watchlistSymbolsKey]);
-
-  useEffect(() => {
-    return () => {
-      if (subscribedSymbolsRef.current.length === 0) return;
-      fetch('/api/v1/market/subscribe', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: subscribedSymbolsRef.current })
-      }).catch((err) => console.error('Failed to unsubscribe from watchlist on unmount:', err));
-    };
-  }, []);
   const handleCreateWatchlist = async () => {
     if (!newWatchlistName.trim()) return;
     
@@ -260,7 +214,10 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
         <div className="flex flex-col">
           {localMatches.map((stock, i) => {
             const quoteKey = toInstrumentKey(stock.instrumentToken || stock.symbol);
-            const quote = quotesByInstrument[quoteKey];
+            const quote =
+              quotesByInstrument[quoteKey] ||
+              selectQuote(quoteKey) ||
+              selectQuote(stock.symbol);
             const livePrice = quote?.price ?? 0;
             const liveChange = quote?.change ?? 0;
             const liveChangePercent = quote?.changePercent ?? 0;

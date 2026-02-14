@@ -9,11 +9,19 @@ import {
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Trade } from '@/types/order.types';
 import { cn } from '@/lib/utils';
 
+export interface RecentTradeRow {
+  id: string;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  quantity: number;
+  pnl: number | null;
+  status: string;
+}
+
 interface RecentTradesTableProps {
-  trades: Trade[];
+  trades: RecentTradeRow[];
   loading?: boolean;
 }
 

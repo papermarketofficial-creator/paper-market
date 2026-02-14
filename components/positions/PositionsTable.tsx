@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
@@ -41,62 +41,18 @@ export function PositionsTable({ loading: parentLoading = false }: PositionsTabl
   const isLoading = usePositionsStore((state) => state.isLoading);
   const closePosition = usePositionsStore((state) => state.closePosition);
   const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
+  const selectQuote = useMarketStore((state) => state.selectQuote);
   
   const loading = parentLoading || isLoading;
   
   const [closingPosition, setClosingPosition] = useState<Position | null>(null);
   const [closingPositionId, setClosingPositionId] = useState<string | null>(null); // Track which position is closing
-  const subscribedPositionSymbolsRef = useRef<string[]>([]);
-  const positionSymbolsKey = useMemo(() => {
-    const uniqueSymbols = Array.from(
-      new Set(positions.map((position) => position.instrumentToken || position.symbol))
-    );
-    return uniqueSymbols.sort().join(',');
-  }, [positions]);
-
   useEffect(() => {
     fetchPositions();
     // Poll lightly for structural recovery only (SSE remains price source of truth).
     const interval = setInterval(() => fetchPositions(true), 30000);
     return () => clearInterval(interval);
   }, [fetchPositions]);
-
-  useEffect(() => {
-    const symbols = positionSymbolsKey ? positionSymbolsKey.split(',') : [];
-    const previousSymbols = subscribedPositionSymbolsRef.current;
-
-    const toSubscribe = symbols.filter((symbol) => !previousSymbols.includes(symbol));
-    const toUnsubscribe = previousSymbols.filter((symbol) => !symbols.includes(symbol));
-
-    if (toSubscribe.length > 0) {
-      fetch('/api/v1/market/subscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: toSubscribe }),
-      }).catch((error) => console.error('Failed to subscribe position symbols:', error));
-    }
-
-    if (toUnsubscribe.length > 0) {
-      fetch('/api/v1/market/subscribe', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: toUnsubscribe }),
-      }).catch((error) => console.error('Failed to unsubscribe position symbols:', error));
-    }
-
-    subscribedPositionSymbolsRef.current = symbols;
-  }, [positionSymbolsKey]);
-
-  useEffect(() => {
-    return () => {
-      if (subscribedPositionSymbolsRef.current.length === 0) return;
-      fetch('/api/v1/market/subscribe', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: subscribedPositionSymbolsRef.current }),
-      }).catch((error) => console.error('Failed to unsubscribe position symbols on unmount:', error));
-    };
-  }, []);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -108,7 +64,8 @@ export function PositionsTable({ loading: parentLoading = false }: PositionsTabl
 
   const getLivePrice = (position: Position) => {
     const key = toInstrumentKey(position.instrumentToken || position.symbol);
-    return quotesByInstrument[key]?.price ?? 0;
+    const quote = quotesByInstrument[key] || selectQuote(key) || selectQuote(position.symbol);
+    return quote?.price ?? 0;
   };
 
   const hasLivePrice = (position: Position) => getLivePrice(position) > 0;

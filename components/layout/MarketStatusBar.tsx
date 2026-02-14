@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { useGlobalStore } from "@/stores/global.store";
 import { useMarketStore } from "@/stores/trading/market.store";
 import { useWalletStore } from "@/stores/wallet.store";
@@ -29,24 +28,6 @@ export function MarketStatusBar() {
   const { selectedSymbol } = useGlobalStore();
   const balance = useWalletStore((state) => state.balance);
   const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
-
-  useEffect(() => {
-    const symbols = INDEX_CONFIG.map((x) => x.symbol);
-
-    fetch("/api/v1/market/subscribe", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbols }),
-    }).catch((error) => console.error("Failed to subscribe indices:", error));
-
-    return () => {
-      fetch("/api/v1/market/subscribe", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols }),
-      }).catch((error) => console.error("Failed to unsubscribe indices:", error));
-    };
-  }, []);
 
   const selectedKey = symbolToIndexInstrumentKey(toCanonicalSymbol(selectedSymbol || ""));
 

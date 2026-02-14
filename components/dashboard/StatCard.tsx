@@ -46,14 +46,14 @@ export function StatCard({
             'flex h-8 w-8 items-center justify-center rounded-lg',
             trend === 'up' && 'bg-success/10',
             trend === 'down' && 'bg-destructive/10',
-            trend === 'neutral' && 'bg-secondary/10',
+            trend === 'neutral' && 'bg-muted',
             !trend && 'bg-muted'
           )}>
             <Icon className={cn(
               'h-4 w-4',
               trend === 'up' && 'text-success',
               trend === 'down' && 'text-destructive',
-              trend === 'neutral' && 'text-secondary',
+              trend === 'neutral' && 'text-muted-foreground',
               !trend && 'text-muted-foreground'
             )} />
           </div>
