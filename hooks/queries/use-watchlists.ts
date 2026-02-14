@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Stock } from '@/types/equity.types';
+import { toInstrumentKey } from '@/lib/market/symbol-normalization';
 
 // ═══════════════════════════════════════════════════════════
 // 📊 WATCHLIST QUERY HOOKS
@@ -17,6 +18,26 @@ interface WatchlistInstrument {
   tradingsymbol: string;
   name: string;
   lotSize: number;
+}
+
+type QuoteApiItem = {
+  last_price?: number;
+  close_price?: number;
+};
+
+function toQuoteLookup(payload: Record<string, QuoteApiItem>): Map<string, QuoteApiItem> {
+  const out = new Map<string, QuoteApiItem>();
+
+  for (const [rawKey, quote] of Object.entries(payload || {})) {
+    const normalized = toInstrumentKey(rawKey);
+    if (!normalized) continue;
+
+    out.set(normalized, quote);
+    out.set(normalized.replace('|', ':'), quote);
+    out.set(normalized.replace(':', '|'), quote);
+  }
+
+  return out;
 }
 
 
@@ -52,7 +73,6 @@ export function useWatchlistInstruments(watchlistId: string | null) {
       
       const { data } = await res.json();
 
-      // Start with neutral placeholder values.
       const baseStocks: Stock[] = data.instruments.map((inst: WatchlistInstrument) => {
         return {
           symbol: inst.tradingsymbol,
@@ -66,7 +86,57 @@ export function useWatchlistInstruments(watchlistId: string | null) {
         };
       });
 
-      return baseStocks;
+      if (baseStocks.length === 0) return baseStocks;
+
+      try {
+        const instrumentKeys = Array.from(
+          new Set(
+            baseStocks
+              .map((stock) => toInstrumentKey(stock.instrumentToken || stock.symbol))
+              .filter(Boolean)
+          )
+        );
+
+        if (instrumentKeys.length === 0) return baseStocks;
+
+        const quotesRes = await fetch('/api/v1/market/quotes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instrumentKeys }),
+        });
+
+        if (!quotesRes.ok) return baseStocks;
+
+        const quotesJson = await quotesRes.json();
+        if (!quotesJson?.success || !quotesJson?.data || typeof quotesJson.data !== 'object') {
+          return baseStocks;
+        }
+
+        const quoteLookup = toQuoteLookup(quotesJson.data as Record<string, QuoteApiItem>);
+
+        return baseStocks.map((stock) => {
+          const key = toInstrumentKey(stock.instrumentToken || stock.symbol);
+          const quote = quoteLookup.get(key);
+          if (!quote) return stock;
+
+          const price = Number(quote.last_price);
+          if (!Number.isFinite(price) || price <= 0) return stock;
+
+          const closeRaw = Number(quote.close_price);
+          const close = Number.isFinite(closeRaw) && closeRaw > 0 ? closeRaw : price;
+          const change = price - close;
+          const changePercent = close > 0 ? (change / close) * 100 : 0;
+
+          return {
+            ...stock,
+            price,
+            change,
+            changePercent,
+          };
+        });
+      } catch {
+        return baseStocks;
+      }
     },
     enabled: !!watchlistId, // Only run query if watchlistId exists
     staleTime: 15_000,

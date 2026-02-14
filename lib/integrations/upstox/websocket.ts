@@ -1,9 +1,8 @@
 import { ApiClient, MarketDataStreamerV3 } from "upstox-js-sdk";
 import { UpstoxService } from "@/services/upstox.service";
 import { logger } from "@/lib/logger";
-import path from "path";
 import protobuf from "protobufjs";
-import fs from "fs";
+import protoJson from "./proto.json";
 
 // ═══════════════════════════════════════════════════════════
 // 🛠️ SINGLETON PATTERN: Global declaration for Next.js hot reload
@@ -14,39 +13,46 @@ declare global {
 
 type MarketUpdateCallback = (data: unknown) => void;
 
-// ═══════════════════════════════════════════════════════════
-// 🚨 PROTOBUF LOADING STRATEGY
-// ═══════════════════════════════════════════════════════════
-// We load the .proto file directly from the public folder.
-// This avoids bundling issues and webpack complex configurations.
-const PROTO_PATH = path.join(
-    process.cwd(),
-    "public",
-    "proto",
-    "MarketDataFeedV3.proto"
-);
-
 // Lazy singleton for protobuf root
 let protobufRoot: any = null;
+let protobufLoadPatched = false;
 
 function getProtobufRoot() {
     if (protobufRoot) return protobufRoot;
 
-    console.log("📂 Attempting to load proto from:", PROTO_PATH);
-
-    if (!fs.existsSync(PROTO_PATH)) {
-        console.error("❌ CRITICAL: Proto file not found at:", PROTO_PATH);
-        throw new Error(`Proto file missing: ${PROTO_PATH}`);
-    }
-
     try {
-        protobufRoot = protobuf.loadSync(PROTO_PATH);
-        console.log("✅ Protobuf loaded successfully");
+        protobufRoot = protobuf.Root.fromJSON(protoJson as any);
+        console.log("✅ Protobuf JSON loaded successfully");
         return protobufRoot;
     } catch (error) {
-        console.error("❌ Failed to parse proto file:", error);
+        console.error("❌ Failed to load protobuf JSON:", error);
         throw error;
     }
+}
+
+function patchSdkProtoLoad(): void {
+    if (protobufLoadPatched) return;
+
+    const originalLoad = (protobuf as any).load?.bind(protobuf);
+    if (typeof originalLoad !== "function") return;
+
+    (protobuf as any).load = (filename: any, callback?: any) => {
+        const target = typeof filename === "string" ? filename : "";
+        const isMarketFeedProto = target.includes("MarketDataFeedV3.proto");
+
+        if (isMarketFeedProto) {
+            const root = getProtobufRoot();
+            if (typeof callback === "function") {
+                callback(null, root);
+                return;
+            }
+            return Promise.resolve(root);
+        }
+
+        return originalLoad(filename, callback);
+    };
+
+    protobufLoadPatched = true;
 }
 
 
@@ -142,6 +148,8 @@ export class UpstoxWebSocket {
             OAUTH2.accessToken = token;
 
             console.log("STEP 4: creating streamer");
+            // Patch protobufjs load for Upstox SDK constructor-time proto init.
+            patchSdkProtoLoad();
             // Initialize Streamer WITH initial subscriptions (required by SDK)
             const initialMode = "ltpc"; // Start with lightweight mode
             

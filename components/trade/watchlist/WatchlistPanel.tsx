@@ -218,9 +218,16 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
               quotesByInstrument[quoteKey] ||
               selectQuote(quoteKey) ||
               selectQuote(stock.symbol);
-            const livePrice = quote?.price ?? 0;
-            const liveChange = quote?.change ?? 0;
-            const liveChangePercent = quote?.changePercent ?? 0;
+            const fallbackPrice = Number(stock.price);
+            const fallbackChange = Number(stock.change);
+            const fallbackChangePercent = Number(stock.changePercent);
+            const livePrice =
+              quote?.price ?? (Number.isFinite(fallbackPrice) && fallbackPrice > 0 ? fallbackPrice : 0);
+            const liveChange =
+              quote?.change ?? (Number.isFinite(fallbackChange) ? fallbackChange : 0);
+            const liveChangePercent =
+              quote?.changePercent ??
+              (Number.isFinite(fallbackChangePercent) ? fallbackChangePercent : 0);
             const hasQuote = Number.isFinite(livePrice) && livePrice > 0;
             const renderedStock: Stock = {
               ...stock,

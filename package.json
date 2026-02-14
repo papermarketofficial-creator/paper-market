@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "load:users": "node scripts/load/simulate-users.mjs"
+    "load:users": "node scripts/load/simulate-users.mjs",
+    "proto:json": "node -e \"const {execSync}=require('child_process'); const fs=require('fs'); const out=execSync('npx -p protobufjs-cli pbjs -t json public/proto/MarketDataFeedV3.proto',{encoding:'utf8'}); fs.writeFileSync('lib/integrations/upstox/proto.json', out, 'utf8');\""
   },
   "dependencies": {
     "@auth/drizzle-adapter": "^1.11.1",
