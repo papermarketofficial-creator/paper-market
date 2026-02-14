@@ -19,6 +19,55 @@ const enrichVolumeWithColor = (volume: any[], candles: any[]) => {
     });
 };
 
+const normalizeEpochSeconds = (value: unknown): number | null => {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return Math.floor(value);
+    }
+
+    if (typeof value === 'string') {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric)) {
+            return Math.floor(numeric);
+        }
+
+        const parsed = Date.parse(value);
+        if (Number.isFinite(parsed)) {
+            return Math.floor(parsed / 1000);
+        }
+    }
+
+    return null;
+};
+
+const normalizeSeriesTime = <T extends { time: unknown }>(rows: T[]): T[] =>
+    rows
+        .map((row) => {
+            const time = normalizeEpochSeconds(row.time);
+            if (time === null) return null;
+            return { ...row, time } as T;
+        })
+        .filter((row): row is T => row !== null);
+
+const mergeSeriesByTimeStrict = <T extends { time: unknown }>(
+    existing: T[],
+    incoming: T[]
+): T[] => {
+    const map = new Map<number, T>();
+
+    for (const row of normalizeSeriesTime(existing)) {
+        map.set(Number(row.time), row);
+    }
+
+    // Incoming rows overwrite overlap rows at identical timestamps.
+    for (const row of normalizeSeriesTime(incoming)) {
+        map.set(Number(row.time), row);
+    }
+
+    return [...map.entries()]
+        .sort((a, b) => a[0] - b[0])
+        .map(([, row]) => row);
+};
+
 export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
   // ─────────────────────────────────────────────────────────────────
   // 📊 Initial State
@@ -81,36 +130,39 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
               }
 
               // Sort ascending
-              const newCandles = [...candles].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+              const newCandles = normalizeSeriesTime(candles).sort((a: any, b: any) => (a.time as number) - (b.time as number));
               // 🔥 Apply colors to volume before sorting/merging
               const newlyColoredVolume = enrichVolumeWithColor(volume, newCandles);
-              const newVolume = [...newlyColoredVolume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+              const newVolume = normalizeSeriesTime(newlyColoredVolume).sort((a: any, b: any) => (a.time as number) - (b.time as number));
               
               const currentHistory = get().historicalData;
               const currentVolume = get().volumeData;
 
-              // Prepend and Deduplicate
-              const existingTimes = new Set(currentHistory.map(c => c.time));
-              const uniqueCandles = newCandles.filter((c: any) => !existingTimes.has(c.time));
-              
-              const existingVolTimes = new Set(currentVolume.map(v => v.time));
-              const uniqueVolume = newVolume.filter((v: any) => !existingVolTimes.has(v.time));
+              const previousOldestTime = currentHistory.length > 0
+                  ? Number(currentHistory[0].time)
+                  : null;
+              const previousCount = currentHistory.length;
 
-              if (uniqueCandles.length > 0) {
-                  const merged = [...uniqueCandles, ...currentHistory];
-                  const mergedVol = [...uniqueVolume, ...currentVolume];
-                  
-                  // 🔥 CRITICAL: DO NOT cap during pagination
-                  // Capping here deletes the candles we just fetched
+              const merged = mergeSeriesByTimeStrict(currentHistory, newCandles);
+              const mergedVol = mergeSeriesByTimeStrict(currentVolume, newVolume);
+
+              const mergedOldestTime = merged.length > 0
+                  ? Number(merged[0].time)
+                  : null;
+              const appendedCount = merged.length - previousCount;
+              const extendedFurtherBack = previousOldestTime === null ||
+                  (mergedOldestTime !== null && mergedOldestTime < previousOldestTime);
+
+              if (appendedCount <= 0 && !extendedFurtherBack) {
+                  console.log('Pagination reached overlap-only window, setting hasMoreHistory=false');
+                  set({ hasMoreHistory: false, isInitialLoad: false });
+              } else {
                   set({
                       historicalData: merged,
                       volumeData: mergedVol
                   });
-                  
-                  console.log(`📊 Loaded ${uniqueCandles.length} new candles. Total: ${merged.length}`);
-              } else {
-                  console.log('📊 No new unique candles, setting hasMoreHistory=false');
-                  set({ hasMoreHistory: false, isInitialLoad: false }); // No new unique candles
+
+                  console.log(`Loaded ${Math.max(appendedCount, 0)} merged candles. Total: ${merged.length}`);
               }
           } else {
               console.error('📊 API returned error:', data.error);
@@ -179,12 +231,12 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
         if (data.success) {
             const { candles, volume } = data.data;
             
-            // Sort by time ascending
-            const sortedCandles = [...candles].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+            // Normalize + strict sort/dedupe by epoch seconds.
+            const sortedCandles = mergeSeriesByTimeStrict<any>([], candles as any[]);
             
             // 🔥 Apply colors to volume based on candle (Up=Teal, Down=Red)
             const coloredVolume = enrichVolumeWithColor(volume, sortedCandles);
-            const sortedVolume = [...coloredVolume].sort((a: any, b: any) => (a.time as number) - (b.time as number));
+            const sortedVolume = mergeSeriesByTimeStrict<any>([], coloredVolume as any[]);
 
             // 🔥 NO CAPPING: Allow unlimited candles for proper historical display
             // Infinite scroll will handle loading older data progressively
@@ -247,3 +299,4 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
     set({ intervalId: null });
   },
 });
+

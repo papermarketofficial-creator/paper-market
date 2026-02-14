@@ -60,13 +60,25 @@ export class CandleOrchestrator {
         // ═══════════════════════════════════════════════════════════
         // TRICK: We don't merge History + Intraday manually anymore.
         // UpstoxService handles "1m + Today" routing internally.
-        const rawCandles = await UpstoxService.getHistoricalCandleData(
+        let rawCandles = await UpstoxService.getHistoricalCandleData(
             params.instrumentKey,
             unit,
             interval,
             fromDate,
             toDate
         );
+
+        if (this.shouldBackfillLatestSession(params, unit, interval, rawCandles)) {
+            console.log(
+                `Candle backfill: empty 1D session for ${params.instrumentKey} on ${toDate}, searching previous sessions`
+            );
+            rawCandles = await this.fetchLatestAvailableSessionCandles(
+                params.instrumentKey,
+                unit,
+                interval,
+                toDate
+            );
+        }
 
         // ═══════════════════════════════════════════════════════════
         // 🎨 FORMAT: Domain -> Presentation
@@ -139,14 +151,16 @@ for (const c of rawCandles) {
                         fromDateObj = subDays(anchorDate, 7);
                         toDateStr = this.formatDateIST(anchorDate);
                     } else {
-                        // For 1D initial load, prefer today's intraday session to avoid cross-session jumps.
-                        // Fallback to last few days only when today's session is not yet available (e.g., weekend/pre-open).
-                        if (this.hasSessionStartedTodayIST(anchorDate)) {
+                        // 1D initial load must show a single trading session:
+                        // - if current session is live/completed today -> use today
+                        // - otherwise -> use latest completed trading day (e.g. Friday on weekends)
+                        if (this.isWithinOrAfterSessionIST(anchorDate)) {
                             fromDateObj = anchorDate;
                             toDateStr = this.formatDateIST(anchorDate);
                         } else {
-                            fromDateObj = subDays(anchorDate, 3);
-                            toDateStr = this.formatDateIST(anchorDate);
+                            const latestCompletedTradingDay = this.getLatestCompletedTradingDayIST(anchorDate);
+                            fromDateObj = latestCompletedTradingDay;
+                            toDateStr = this.formatDateIST(latestCompletedTradingDay);
                         }
                     }
                     break;
@@ -292,6 +306,77 @@ for (const c of rawCandles) {
         };
     }
 
+    private static shouldBackfillLatestSession(
+        params: CandleFetchParams,
+        unit: string,
+        interval: string,
+        rawCandles: unknown[]
+    ): boolean {
+        if (rawCandles.length > 0) return false;
+        if (params.toDate) return false; // pagination path should not auto-shift cursor
+        if ((params.range || '').toUpperCase() !== '1D') return false;
+        return unit === 'minutes' && interval === '1';
+    }
+
+    private static async fetchLatestAvailableSessionCandles(
+        instrumentKey: string,
+        unit: string,
+        interval: string,
+        anchorToDate: string
+    ): Promise<any[]> {
+        let cursor = new Date(anchorToDate);
+
+        // Backfill at most the previous 7 calendar days to cover weekends/holidays.
+        for (let i = 0; i < 7; i += 1) {
+            cursor = subDays(cursor, 1);
+            if (this.isWeekendIST(cursor)) continue;
+
+            const day = this.formatDateIST(cursor);
+            const candles = await UpstoxService.getHistoricalCandleData(
+                instrumentKey,
+                unit,
+                interval,
+                day,
+                day
+            );
+
+            if (candles.length > 0) {
+                return candles;
+            }
+
+            const windowFrom = this.formatDateIST(subDays(cursor, 2));
+            const windowCandles = await UpstoxService.getHistoricalCandleData(
+                instrumentKey,
+                unit,
+                interval,
+                windowFrom,
+                day
+            );
+            const latestSession = this.extractLatestSession(windowCandles);
+            if (latestSession.length > 0) {
+                return latestSession;
+            }
+        }
+
+        return [];
+    }
+
+    private static extractLatestSession(candles: any[]): any[] {
+        if (candles.length === 0) return [];
+
+        let latestSessionDate = '';
+        for (const candle of candles) {
+            const timestamp = String(candle?.[0] ?? '');
+            const sessionDate = timestamp.slice(0, 10);
+            if (sessionDate > latestSessionDate) {
+                latestSessionDate = sessionDate;
+            }
+        }
+
+        if (!latestSessionDate) return [];
+        return candles.filter((candle) => String(candle?.[0] ?? '').startsWith(latestSessionDate));
+    }
+
     /**
      * Format Date to YYYY-MM-DD in Asia/Kolkata timezone
      */
@@ -307,10 +392,9 @@ for (const c of rawCandles) {
     }
 
     /**
-     * Returns true when today's trading session has started in IST (Mon-Fri, >= 09:15).
-     * Used to keep 1D charts scoped to the current session when available.
+     * True when current IST time is in-session or post-session for a weekday.
      */
-    private static hasSessionStartedTodayIST(now: Date): boolean {
+    private static isWithinOrAfterSessionIST(now: Date): boolean {
         const parts = new Intl.DateTimeFormat('en-GB', {
             timeZone: this.TIMEZONE,
             weekday: 'short',
@@ -326,6 +410,46 @@ for (const c of rawCandles) {
         const minute = Number(parts.find((p) => p.type === 'minute')?.value || '0');
         const totalMinutes = hour * 60 + minute;
 
-        return totalMinutes >= this.MARKET_OPEN_MINUTES;
+        return totalMinutes >= this.MARKET_OPEN_MINUTES && totalMinutes <= (24 * 60);
+    }
+
+    private static isWeekendIST(date: Date): boolean {
+        const weekday = new Intl.DateTimeFormat('en-GB', {
+            timeZone: this.TIMEZONE,
+            weekday: 'short',
+        }).format(date);
+        return weekday === 'Sat' || weekday === 'Sun';
+    }
+
+    /**
+     * Latest completed trading day in IST (weekday).
+     * If now is a weekday pre-open, returns previous weekday.
+     */
+    private static getLatestCompletedTradingDayIST(now: Date): Date {
+        const parts = new Intl.DateTimeFormat('en-GB', {
+            timeZone: this.TIMEZONE,
+            weekday: 'short',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false,
+        }).formatToParts(now);
+
+        const weekday = parts.find((p) => p.type === 'weekday')?.value || '';
+        const hour = Number(parts.find((p) => p.type === 'hour')?.value || '0');
+        const minute = Number(parts.find((p) => p.type === 'minute')?.value || '0');
+        const totalMinutes = hour * 60 + minute;
+
+        let cursor = new Date(now);
+
+        // Weekend or pre-open weekday -> step back one day first.
+        if (weekday === 'Sat' || weekday === 'Sun' || totalMinutes < this.MARKET_OPEN_MINUTES) {
+            cursor = subDays(cursor, 1);
+        }
+
+        while (this.isWeekendIST(cursor)) {
+            cursor = subDays(cursor, 1);
+        }
+
+        return cursor;
     }
 }

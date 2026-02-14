@@ -24,6 +24,16 @@ interface ChartContainerProps {
 }
 
 // Reuse the generation logic from previous file for now (Phase 1)
+const INITIAL_VISIBLE_BARS_BY_RANGE: Record<string, number> = {
+  '1D': 130,
+  '5D': 180,
+  '1M': 220,
+  '3M': 180,
+  '6M': 220,
+  '1Y': 260,
+  '3Y': 220,
+  '5Y': 240,
+};
 
 
 export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
@@ -324,17 +334,26 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   const ONE_DAY_WARMUP_MAX_PAGES = 2;
 
   const frameChartToLatest = useCallback(() => {
-    if (!chartApi) return false;
+    if (!chartApi || historicalData.length === 0) return false;
     try {
       const timeScale = chartApi.timeScale();
-      timeScale.fitContent();
+      const normalizedRange = (range || '1D').toUpperCase();
+      const targetVisibleBars = INITIAL_VISIBLE_BARS_BY_RANGE[normalizedRange] ?? ONE_DAY_VISIBLE_FALLBACK_BARS;
+      const visibleBars = Math.max(40, Math.min(targetVisibleBars, historicalData.length));
+      const rightOffsetBars = normalizedRange === '1D' ? 12 : 8;
+
+      // Use logical index range so initial candle width is consistent regardless of timestamp gaps.
+      const to = Math.max(historicalData.length - 1 + rightOffsetBars, rightOffsetBars);
+      const from = Math.max(0, to - visibleBars);
+
+      timeScale.setVisibleLogicalRange({ from, to });
       timeScale.scrollToRealTime();
       return true;
     } catch (error) {
       console.warn('Initial chart framing failed:', error);
       return false;
     }
-  }, [chartApi]);
+  }, [chartApi, historicalData.length, range]);
 
   // Frame once per request cycle after first dataset is ready.
   useEffect(() => {
