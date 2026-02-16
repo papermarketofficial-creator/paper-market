@@ -1,5 +1,19 @@
 import { NormalizedTick } from '@/lib/trading/tick-bus';
 
+function extractLtpc(feed: any): any | null {
+    return (
+        feed?.ltpc ??
+        feed?.ff?.ltpc ??
+        feed?.fullFeed?.marketFF?.ltpc ??
+        feed?.fullFeed?.indexFF?.ltpc ??
+        feed?.ff?.marketFF?.ltpc ??
+        feed?.ff?.indexFF?.ltpc ??
+        feed?.firstLevelWithGreeks?.ltpc ??
+        feed?.ff?.firstLevelWithGreeks?.ltpc ??
+        null
+    );
+}
+
 // ═══════════════════════════════════════════════════════════
 // 🔌 UPSTOX ADAPTER: Normalize Upstox-specific data format
 // ═══════════════════════════════════════════════════════════
@@ -47,9 +61,10 @@ export class UpstoxAdapter {
         
         for (const key of Object.keys(feeds)) {
             const feed = feeds[key];
-            const ltpc = feed.ltpc;
+            const ltpc = extractLtpc(feed);
+            const ltp = Number(ltpc?.ltp);
             
-            if (!ltpc || !ltpc.ltp) continue;
+            if (!ltpc || !Number.isFinite(ltp) || ltp <= 0) continue;
             
             // ═══════════════════════════════════════════════════════════
             // 🛠️ SYMBOL RESOLUTION: ISIN → Trading Symbol
@@ -68,7 +83,7 @@ export class UpstoxAdapter {
             // ═══════════════════════════════════════════════════════════
             let timestamp = Date.now() / 1000; // Default to now
             if (ltpc.ltt) {
-                const ltt = parseInt(ltpc.ltt);
+                const ltt = Number(ltpc.ltt);
                 // If timestamp is in milliseconds (13 digits), convert to seconds
                 timestamp = ltt.toString().length === 13 
                     ? Math.floor(ltt / 1000) 
@@ -78,11 +93,11 @@ export class UpstoxAdapter {
             const tick: NormalizedTick = {
                 instrumentKey,
                 symbol,
-                price: ltpc.ltp,
-                volume: ltpc.vol || 0,
+                price: ltp,
+                volume: Number(ltpc.vol ?? ltpc.ltq ?? 0) || 0,
                 timestamp,
                 exchange,
-                close: ltpc.cp
+                close: Number(ltpc.cp) || undefined
             };
             
             ticks.push(tick);

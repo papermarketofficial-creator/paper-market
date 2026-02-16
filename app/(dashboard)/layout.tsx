@@ -10,7 +10,7 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div data-theme="terminal" className="bg-background min-h-screen text-foreground font-sans selection:bg-trade-buy/30">
+    <div data-theme="terminal" className="bg-background min-h-screen text-foreground font-sans ">
       <QueryClientProvider client={queryClient}>
         <DashboardLayoutClient>{children}</DashboardLayoutClient>
       </QueryClientProvider>

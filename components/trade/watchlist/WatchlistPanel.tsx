@@ -44,7 +44,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   }, []);
   
   // Get active watchlist ID from Zustand (UI state only)
-  const { activeWatchlistId, setActiveWatchlistId, prefetchInstrument, setStocks } = useMarketStore();
+  const { activeWatchlistId, setActiveWatchlistId, setStocks } = useMarketStore();
   const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
   const selectQuote = useMarketStore((state) => state.selectQuote);
   const resolvedWatchlistId = useMemo(() => {
@@ -242,7 +242,6 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
               onClick={() => onSelect(renderedStock)}
               onMouseEnter={() => {
                 setHoveredSymbol(stock.symbol);
-                if (stock.instrumentToken) prefetchInstrument(stock.instrumentToken);
               }}
               onMouseLeave={() => setHoveredSymbol(null)}
               className={cn(

@@ -1,5 +1,4 @@
 import { MarketSlice, Quote } from "../types";
-import { chartRegistry } from "@/lib/trading/chart-registry";
 import { candleEngine } from "@/lib/trading/candle-engine";
 import { toCanonicalSymbol, toInstrumentKey, toSymbolKey } from "@/lib/market/symbol-normalization";
 
@@ -195,11 +194,6 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
         historicalData: [...state.historicalData, candleUpdate.candle],
         livePrice: tick.price,
       }));
-
-      const controller = chartRegistry.get(chartKey);
-      if (controller) {
-        controller.updateCandle(candleUpdate.candle as any);
-      }
       return;
     }
 
@@ -207,10 +201,5 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
       historicalData: [...state.historicalData.slice(0, -1), candleUpdate.candle],
       livePrice: tick.price,
     }));
-
-    const controller = chartRegistry.get(chartKey);
-    if (controller) {
-      controller.updateCandle(candleUpdate.candle as any);
-    }
   },
 });

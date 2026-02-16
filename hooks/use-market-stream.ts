@@ -1,10 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMarketStore } from '@/stores/trading/market.store';
-import { tickBus } from '@/lib/trading/tick-bus';
-import { getMarketStream } from '@/lib/sse';
+import { getMarketWebSocket } from '@/lib/market-ws';
 import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normalization';
 
 const ISIN_LIKE = /^[A-Z]{2}[A-Z0-9]{8,14}$/i;
+const CORE_INDEX_KEYS = [
+    toInstrumentKey('NSE_INDEX|NIFTY 50'),
+    toInstrumentKey('NSE_INDEX|NIFTY BANK'),
+    toInstrumentKey('NSE_INDEX|NIFTY FIN SERVICE'),
+].filter(Boolean);
+
+function pickFirstFinite(...values: unknown[]): number | null {
+    for (const value of values) {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed)) return parsed;
+    }
+    return null;
+}
 
 function resolveTradingSymbol(rawSymbol: unknown): string {
     if (typeof rawSymbol !== 'string') return '';
@@ -37,86 +49,176 @@ function resolveTradingSymbol(rawSymbol: unknown): string {
 }
 
 export const useMarketStream = () => {
-    const { applyTick, hydrateQuotes, updateLiveCandle } = useMarketStore();
+    const applyTick = useMarketStore((state) => state.applyTick);
+    const hydrateQuotes = useMarketStore((state) => state.hydrateQuotes);
+    const updateLiveCandle = useMarketStore((state) => state.updateLiveCandle);
+    const stocks = useMarketStore((state) => state.stocks);
+    const indices = useMarketStore((state) => state.indices);
     const [isConnected, setIsConnected] = useState(false);
+    const wsRef = useRef<ReturnType<typeof getMarketWebSocket> | null>(null);
+    const subscribedKeysRef = useRef<Set<string>>(new Set());
+
+    const collectDesiredKeys = useCallback((): string[] => {
+        const state = useMarketStore.getState();
+        const keys = new Set<string>();
+
+        for (const item of state.stocks || []) {
+            const key = toInstrumentKey(item.instrumentToken || item.symbol || '');
+            if (key) keys.add(key);
+        }
+
+        for (const item of state.indices || []) {
+            const key = toInstrumentKey(item.instrumentToken || item.symbol || '');
+            if (key) keys.add(key);
+        }
+
+        for (const key of CORE_INDEX_KEYS) {
+            keys.add(key);
+        }
+
+        const chartKey = toInstrumentKey(state.simulatedInstrumentKey || state.simulatedSymbol || '');
+        if (chartKey) keys.add(chartKey);
+
+        return Array.from(keys);
+    }, []);
+
+    const syncSubscriptions = useCallback(() => {
+        const ws = wsRef.current;
+        if (!ws || !ws.isConnected()) return;
+
+        const desired = new Set(collectDesiredKeys());
+        const current = subscribedKeysRef.current;
+
+        if (desired.size === current.size && [...desired].every((k) => current.has(k))) {
+            return;
+        }
+
+        const toSubscribe = Array.from(desired).filter((key) => !current.has(key));
+        const toUnsubscribe = Array.from(current).filter((key) => !desired.has(key));
+
+        if (toSubscribe.length > 0) {
+            ws.subscribe(toSubscribe);
+        }
+
+        if (toUnsubscribe.length > 0) {
+            ws.unsubscribe(toUnsubscribe);
+        }
+
+        subscribedKeysRef.current = desired;
+    }, [collectDesiredKeys]);
+
+    // Re-sync subscriptions when stocks or indices change (e.g., watchlist loads)
+    useEffect(() => {
+        if (isConnected) {
+            syncSubscriptions();
+        }
+    }, [stocks, indices, isConnected, syncSubscriptions]);
 
     useEffect(() => {
-        let eventSource: EventSource | null = null;
         let cancelled = false;
 
-        const handleMessage = (event: MessageEvent) => {
-            try {
-                if (typeof event.data !== 'string' || event.data.length === 0) return;
-                if (event.data[0] !== '{') return;
-
-                const message = JSON.parse(event.data);
-
-                if (message.type === 'connected') {
-                    setIsConnected(true);
-                    return;
-                }
-
-                if (message.type !== 'tick' || !message.data) {
-                    return;
-                }
-
-                const quote = message.data;
-                const instrumentKey = toInstrumentKey(
-                    quote.instrumentKey || quote.instrument_key || quote.symbol
-                );
-                const tradingSymbol = toCanonicalSymbol(
-                    resolveTradingSymbol(quote.symbol || quote.instrumentKey || quote.instrument_key)
-                );
-                if (!instrumentKey) return;
-                if (!tradingSymbol) return;
-
-                const price = Number(quote.price);
-                if (!Number.isFinite(price) || price <= 0) return;
-
-                const tickTime = quote.timestamp
-                    ? Math.floor(quote.timestamp / 1000)
-                    : Math.floor(Date.now() / 1000);
-
-                tickBus.emitTick({
-                    instrumentKey,
-                    symbol: tradingSymbol,
-                    price,
-                    volume: quote.volume || 0,
-                    timestamp: tickTime,
-                    exchange: 'NSE',
-                    close: quote.close
-                });
-
-                applyTick({
-                    instrumentKey,
-                    symbol: tradingSymbol,
-                    price,
-                    close: quote.close,
-                    timestamp: quote.timestamp,
-                });
-                updateLiveCandle(
-                    {
-                        price,
-                        volume: quote.volume,
-                        time: tickTime
-                    },
-                    tradingSymbol,
-                    instrumentKey
-                );
-            } catch (err) {
-                console.error('Failed to parse SSE message', err);
+        const handleTick = (tickData: any) => {
+            if (process.env.NODE_ENV === 'development') {
+                console.log('RAW TICK:', tickData);
             }
+
+            const rawInstrument =
+                tickData?.instrumentKey ??
+                tickData?.instrument_key ??
+                tickData?.instrumentToken ??
+                tickData?.instrument_token ??
+                tickData?.symbol;
+
+            const instrumentKey = toInstrumentKey(String(rawInstrument || ''));
+            if (!instrumentKey) return;
+
+            const tradingSymbol =
+                toCanonicalSymbol(tickData?.symbol) ||
+                instrumentKey.split('|')[1] ||
+                instrumentKey;
+
+            const safeSymbol =
+                tradingSymbol ||
+                instrumentKey.split('|')[1] ||
+                instrumentKey;
+
+            const price =
+                Number(tickData?.price) ||
+                Number(tickData?.ltp) ||
+                Number(tickData?.last_price) ||
+                Number(tickData?.lastTradedPrice) ||
+                Number(tickData?.lastPrice) ||
+                Number(tickData?.ltpc?.ltp) ||
+                Number(tickData?.data?.price) ||
+                Number(tickData?.data?.ltp);
+
+            if (!Number.isFinite(price)) {
+                console.warn('Dropping tick - invalid price', tickData);
+                return;
+            }
+
+            const close = pickFirstFinite(
+                tickData?.close,
+                tickData?.cp,
+                tickData?.prevClose,
+                tickData?.prev_close,
+                tickData?.ltpc?.cp,
+                tickData?.data?.close
+            );
+
+            const timestamp = pickFirstFinite(
+                tickData?.timestamp,
+                tickData?.ts,
+                tickData?.time,
+                tickData?.ltt,
+                tickData?.ltpc?.ltt,
+                tickData?.data?.timestamp
+            );
+
+            if (process.env.NODE_ENV === 'development') {
+                console.log('PARSED TICK:', {
+                    instrumentKey,
+                    tradingSymbol: safeSymbol,
+                    price,
+                });
+            }
+
+            applyTick({
+                instrumentKey,
+                symbol: safeSymbol,
+                price,
+                close: close && close > 0 ? close : undefined,
+                timestamp: timestamp && timestamp > 0 ? timestamp : undefined,
+            });
         };
 
-        const handleOpen = () => {
-            setIsConnected(true);
-        };
+        const handleCandle = (candleData: any) => {
+            // ═══════════════════════════════════════════════════════════
+            // 📊 HANDLE CANDLE FROM MARKET-ENGINE
+            // ═══════════════════════════════════════════════════════════
+            const { candle, instrumentKey: rawInstrumentKey, symbol: rawSymbol } = candleData;
 
-        const handleError = () => {
-            setIsConnected(false);
+            const instrumentKey = toInstrumentKey(rawInstrumentKey);
+            const tradingSymbol = toCanonicalSymbol(resolveTradingSymbol(rawSymbol || rawInstrumentKey));
+
+            if (!instrumentKey || !tradingSymbol) return;
+
+            // updateLiveCandle expects { price, volume, time }
+            updateLiveCandle(
+                {
+                    price: candle.close,
+                    volume: candle.volume || 0,
+                    time: candle.time
+                },
+                tradingSymbol,
+                instrumentKey
+            );
         };
 
         const connect = async () => {
+            // ═══════════════════════════════════════════════════════════
+            // 🔄 STEP 1: Hydrate initial snapshot
+            // ═══════════════════════════════════════════════════════════
             try {
                 const snapshotRes = await fetch('/api/v1/market/snapshot', {
                     cache: 'no-store',
@@ -133,26 +235,47 @@ export const useMarketStream = () => {
 
             if (cancelled) return;
 
-            eventSource = getMarketStream();
-            if (eventSource.readyState === EventSource.OPEN) {
-                setIsConnected(true);
-            }
+            // ═══════════════════════════════════════════════════════════
+            // 🔌 STEP 2: Connect to market-engine WebSocket
+            // ═══════════════════════════════════════════════════════════
+            const wsUrl = process.env.NEXT_PUBLIC_MARKET_ENGINE_WS_URL || 'ws://localhost:4201';
 
-            eventSource.addEventListener('message', handleMessage as EventListener);
-            eventSource.addEventListener('open', handleOpen);
-            eventSource.addEventListener('error', handleError);
+            const ws = getMarketWebSocket({
+                url: wsUrl,
+                onTick: handleTick,
+                onCandle: handleCandle,
+                onConnected: () => {
+                    setIsConnected(true);
+                    syncSubscriptions();
+                },
+                onDisconnected: () => {
+                    setIsConnected(false);
+                    subscribedKeysRef.current = new Set();
+                },
+                onError: (error) => {
+                    console.error('Market WebSocket error:', error);
+                    setIsConnected(false);
+                    subscribedKeysRef.current = new Set();
+                }
+            });
+            wsRef.current = ws;
+
+            ws.connect();
         };
 
         connect();
 
         return () => {
             cancelled = true;
-            if (!eventSource) return;
-            eventSource.removeEventListener('message', handleMessage as EventListener);
-            eventSource.removeEventListener('open', handleOpen);
-            eventSource.removeEventListener('error', handleError);
+            const ws = wsRef.current;
+            if (ws?.isConnected() && subscribedKeysRef.current.size > 0) {
+                ws.unsubscribe(Array.from(subscribedKeysRef.current));
+            }
+            subscribedKeysRef.current = new Set();
+            // Note: We don't disconnect the WebSocket here as it's a singleton
+            // It will be reused across component mounts
         };
-    }, [applyTick, hydrateQuotes, updateLiveCandle]);
+    }, [applyTick, hydrateQuotes, syncSubscriptions, updateLiveCandle]);
 
     return { isConnected };
 };

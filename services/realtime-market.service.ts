@@ -69,9 +69,11 @@ class RealTimeMarketService extends EventEmitter {
         const raw = String(feedKey || "").trim();
         if (!raw) return "";
 
-        const rhs = raw.includes("|") ? (raw.split("|")[1] || raw) : raw;
+        const sep = raw.includes("|") ? "|" : raw.includes(":") ? ":" : "";
+        const rhs = sep ? (raw.split(sep)[1] || raw) : raw;
         const fromIsin =
             this.reverseIsinMap.get(rhs) ||
+            this.reverseIsinMap.get(rhs.toUpperCase()) ||
             this.reverseIsinMap.get(raw);
 
         return this.canonicalizeSymbol(fromIsin || rhs || raw);
@@ -277,7 +279,12 @@ class RealTimeMarketService extends EventEmitter {
                 const closePrice = Number(detail?.closePrice);
                 const canonicalSymbol = this.resolveSymbolFromFeedKey(feedKey);
                 if (!canonicalSymbol) continue;
-                const instrumentKey = toInstrumentKey(feedKey);
+                const mappedInstrumentToken =
+                    this.isinMap.get(canonicalSymbol) ||
+                    this.isinMap.get(canonicalSymbol.toUpperCase()) ||
+                    this.isinMap.get(canonicalSymbol.replace(/\s+/g, "")) ||
+                    feedKey;
+                const instrumentKey = toInstrumentKey(mappedInstrumentToken);
 
                 const quote: Quote = {
                     instrumentKey,

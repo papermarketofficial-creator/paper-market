@@ -56,7 +56,6 @@ export interface WatchlistSlice {
   setActiveWatchlistId: (watchlistId: string | null) => void;
   setStocks: (stocks: Stock[]) => void;
   updateStockPrices: (priceUpdates: Record<string, number>) => void;
-  prefetchInstrument: (instrumentKey: string) => void;
   getCurrentInstruments: (mode: InstrumentMode | 'indices') => Stock[];
   searchInstruments: (query: string, type?: string) => Promise<void>;
 }

@@ -34,7 +34,7 @@ function DashboardContentWrapper({ children }: { children: ReactNode }) {
 
   return (
 
-    <div className="flex min-h-screen w-full bg-background text-foreground font-sans selection:bg-trade-buy/30 selection:text-trade-buy">
+    <div className="flex min-h-screen w-full bg-background text-foreground font-sans ">
       <Sidebar mobileOpen={mobileMenuOpen} setMobileOpen={setMobileMenuOpen} />
 
       <div className="flex-1 flex flex-col md:ml-16 transition-all duration-300">

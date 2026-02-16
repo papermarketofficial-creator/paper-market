@@ -28,6 +28,7 @@ export function MarketStatusBar() {
   const { selectedSymbol } = useGlobalStore();
   const balance = useWalletStore((state) => state.balance);
   const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
+  const selectQuote = useMarketStore((state) => state.selectQuote);
 
   const selectedKey = symbolToIndexInstrumentKey(toCanonicalSymbol(selectedSymbol || ""));
 
@@ -46,7 +47,10 @@ export function MarketStatusBar() {
       <div className="flex items-center gap-4 text-muted-foreground font-mono">
         {INDEX_CONFIG.map((cfg) => {
           const key = cfg.instrumentKey;
-          const quote = quotesByInstrument[key];
+          const quote =
+            quotesByInstrument[key] ||
+            selectQuote(key) ||
+            selectQuote(cfg.symbol);
           const price = quote?.price ?? 0;
           const changePercent = quote?.changePercent ?? 0;
           const hasQuote = Number.isFinite(price) && price > 0;

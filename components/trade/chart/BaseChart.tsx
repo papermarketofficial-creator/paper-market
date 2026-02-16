@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, forwardRef, useImperativeHandle, useState } from 'react';
+import { useEffect, useRef, forwardRef, useImperativeHandle, useState, useCallback } from 'react';
 import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, CandlestickData, HistogramSeries, HistogramData, CrosshairMode, LineSeries } from 'lightweight-charts';
 import { IndicatorConfig } from '@/stores/trading/analysis.store';
 import { DrawingManager } from './overlays/DrawingManager';
@@ -60,6 +60,21 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   const isFetchingRef = useRef(false); // Throttle
   const previousLogicalRangeRef = useRef<{ from: number; to: number } | null>(null); // Avoid initial auto-pagination
   const chartControllerRef = useRef<ChartController | null>(null); // Chart controller for direct updates
+  const rawToRenderTimeRef = useRef<Map<number, number>>(new Map());
+  const renderToRawTimeRef = useRef<Map<number, number>>(new Map());
+  const intervalHintSecRef = useRef<number>(60);
+  const lastAppliedDataRef = useRef<{
+    symbolKey: string;
+    rangeKey: string;
+    length: number;
+    firstTime: number;
+    lastTime: number;
+    lastRenderTime: number;
+    lastOpen: number;
+    lastHigh: number;
+    lastLow: number;
+    lastClose: number;
+  } | null>(null);
   
   // 🔥 FIX: Use ref for onLoadMore to prevent chart remounting when callback changes
   const onLoadMoreRef = useRef(onLoadMore);
@@ -86,6 +101,64 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   // Helper: Detect if pane needed
   const hasMacd = indicators.some(i => i.config.type === 'MACD');
 
+  const detectIntervalHintSec = useCallback((rows: CandlestickData[]): number => {
+    if (rows.length < 2) return 60;
+    const counts = new Map<number, number>();
+    let fallback = 60;
+
+    for (let i = 1; i < rows.length; i++) {
+      const prev = Number(rows[i - 1]?.time);
+      const curr = Number(rows[i]?.time);
+      const diff = Math.round(curr - prev);
+      if (!Number.isFinite(diff) || diff <= 0) continue;
+      if (diff < fallback || fallback <= 0) fallback = diff;
+      if (diff > 86_400 * 7) continue;
+      counts.set(diff, (counts.get(diff) ?? 0) + 1);
+    }
+
+    let best = 0;
+    let bestCount = -1;
+    for (const [diff, count] of counts.entries()) {
+      if (count > bestCount || (count === bestCount && diff < best)) {
+        best = diff;
+        bestCount = count;
+      }
+    }
+
+    if (best > 0) return best;
+    return fallback > 0 ? fallback : 60;
+  }, []);
+
+  const rebuildRenderTimeline = useCallback((rows: CandlestickData[]): CandlestickData[] => {
+    rawToRenderTimeRef.current = new Map();
+    renderToRawTimeRef.current = new Map();
+    if (!rows.length) return rows;
+
+    const intervalHint = detectIntervalHintSec(rows);
+    intervalHintSecRef.current = intervalHint;
+
+    const firstRaw = Number(rows[0].time);
+    const mapped: CandlestickData[] = new Array(rows.length);
+    for (let i = 0; i < rows.length; i++) {
+      const rawTime = Number(rows[i].time);
+      const renderTime = firstRaw + i * intervalHint;
+      rawToRenderTimeRef.current.set(rawTime, renderTime);
+      renderToRawTimeRef.current.set(renderTime, rawTime);
+      mapped[i] = {
+        ...rows[i],
+        time: renderTime as any,
+      };
+    }
+
+    return mapped;
+  }, [detectIntervalHintSec]);
+
+  const resolveDisplayTime = useCallback((time: number): number => {
+    const t = Number(time);
+    if (!Number.isFinite(t)) return t;
+    return renderToRawTimeRef.current.get(Math.floor(t)) ?? t;
+  }, []);
+
   // 1. Initialize Chart (Mount Only)
   useEffect(() => {
     if (!chartContainerRef.current) return;
@@ -110,12 +183,15 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         borderColor: '#1F2937',
         timeVisible: true,
         secondsVisible: false,
+        rightBarStaysOnScroll: true,
+        lockVisibleTimeRangeOnResize: true,
+        ignoreWhitespaceIndices: true,
         rightOffset: 12,
         // 🔥 INSTITUTIONAL-GRADE TICK MARK FORMATTER
         // Uses tick weight (not timeframe) for automatic zoom adaptation
         // Matches TradingView/Bloomberg professional behavior
         tickMarkFormatter: (time: number, tickMarkType: number) => {
-          const date = new Date(time * 1000);
+          const date = new Date(resolveDisplayTime(time) * 1000);
           
           // 🔥 Tick weight-based formatting (professional approach)
           // tickMarkType: 0=year, 1=month, 2=day, 3=hour, 4=minute
@@ -145,7 +221,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       },
       localization: {
         timeFormatter: (time: number) => {
-          const date = new Date(time * 1000);
+          const date = new Date(resolveDisplayTime(time) * 1000);
           
           // 🔥 SMART FORMATTING: Detect if this is a daily/weekly/monthly candle
           // Daily+ candles have time = 00:00 in IST, intraday candles have actual times
@@ -296,6 +372,10 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     if (!candleSeriesRef.current || !symbol) return;
     const registrySymbol = toCanonicalSymbol(symbol);
     const registryInstrumentKey = toInstrumentKey(instrumentKey || registrySymbol);
+    rawToRenderTimeRef.current = new Map();
+    renderToRawTimeRef.current = new Map();
+    intervalHintSecRef.current = 60;
+    lastAppliedDataRef.current = null;
 
     console.log(`🎨 Initializing ChartController for ${registryInstrumentKey}`);
     
@@ -332,27 +412,129 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     const controller = chartControllerRef.current;
     
-    console.log(`📊 Data update effect triggered: data.length=${data?.length || 0}, symbol=${symbol}`);
+    console.log(`Data update effect triggered: data.length=${data?.length || 0}, symbol=${symbol}`);
     
-    // 🛡️ RACE CONDITION FIX: Ensure controller exists and has valid series
+    // RACE CONDITION FIX: Ensure controller exists and has valid series
     // When switching stocks, old controller might be destroyed while new data arrives
     if (!controller || !data || data.length === 0) {
-        console.log(`⏸️ Skipping data update: controller=${!!controller}, data.length=${data?.length || 0}`);
+        console.log(`Skipping data update: controller=${!!controller}, data.length=${data?.length || 0}`);
         return;
     }
     
     // Double-check the controller still has a valid series (not destroyed)
     const stats = controller.getStats();
     if (!stats.hasSeries) {
-        console.warn(`⚠️ Skipping data update - controller series not ready for ${symbol}`);
+        console.warn(`Skipping data update - controller series not ready for ${symbol}`);
         return;
     }
+
+    const symbolKey = toInstrumentKey(instrumentKey || symbol);
+    const rangeKey = String(range || '').toUpperCase();
+    const firstTime = Number(data[0]?.time);
+    const lastCandle = data[data.length - 1] as CandlestickData;
+    const lastTime = Number(lastCandle?.time);
+    const lastOpen = Number((lastCandle as any)?.open);
+    const lastHigh = Number((lastCandle as any)?.high);
+    const lastLow = Number((lastCandle as any)?.low);
+    const lastClose = Number((lastCandle as any)?.close);
+
+    const prev = lastAppliedDataRef.current;
+    const symbolOrRangeChanged = !prev || prev.symbolKey !== symbolKey || prev.rangeKey !== rangeKey;
+    const sameLeadingEdge = !!prev && firstTime === prev.firstTime;
+    const appendedNewestOnly =
+      !!prev &&
+      !symbolOrRangeChanged &&
+      sameLeadingEdge &&
+      data.length === prev.length + 1 &&
+      lastTime > prev.lastTime;
+    const patchedNewestOnly =
+      !!prev &&
+      !symbolOrRangeChanged &&
+      sameLeadingEdge &&
+      data.length === prev.length &&
+      lastTime === prev.lastTime &&
+      (lastOpen !== prev.lastOpen ||
+        lastHigh !== prev.lastHigh ||
+        lastLow !== prev.lastLow ||
+        lastClose !== prev.lastClose);
+    const unchangedData =
+      !!prev &&
+      !symbolOrRangeChanged &&
+      sameLeadingEdge &&
+      data.length === prev.length &&
+      lastTime === prev.lastTime &&
+      lastOpen === prev.lastOpen &&
+      lastHigh === prev.lastHigh &&
+      lastLow === prev.lastLow &&
+      lastClose === prev.lastClose;
+
+    if ((appendedNewestOnly || patchedNewestOnly) && lastCandle) {
+      let renderTime = rawToRenderTimeRef.current.get(lastTime);
+      if (!Number.isFinite(renderTime as number) && appendedNewestOnly && prev) {
+        renderTime = prev.lastRenderTime + intervalHintSecRef.current;
+        rawToRenderTimeRef.current.set(lastTime, renderTime as number);
+        renderToRawTimeRef.current.set(renderTime as number, lastTime);
+      }
+      if (!Number.isFinite(renderTime as number)) {
+        renderTime = lastTime;
+      }
+
+      const renderCandle: CandlestickData = {
+        ...(lastCandle as any),
+        time: Number(renderTime) as any,
+      };
+      controller.updateCandle(renderCandle);
+      lastAppliedDataRef.current = {
+        symbolKey,
+        rangeKey,
+        length: data.length,
+        firstTime,
+        lastTime,
+        lastRenderTime: Number(renderTime),
+        lastOpen,
+        lastHigh,
+        lastLow,
+        lastClose,
+      };
+      return;
+    }
+
+    if (unchangedData) {
+      return;
+    }
+
+    if (process.env.NODE_ENV !== 'production') {
+      for (let i = 1; i < data.length; i++) {
+        if (data[i].time <= data[i - 1].time) {
+          console.error('Non-monotonic candle stream detected', {
+            index: i,
+            prev: data[i - 1],
+            current: data[i],
+          });
+          break;
+        }
+      }
+    }
     
-    // Update chart data via controller (no remount!)
-    console.log(`📊 Updating ChartController with ${data.length} candles for ${symbol}`);
-    controller.setData(data);
-    console.log(`✅ Chart data updated successfully: ${data.length} candles for ${symbol}`);
-  }, [data, symbol]); // Listen to data changes, update via controller
+    // Full reset path: symbol/range changes and non-tail structural history changes.
+    console.log(`Updating ChartController with ${data.length} candles for ${symbol}`);
+    const renderedData = rebuildRenderTimeline(data as CandlestickData[]);
+    controller.setData(renderedData);
+    const renderedLastTime = Number(renderedData[renderedData.length - 1]?.time ?? lastTime);
+    lastAppliedDataRef.current = {
+      symbolKey,
+      rangeKey,
+      length: data.length,
+      firstTime,
+      lastTime,
+      lastRenderTime: renderedLastTime,
+      lastOpen,
+      lastHigh,
+      lastLow,
+      lastClose,
+    };
+    console.log(`Chart data updated successfully: ${data.length} candles for ${symbol}`);
+  }, [data, symbol, instrumentKey, range]); // Listen to data changes, update via controller
 
   // Handle Volume Updates
   useEffect(() => {
@@ -361,7 +543,18 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     
     if (volumeSeries && volumeData && volumeData.length > 0) {
         try {
-            volumeSeries.setData(volumeData);
+            const mappedVolume = volumeData.map((row: any) => {
+              const rawTime = Number(row?.time);
+              const mappedTime = rawToRenderTimeRef.current.get(rawTime);
+              if (!Number.isFinite(mappedTime as number)) {
+                return row;
+              }
+              return {
+                ...row,
+                time: Number(mappedTime) as any,
+              };
+            });
+            volumeSeries.setData(mappedVolume as any);
         } catch (error) {
             console.warn(`⚠️ Failed to update volume data:`, error);
         }

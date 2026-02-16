@@ -133,36 +133,13 @@ export class ChartController {
 
         // 🔥 CRITICAL FIX: Filter out candles with null/undefined values
         // Lightweight Charts throws "Value is null" error if OHLC values are null
-        const validData = data.filter((candle: any) => {
-            if (!candle || candle.time == null) {
-                console.warn(`⚠️ ChartController: Skipping candle with null time:`, candle);
-                return false;
-            }
-            if (candle.open == null || candle.high == null || candle.low == null || candle.close == null) {
-                console.warn(`⚠️ ChartController: Skipping candle with null OHLC:`, {
-                    time: candle.time,
-                    open: candle.open,
-                    high: candle.high,
-                    low: candle.low,
-                    close: candle.close
-                });
-                return false;
-            }
-            return true;
-        });
-
-        if (validData.length < data.length) {
-            console.warn(`🔥 ChartController: Filtered out ${data.length - validData.length} invalid candles`);
-        }
-
-        if (validData.length === 0) {
-            console.error(`❌ ChartController: No valid candles to display`);
+        if (!Array.isArray(data) || data.length === 0) {
             return;
         }
 
         // 🔥 CRITICAL: lightweight-charts requires data sorted by time (ascending)
         // Sort before passing to avoid "data must be asc ordered by time" error
-        const sortedData = [...validData].sort((a, b) => {
+        const sortedData = [...data].sort((a, b) => {
             const timeA = typeof a.time === 'number' ? a.time : new Date(a.time as any).getTime() / 1000;
             const timeB = typeof b.time === 'number' ? b.time : new Date(b.time as any).getTime() / 1000;
             return timeA - timeB;

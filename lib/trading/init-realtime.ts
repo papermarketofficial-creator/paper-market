@@ -1,60 +1,57 @@
-import { tickBus } from '@/lib/trading/tick-bus';
-import { candleEngine } from '@/lib/trading/candle-engine';
 import { chartRegistry } from '@/lib/trading/chart-registry';
+import { getMarketWebSocket } from '@/lib/market-ws';
 
 // ═══════════════════════════════════════════════════════════
-// 🔌 SUBSCRIBE CANDLE ENGINE TO TICK BUS
+// 🔌 SUBSCRIBE TO CANDLE UPDATES FROM MARKET-ENGINE
 // ═══════════════════════════════════════════════════════════
 /**
- * Subscribe CandleEngine to process ticks for 1-minute candles
- * (Can be extended to support multiple intervals)
+ * Subscribe to candle updates from market-engine WebSocket
+ * and update charts directly via ChartRegistry
+ * 
+ * NOTE: This replaces the old TickBus → CandleEngine → ChartRegistry flow.
+ * Now: market-engine → WebSocket → ChartRegistry
  */
-function initializeCandleEngineSubscription() {
-    console.log("🔌 Subscribing CandleEngine to TickBus...");
+function initializeCandleSubscription() {
+    console.log("🔌 Subscribing to candle updates from market-engine...");
     
-    tickBus.on('tick', (tick) => {
-        // Process tick for 1-minute candles (60 seconds)
-        const candleUpdate = candleEngine.processTick(tick, 60);
-        
-        if (candleUpdate) {
+    const wsUrl = process.env.NEXT_PUBLIC_MARKET_ENGINE_WS_URL || 'ws://localhost:4201';
+    
+    const ws = getMarketWebSocket({
+        url: wsUrl,
+        onCandle: (candleData) => {
+            const { candle, instrumentKey } = candleData;
+            
             // ═══════════════════════════════════════════════════════════
             // 🛠️ SINGLE-WRITER PATTERN: Direct chart update
             // ═══════════════════════════════════════════════════════════
-            // CandleEngine → ChartRegistry → ChartController
+            // market-engine → WebSocket → ChartRegistry → ChartController
             // Bypasses React/Zustand entirely for live updates
-            const controller = chartRegistry.get(candleUpdate.instrumentKey);
+            const controller = chartRegistry.get(instrumentKey);
             if (controller) {
-                controller.updateCandle(candleUpdate.candle);
+                controller.updateCandle(candle);
             }
         }
-        
-        // Future: Support multiple intervals
-        // candleEngine.processTick(tick, 300); // 5-minute
-        // candleEngine.processTick(tick, 900); // 15-minute
     });
     
-    console.log("✅ CandleEngine subscribed to TickBus");
+    // Note: Connection is handled by use-market-stream hook
+    // This just registers the candle handler
+    
+    console.log("✅ Candle subscription initialized");
 }
 
-// ═══════════════════════════════════════════════════════════
-// 🚀 AUTO-INITIALIZE ON MODULE LOAD
-// ═══════════════════════════════════════════════════════════
 // ═══════════════════════════════════════════════════════════
 // 🚀 AUTO-INITIALIZE ON MODULE LOAD
 // ═══════════════════════════════════════════════════════════
 declare global {
-    var __candleEngineInitialized: boolean | undefined;
+    var __candleSubscriptionInitialized: boolean | undefined;
 }
 
-if (!globalThis.__candleEngineInitialized) {
-    globalThis.__candleEngineInitialized = true;
-    initializeCandleEngineSubscription();
-    
-    // 📊 METRICS LOCK: Monitor listener count (Target: 1)
-    console.log("📊 TickBus 'tick' listeners:", tickBus.listenerCount('tick'));
+if (!globalThis.__candleSubscriptionInitialized) {
+    globalThis.__candleSubscriptionInitialized = true;
+    initializeCandleSubscription();
 } else {
-    console.log("♻️ CandleEngine already subscribed (Skipping re-init)");
+    console.log("♻️ Candle subscription already initialized (Skipping re-init)");
 }
 
 // Export for manual control if needed
-export { initializeCandleEngineSubscription };
+export { initializeCandleSubscription };

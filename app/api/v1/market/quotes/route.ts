@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ApiError, handleError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
+import { db } from "@/lib/db";
+import { instruments } from "@/lib/db/schema";
+import { inArray } from "drizzle-orm";
+import { toInstrumentKey } from "@/lib/market/symbol-normalization";
+import { resolveUpstoxPreviousClose } from "@/lib/market/upstox-quote-normalization";
 
 const UPSTOX_API_URL = "https://api.upstox.com/v2";
 
-type UpstoxQuoteMap = Record<string, { last_price?: number; close_price?: number }>;
+type UpstoxQuoteMap = Record<string, any>;
 
 function sanitizeInstrumentKeys(input: unknown): string[] {
     if (!Array.isArray(input)) return [];
@@ -14,6 +19,33 @@ function sanitizeInstrumentKeys(input: unknown): string[] {
         .filter((k) => k.length > 0);
 
     return Array.from(new Set(keys));
+}
+
+function toUpstoxRequestInstrumentKey(raw: string): string {
+    const normalized = String(raw || "")
+        .trim()
+        .replace(":", "|")
+        .replace(/\s*\|\s*/g, "|")
+        .replace(/\s+/g, " ");
+
+    if (!normalized) return "";
+
+    const [prefixRaw, suffixRaw = ""] = normalized.split("|");
+    const prefix = String(prefixRaw || "").toUpperCase();
+    const suffix = String(suffixRaw || "").trim();
+    if (!suffix) return prefix;
+
+    if (prefix.endsWith("_INDEX")) {
+        const titled = suffix
+            .toLowerCase()
+            .split(" ")
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(" ");
+        return `${prefix}|${titled}`;
+    }
+
+    return `${prefix}|${suffix.toUpperCase()}`;
 }
 
 function parseJsonSafe(text: string): any | null {
@@ -37,18 +69,21 @@ function buildQuoteLookup(quotes: UpstoxQuoteMap): Map<string, { last: number; c
     const out = new Map<string, { last: number; close: number }>();
 
     for (const [key, quote] of Object.entries(quotes || {})) {
+        const normalizedKey = toInstrumentKey(key);
+        if (!normalizedKey) continue;
+
         const last = Number(quote?.last_price);
         if (!Number.isFinite(last) || last <= 0) continue;
 
-        const closeRaw = Number(quote?.close_price);
-        const close = Number.isFinite(closeRaw) && closeRaw > 0 ? closeRaw : last;
+        const resolvedClose = resolveUpstoxPreviousClose(quote, last);
+        const close = resolvedClose ?? last;
 
-        out.set(key, { last, close });
-        out.set(key.replace(":", "|"), { last, close });
-        out.set(key.replace("|", ":"), { last, close });
+        out.set(normalizedKey, { last, close });
+        out.set(normalizedKey.replace("|", ":"), { last, close });
+        out.set(normalizedKey.replace(":", "|"), { last, close });
 
-        const sep = key.includes(":") ? ":" : key.includes("|") ? "|" : "";
-        const suffix = sep ? key.split(sep)[1] || "" : key;
+        const sep = normalizedKey.includes(":") ? ":" : normalizedKey.includes("|") ? "|" : "";
+        const suffix = sep ? normalizedKey.split(sep)[1] || "" : normalizedKey;
         if (suffix) {
             out.set(`suffix:${suffix.toUpperCase()}`, { last, close });
         }
@@ -57,20 +92,69 @@ function buildQuoteLookup(quotes: UpstoxQuoteMap): Map<string, { last: number; c
     return out;
 }
 
+async function buildSymbolSuffixLookup(instrumentKeys: string[]): Promise<Map<string, string>> {
+    const out = new Map<string, string>();
+    const equityIsinKeys = Array.from(
+        new Set(
+            instrumentKeys
+                .map((key) => toInstrumentKey(key))
+                .filter((key) => /^(NSE_EQ|BSE_EQ)[|:][A-Z0-9]{8,20}$/.test(key))
+                .map((key) => key.replace(":", "|"))
+        )
+    );
+
+    if (equityIsinKeys.length === 0) return out;
+
+    try {
+        const rows = await db
+            .select({
+                instrumentToken: instruments.instrumentToken,
+                symbol: instruments.tradingsymbol,
+            })
+            .from(instruments)
+            .where(inArray(instruments.instrumentToken, equityIsinKeys));
+
+        for (const row of rows) {
+            const key = toInstrumentKey(row.instrumentToken);
+            const symbol = String(row.symbol || "").trim().toUpperCase();
+            if (!key || !symbol) continue;
+            out.set(key, symbol);
+        }
+    } catch (error) {
+        logger.warn({ err: error }, "Failed to load quote key symbol aliases");
+    }
+
+    return out;
+}
+
 function toRequestedKeyPayload(
     instrumentKeys: string[],
-    lookup: Map<string, { last: number; close: number }>
+    lookup: Map<string, { last: number; close: number }>,
+    symbolSuffixByKey?: Map<string, string>
 ): UpstoxQuoteMap {
     const out: UpstoxQuoteMap = {};
 
-    for (const key of instrumentKeys) {
+    for (const rawKey of instrumentKeys) {
+        const key = toInstrumentKey(rawKey);
+        if (!key) continue;
+
         const sep = key.includes(":") ? ":" : key.includes("|") ? "|" : "";
         const suffix = sep ? key.split(sep)[1] || "" : key;
-        const quote =
-            lookup.get(key) ||
-            lookup.get(key.replace("|", ":")) ||
-            lookup.get(key.replace(":", "|")) ||
-            (suffix ? lookup.get(`suffix:${suffix.toUpperCase()}`) : undefined);
+        const mappedSymbolSuffix = symbolSuffixByKey?.get(key);
+
+        const candidates = [
+            key,
+            key.replace("|", ":"),
+            key.replace(":", "|"),
+            suffix ? `suffix:${suffix.toUpperCase()}` : "",
+            mappedSymbolSuffix ? `suffix:${mappedSymbolSuffix}` : "",
+        ].filter(Boolean);
+
+        let quote: { last: number; close: number } | undefined;
+        for (const candidate of candidates) {
+            quote = lookup.get(candidate);
+            if (quote) break;
+        }
 
         if (!quote) continue;
 
@@ -86,14 +170,30 @@ function toRequestedKeyPayload(
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
-        const instrumentKeys = sanitizeInstrumentKeys(body?.instrumentKeys);
+        const requestKeys = sanitizeInstrumentKeys(body?.instrumentKeys);
+        const instrumentKeys = Array.from(
+            new Set(
+                requestKeys
+                    .map((key) => toInstrumentKey(key))
+                    .filter((key) => key.length > 0)
+            )
+        );
 
-        if (instrumentKeys.length === 0) {
+        if (requestKeys.length === 0 || instrumentKeys.length === 0) {
             return NextResponse.json(
                 { success: false, error: "instrumentKeys array is required" },
                 { status: 400 }
             );
         }
+
+        const symbolSuffixByKey = await buildSymbolSuffixLookup(instrumentKeys);
+        const upstreamInstrumentKeys = Array.from(
+            new Set(
+                requestKeys
+                    .map((key) => toUpstoxRequestInstrumentKey(key))
+                    .filter((key) => key.length > 0)
+            )
+        );
 
         const { UpstoxService } = await import("@/services/upstox.service");
         const token = await UpstoxService.getSystemToken();
@@ -103,7 +203,7 @@ export async function POST(req: NextRequest) {
         }
 
         const params = new URLSearchParams();
-        params.set("instrument_key", instrumentKeys.join(","));
+        params.set("instrument_key", upstreamInstrumentKeys.join(","));
         const url = `${UPSTOX_API_URL}/market-quote/quotes?${params.toString()}`;
 
         const response = await fetch(url, {
@@ -120,7 +220,7 @@ export async function POST(req: NextRequest) {
 
         if (response.ok && upstreamStatus !== "error" && Object.keys(upstreamData).length > 0) {
             const lookup = buildQuoteLookup(upstreamData);
-            const payload = toRequestedKeyPayload(instrumentKeys, lookup);
+            const payload = toRequestedKeyPayload(instrumentKeys, lookup, symbolSuffixByKey);
             if (Object.keys(payload).length > 0) {
                 return NextResponse.json({
                     success: true,
@@ -142,7 +242,7 @@ export async function POST(req: NextRequest) {
             "Quotes endpoint failed, using LTP fallback"
         );
 
-        const prices = await UpstoxService.getSystemQuotes(instrumentKeys);
+        const prices = await UpstoxService.getSystemQuotes(upstreamInstrumentKeys);
         const ltpAsQuotes: UpstoxQuoteMap = {};
         for (const [key, price] of Object.entries(prices)) {
             const last = Number(price);
@@ -154,9 +254,10 @@ export async function POST(req: NextRequest) {
         }
 
         const ltpLookup = buildQuoteLookup(ltpAsQuotes);
-        const fallbackPayload = toRequestedKeyPayload(instrumentKeys, ltpLookup);
+        const fallbackPayload = toRequestedKeyPayload(instrumentKeys, ltpLookup, symbolSuffixByKey);
 
         if (Object.keys(fallbackPayload).length > 0) {
+            logger.info({ count: Object.keys(fallbackPayload).length }, "Quotes served from LTP fallback");
             return NextResponse.json({
                 success: true,
                 data: fallbackPayload,
@@ -166,6 +267,7 @@ export async function POST(req: NextRequest) {
             });
         }
 
+        // Both primary and fallback failed
         const msg =
             (typeof upstream?.message === "string" && upstream.message.trim()) ||
             `${response.status} ${response.statusText}`.trim() ||

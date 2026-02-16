@@ -91,26 +91,36 @@ export class CandleOrchestrator {
             console.log(`🎻 Orchestrator: First ${rawCandles[0][0]}, Last ${rawCandles[rawCandles.length-1][0]}`);
         }
 
-       const formattedCandles: FormattedCandle[] = [];
-const formattedVolume: FormattedVolume[] = [];
+        const formattedCandles: FormattedCandle[] = [];
+        const formattedVolume: FormattedVolume[] = [];
 
-for (const c of rawCandles) {
-    const time = toUnixSeconds(c[0]);
+        for (const c of rawCandles) {
+            const time = toUnixSeconds(c[0]);
 
-    formattedCandles.push({
-        time,
-        open: c[1],
-        high: c[2],
-        low: c[3],
-        close: c[4],
-    });
+            if (
+                !Number.isFinite(time) ||
+                !Number.isFinite(c[1]) ||
+                !Number.isFinite(c[2]) ||
+                !Number.isFinite(c[3]) ||
+                !Number.isFinite(c[4])
+            ) {
+                throw new Error('Invalid candle received from broker');
+            }
 
-    formattedVolume.push({
-        time,
-        value: c[5],
-        color: c[4] >= c[1] ? '#22C55E' : '#EF4444'
-    });
-}
+            formattedCandles.push({
+                time,
+                open: c[1],
+                high: c[2],
+                low: c[3],
+                close: c[4],
+            });
+
+            formattedVolume.push({
+                time,
+                value: c[5],
+                color: c[4] >= c[1] ? '#22C55E' : '#EF4444'
+            });
+        }
 
 
         return {
@@ -190,8 +200,8 @@ for (const c of rawCandles) {
                     break;
 
                 case '3M':
-                    // 🔥 NEW: 3 Month Range -> Daily Candles
-                    unit = 'days'; interval = '1';
+                    // 🔥 NEW: 3 Month Range -> Hourly Candles
+                    unit = 'hours'; interval = '1';
                     if (isPaginating) {
                         fromDateObj = subMonths(anchorDate, 1);
                         toDateStr = this.formatDateIST(anchorDate);

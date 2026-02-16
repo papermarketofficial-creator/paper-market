@@ -188,13 +188,13 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
         '1d': '1m',       // 1D range -> 1 minute candles
         '5d': '5m',       // 5D range -> 5 minute candles
         '1mo': '30m',     // 1M range -> 30 minute candles
-        '3mo': '1d',      // 3M range -> Daily candles
+        '3mo': '1h',      // 3M range -> Hourly candles
         '6mo': '1d',      // 6M range -> Daily candles (limit: hourly max 3mo)
         '1y': '1d',       // 1Y range -> Daily candles
         '3y': '1w',       // 3Y range -> Weekly candles
         '5y': '1mo',      // 5Y range -> Monthly candles
         // Upper case variants just in case
-        '1D': '1m', '5D': '5m', '1M': '30m', '3M': '1d', '6M': '1d', '1Y': '1d', '5Y': '1mo'
+        '1D': '1m', '5D': '5m', '1M': '30m', '3M': '1h', '6M': '1d', '1Y': '1d', '5Y': '1mo'
     };
     const detectedInterval = range ? (rangeToInterval[range] || '1d') : timeframe;
     

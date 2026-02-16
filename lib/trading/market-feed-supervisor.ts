@@ -2,10 +2,6 @@ import { EventEmitter } from "events";
 import { UpstoxWebSocket } from "@/lib/integrations/upstox/websocket";
 import { SymbolSupervisor } from "./symbol-supervisor";
 
-declare global {
-  var __marketFeedSupervisor: MarketFeedSupervisor | undefined;
-}
-
 type SessionState = "NORMAL" | "EXPECTED_SILENCE" | "SUSPECT_OUTAGE";
 
 export class MarketFeedSupervisor extends EventEmitter {
@@ -281,6 +277,4 @@ export class MarketFeedSupervisor extends EventEmitter {
   }
 }
 
-export const marketFeedSupervisor =
-  global.__marketFeedSupervisor ??
-  (global.__marketFeedSupervisor = new MarketFeedSupervisor());
+export const marketFeedSupervisor = new MarketFeedSupervisor();

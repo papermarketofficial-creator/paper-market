@@ -78,14 +78,6 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
     });
   },
   
-  prefetchInstrument: (instrumentKey: string) => {
-      // Fire and forget fetch to warm up the cache
-      // Mapping range '1d' to API params (simplified match with initializeSimulation logic)
-      // Using '1d' as default prefetch interval if not complex
-      fetch(`/api/v1/market/history?instrumentKey=${instrumentKey}&interval=1m&range=1d`)
-         .catch(err => console.error('Prefetch failed', err));
-  },
-
   // ✅ Pure function getter, requires mode to be passed
   getCurrentInstruments: (mode: any) => {
     const state = get();

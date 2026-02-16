@@ -25,14 +25,17 @@ interface ChartContainerProps {
 
 // Reuse the generation logic from previous file for now (Phase 1)
 const INITIAL_VISIBLE_BARS_BY_RANGE: Record<string, number> = {
-  '1D': 130,
-  '5D': 180,
-  '1M': 220,
-  '3M': 180,
-  '6M': 220,
-  '1Y': 260,
-  '3Y': 220,
-  '5Y': 240,
+  // Keep initial framing close to expected candle density per range.
+  // Previous caps were too low for multi-day/month ranges, causing partial
+  // windows that looked visually broken/disconnected.
+  '1D': 220,  // 1m candles (thicker default candles for readability)
+  '5D': 420,  // 5m candles (~375 for 5 sessions)
+  '1M': 620,  // 15m candles (~500-600 for a month)
+  '3M': 460,  // 1h candles (~350-450 for 3 months)
+  '6M': 180,  // 1d candles
+  '1Y': 300,  // 1d candles
+  '3Y': 190,  // 1w candles
+  '5Y': 280,  // 1w candles
 };
 
 
@@ -81,47 +84,14 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     }, 300)
   );
 
-  const debouncedSubscribeRef = useRef(
-    debounce(async (sym: string) => {
-      try {
-        const res = await fetch('/api/v1/market/subscribe', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ symbols: [sym] })
-        });
-
-        if (!res.ok) {
-          const details = await res.text().catch(() => '');
-          throw new Error(`Subscribe failed (${res.status}) ${details}`);
-        }
-      } catch (err) {
-        console.error('Failed to subscribe:', err);
-      }
-    }, 250)
-  );
-
   // 1) Symbol subscription lifecycle.
   useEffect(() => {
     useAnalysisStore.getState().cancelDrawing();
     stopSimulation();
     startSimulation();
 
-    debouncedSubscribeRef.current(symbol);
-
     return () => {
       stopSimulation();
-      fetch('/api/v1/market/subscribe', {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbols: [symbol] })
-      })
-        .then(async (res) => {
-          if (!res.ok) {
-            const details = await res.text().catch(() => '');
-            throw new Error(`Unsubscribe failed (${res.status}) ${details}`);
-          }
-        })
-        .catch((err) => console.error('Failed to unsubscribe:', err));
     };
   }, [symbol, startSimulation, stopSimulation]);
 
@@ -339,7 +309,14 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
       const timeScale = chartApi.timeScale();
       const normalizedRange = (range || '1D').toUpperCase();
       const targetVisibleBars = INITIAL_VISIBLE_BARS_BY_RANGE[normalizedRange] ?? ONE_DAY_VISIBLE_FALLBACK_BARS;
-      const visibleBars = Math.max(40, Math.min(targetVisibleBars, historicalData.length));
+      const chartWidth = Number((chartApi.options() as any)?.width);
+      const minPixelsPerBar = normalizedRange === '1D' ? 4 : 3;
+      const widthCappedBars =
+        Number.isFinite(chartWidth) && chartWidth > 0
+          ? Math.floor(chartWidth / minPixelsPerBar)
+          : targetVisibleBars;
+      const desiredVisibleBars = Math.min(targetVisibleBars, Math.max(40, widthCappedBars));
+      const visibleBars = Math.max(40, Math.min(desiredVisibleBars, historicalData.length));
       const rightOffsetBars = normalizedRange === '1D' ? 12 : 8;
 
       // Use logical index range so initial candle width is consistent regardless of timestamp gaps.

@@ -5,6 +5,7 @@ import { logger } from "@/lib/logger";
 import { ApiError } from "@/lib/errors";
 import { cache, CacheKeys } from "@/lib/cache";
 import { upstoxRateLimiter } from "@/lib/rate-limit";
+import { resolveUpstoxPreviousClose } from "@/lib/market/upstox-quote-normalization";
 
 const UPSTOX_API_URL = "https://api.upstox.com/v2";
 
@@ -386,10 +387,12 @@ export class UpstoxService {
                   const lastPrice = Number((value as any)?.last_price);
                   if (!Number.isFinite(lastPrice) || lastPrice <= 0) continue;
 
-                  const close = Number((value as any)?.close_price);
+                  const close = resolveUpstoxPreviousClose(value, lastPrice);
+                  const closePrice =
+                      typeof close === "number" && Number.isFinite(close) && close > 0 ? close : null;
                   quotes[key] = {
                       lastPrice,
-                      closePrice: Number.isFinite(close) && close > 0 ? close : null,
+                      closePrice,
                   };
               }
 

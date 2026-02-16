@@ -65,50 +65,29 @@ const { handlers, auth: nextAuth, signIn, signOut } = NextAuth({
             return true;
         },
         async jwt({ token, user }) {
-            // On initial sign-in, trust the resolved user id immediately.
-            if (user?.id) {
-                token.sub = user.id;
-                return token;
-            }
-
-            // For existing sessions, avoid DB hits unless id is missing.
-            if (token.sub) {
-                return token;
-            }
-
-            if (!token.email) {
-                return token;
-            }
-
-            try {
-                const [dbUser] = await db
-                    .select({ id: users.id })
-                    .from(users)
-                    .where(eq(users.email, token.email))
-                    .limit(1);
-
-                if (dbUser?.id) {
-                    token.sub = dbUser.id;
+            if (user) {
+                const userId = typeof (user as any).id === "string" ? (user as any).id : undefined;
+                const userRole = typeof (user as any).role === "string" ? (user as any).role : undefined;
+                if (userId) {
+                    token.sub = userId;
+                    (token as any).id = userId;
                 }
-            } catch (error) {
-                // Fail-soft: keep existing token data so transient DB issues don't drop session.
-                console.warn("JWT DB lookup failed, keeping current token:", error);
+                if (userRole) {
+                    (token as any).role = userRole;
+                }
+                return token;
             }
 
+            if (!(token as any).id && token.sub) {
+                (token as any).id = token.sub;
+            }
             return token;
         },
     },
 });
 
-// ═══════════════════════════════════════════════════════════
-// 🔒 SESSION CACHE (PHASE 4: DB Relief)
-// ═══════════════════════════════════════════════════════════
-// WHY: auth() hits DB on EVERY request (select from users).
-// Without cache → 100 req/sec = 100 DB queries/sec.
-// With 60s cache → 100 req/sec = ~2 DB queries/sec.
-//
-// CRITICAL: This prevents DB connection pool exhaustion under load.
-// ═══════════════════════════════════════════════════════════
+// Keep a short-lived in-memory session cache to reduce repeated token decode work
+// on bursty request patterns. JWT strategy remains the source of truth.
 
 import { LRUCache } from 'lru-cache';
 

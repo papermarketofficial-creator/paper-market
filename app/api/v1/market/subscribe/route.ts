@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { realTimeMarketService } from "@/services/realtime-market.service";
 
 export const dynamic = 'force-dynamic';
 
 /**
- * 🔥 INSTITUTIONAL PATTERN: Server-side symbol subscriptions
+ * Subscribe/Unsubscribe routes are deprecated.
  * 
- * SSE stream is symbol-agnostic (permanent connection).
- * Subscriptions happen server-side when charts/watchlists load.
+ * Symbol subscriptions are now handled client-side via WebSocket
+ * connection to market-engine. These routes are kept for backward
+ * compatibility but should not be used.
  * 
- * This prevents:
- * - SSE reconnect storms
- * - Tick drops during symbol changes
- * - Ghost subscriptions
+ * To subscribe to symbols:
+ * 1. Client connects to market-engine WebSocket (ws://localhost:4201)
+ * 2. Client sends: { type: 'subscribe', symbols: ['RELIANCE', 'TCS'] }
+ * 3. Market-engine handles ref-counted subscriptions to Upstox
  */
 export async function POST(req: NextRequest) {
     try {
@@ -32,16 +32,12 @@ export async function POST(req: NextRequest) {
             );
         }
 
-        // Initialize if not already
-        await realTimeMarketService.initialize();
-
-        // Subscribe to symbols via supervisor (ref-counted)
-        await realTimeMarketService.subscribe(symbols);
-
-        console.log(`✅ Subscribed to ${symbols.length} symbols:`, symbols);
+        // This route is deprecated - subscriptions happen client-side via WebSocket
+        console.warn(`⚠️ Deprecated subscribe route called for ${symbols.length} symbols. Use WebSocket instead.`);
 
         return NextResponse.json({
             success: true,
+            message: "Subscriptions are now handled client-side via WebSocket. This route is deprecated.",
             data: { subscribedCount: symbols.length, symbols }
         });
 
@@ -71,13 +67,12 @@ export async function DELETE(req: NextRequest) {
             );
         }
 
-        // Unsubscribe via supervisor (ref-counted)
-        await realTimeMarketService.unsubscribe(symbols);
-
-        console.log(`🗑️ Unsubscribed from ${symbols.length} symbols:`, symbols);
+        // This route is deprecated - unsubscriptions happen client-side via WebSocket
+        console.warn(`⚠️ Deprecated unsubscribe route called for ${symbols.length} symbols. Use WebSocket instead.`);
 
         return NextResponse.json({
             success: true,
+            message: "Unsubscriptions are now handled client-side via WebSocket. This route is deprecated.",
             data: { unsubscribedCount: symbols.length }
         });
 
