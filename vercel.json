@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/admin/eod-price-update",
-      "schedule": "35 10 * * 1-5"
-    }
-  ]
-}
