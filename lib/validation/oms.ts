@@ -4,6 +4,7 @@ import { z } from "zod";
 const OrderSideEnum = z.enum(["BUY", "SELL"]);
 const OrderTypeEnum = z.enum(["MARKET", "LIMIT"]);
 const OrderStatusEnum = z.enum(["PENDING", "OPEN", "FILLED", "CANCELLED", "REJECTED"]);
+const ExitReasonEnum = z.enum(["MANUAL", "STOP_LOSS", "TARGET", "EXPIRY"]);
 
 // Base order fields shared between MARKET and LIMIT orders
 const BaseOrderSchema = z.object({
@@ -13,12 +14,26 @@ const BaseOrderSchema = z.object({
         .min(2, "Symbol must be at least 2 characters")
         .max(30, "Symbol cannot exceed 30 characters")
         .transform((val) => val.toUpperCase()),
+    instrumentToken: z
+        .string()
+        .trim()
+        .min(3, "Instrument token is required"), // Required for token-driven routing
     side: OrderSideEnum,
     quantity: z
         .number()
         .int("Quantity must be an integer")
         .positive("Quantity must be positive"),
-    idempotencyKey: z.string().uuid("Invalid idempotency key format").optional(),
+    idempotencyKey: z
+        .string()
+        .trim()
+        .min(8, "Idempotency key must be at least 8 characters")
+        .max(128, "Idempotency key cannot exceed 128 characters")
+        .optional(),
+    exitReason: ExitReasonEnum.optional(),
+    settlementPrice: z
+        .number()
+        .positive("Settlement price must be positive")
+        .optional(),
 });
 
 // Market order schema

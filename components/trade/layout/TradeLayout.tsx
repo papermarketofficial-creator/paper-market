@@ -10,7 +10,7 @@ interface TradeLayoutProps {
 
 export function TradeLayout({ watchlist, chart, orderForm }: TradeLayoutProps) {
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden bg-background">
+    <div className="flex h-full overflow-hidden bg-background">
       {/* Middle Column: Watchlist (Fixed Width + Resizable logic conceptually) */}
       <div className="w-[320px] md:w-[360px] border-r border-border flex flex-col shrink-0">
         {watchlist}

@@ -86,7 +86,7 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
   // ─────────────────────────────────────────────────────────────────
   // 📈 Chart Data Actions
   // ─────────────────────────────────────────────────────────────────
-  fetchMoreHistory: async (symbol: string, range: string, endTime: number) => {
+  fetchMoreHistory: async (symbol: string, range: string, endTime: number, instrumentKey?: string) => {
       // Prevent fetching if already loading or no more history
       if (get().isFetchingHistory) {
           console.log('⏸️ fetchMoreHistory: Already fetching, skipping');
@@ -109,7 +109,9 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
               day: '2-digit'
           }).format(new Date(endTime * 1000));
           
-          let queryParams = `symbol=${symbol}`;
+          let queryParams = `symbol=${encodeURIComponent(symbol)}`;
+          const resolvedKey = toInstrumentKey(instrumentKey || get().simulatedInstrumentKey || "");
+          if (resolvedKey) queryParams += `&instrumentKey=${encodeURIComponent(resolvedKey)}`;
           if (range) queryParams += `&range=${range}`;
           queryParams += `&toDate=${toDateStr}`; // Pagination cursor
   
@@ -174,10 +176,12 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
       }
   },
 
-  initializeSimulation: async (symbol: string, timeframe = '1d', range?: string) => {
+  initializeSimulation: async (symbol: string, timeframe = '1d', range?: string, instrumentKey?: string) => {
     const canonicalSymbol = toCanonicalSymbol(symbol);
     const state = get();
+    const explicitInstrumentKey = toInstrumentKey(instrumentKey || "");
     const knownInstrument =
+      explicitInstrumentKey ||
       state.stocksBySymbol?.[canonicalSymbol]?.instrumentToken ||
       state.stocks?.find((item: any) => toCanonicalSymbol(item.symbol) === canonicalSymbol)?.instrumentToken ||
       state.indices?.find((item: any) => toCanonicalSymbol(item.symbol) === canonicalSymbol)?.instrumentToken ||
@@ -214,7 +218,8 @@ export const createChartDataSlice: MarketSlice<any> = (set, get) => ({
     }); 
     
     try {
-        let queryParams = `symbol=${canonicalSymbol}`;
+        let queryParams = `symbol=${encodeURIComponent(canonicalSymbol)}`;
+        if (resolvedInstrumentKey) queryParams += `&instrumentKey=${encodeURIComponent(resolvedInstrumentKey)}`;
         if (range) queryParams += `&range=${range}`;
         else queryParams += `&timeframe=${timeframe}`;
 

@@ -24,8 +24,11 @@ export interface Transaction {
 export interface WalletState {
     // Balance state
     balance: number;
+    equity: number;
     blockedBalance: number;
     availableBalance: number;
+    marginStatus: "NORMAL" | "MARGIN_STRESSED";
+    accountState: "NORMAL" | "MARGIN_STRESSED" | "LIQUIDATING";
     currency: string;
     lastReconciled: Date | null;
 
@@ -63,8 +66,11 @@ export interface TransactionFilters {
 export const useWalletStore = create<WalletState>((set, get) => ({
     // Initial state
     balance: 0,
+    equity: 0,
     blockedBalance: 0,
     availableBalance: 0,
+    marginStatus: "NORMAL",
+    accountState: "NORMAL",
     currency: "INR",
     lastReconciled: null,
     transactions: [],
@@ -94,8 +100,19 @@ export const useWalletStore = create<WalletState>((set, get) => ({
             if (result.success && result.data) {
                 set({
                     balance: result.data.balance,
+                    equity: result.data.equity,
                     blockedBalance: result.data.blockedBalance,
                     availableBalance: result.data.availableBalance,
+                    marginStatus:
+                        result.data.marginStatus === "MARGIN_STRESSED"
+                            ? "MARGIN_STRESSED"
+                            : "NORMAL",
+                    accountState:
+                        result.data.accountState === "LIQUIDATING"
+                            ? "LIQUIDATING"
+                            : result.data.accountState === "MARGIN_STRESSED"
+                                ? "MARGIN_STRESSED"
+                                : "NORMAL",
                     currency: result.data.currency,
                     lastReconciled: result.data.lastReconciled ? new Date(result.data.lastReconciled) : null,
                     isLoadingBalance: false,
@@ -162,8 +179,11 @@ export const useWalletStore = create<WalletState>((set, get) => ({
     resetWallet: () => {
         set({
             balance: 0,
+            equity: 0,
             blockedBalance: 0,
             availableBalance: 0,
+            marginStatus: "NORMAL",
+            accountState: "NORMAL",
             currency: "INR",
             lastReconciled: null,
             transactions: [],

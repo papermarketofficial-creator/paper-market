@@ -60,6 +60,14 @@ class TickBus {
     private listeners = new Set<(tick: NormalizedTick) => void>();
     private tickCount = 0;
     private symbolCounts = new Map<string, number>();
+    private symbolLastSeen = new Map<string, number>();
+    private symbolCleanupInterval: NodeJS.Timeout | null = null;
+    private readonly SYMBOL_COUNT_RETENTION_MS = 60 * 60 * 1000;
+    private readonly SYMBOL_CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
+
+    constructor() {
+        this.startSymbolCleanupLoop();
+    }
 
     /**
      * Subscribe to tick events
@@ -110,8 +118,10 @@ class TickBus {
         
         // Track per-symbol counts
         const identityKey = tick.instrumentKey || tick.symbol || "__unknown__";
+        const nowMs = Date.now();
         const count = this.symbolCounts.get(identityKey) || 0;
         this.symbolCounts.set(identityKey, count + 1);
+        this.symbolLastSeen.set(identityKey, nowMs);
 
         // 🔥 BACKPRESSURE: Keep only latest tick per symbol
         // During volatility spikes (20x tick rate), this prevents memory explosion
@@ -151,6 +161,7 @@ class TickBus {
      * Get statistics
      */
     getStats() {
+        this.cleanupStaleSymbolCounts(Date.now());
         return {
             totalTicks: this.tickCount,
             symbolCounts: Object.fromEntries(this.symbolCounts),
@@ -173,6 +184,22 @@ class TickBus {
     resetStats() {
         this.tickCount = 0;
         this.symbolCounts.clear();
+        this.symbolLastSeen.clear();
+    }
+
+    private startSymbolCleanupLoop(): void {
+        if (this.symbolCleanupInterval) return;
+        this.symbolCleanupInterval = setInterval(() => {
+            this.cleanupStaleSymbolCounts(Date.now());
+        }, this.SYMBOL_CLEANUP_INTERVAL_MS);
+    }
+
+    private cleanupStaleSymbolCounts(nowMs: number): void {
+        for (const [symbol, lastSeenMs] of this.symbolLastSeen.entries()) {
+            if (nowMs - lastSeenMs <= this.SYMBOL_COUNT_RETENTION_MS) continue;
+            this.symbolLastSeen.delete(symbol);
+            this.symbolCounts.delete(symbol);
+        }
     }
 }
 
@@ -186,9 +213,8 @@ const globalForTickBus = globalThis as unknown as { __tickBus: TickBus };
 
 export const tickBus = globalForTickBus.__tickBus || new TickBus();
 
-if (process.env.NODE_ENV !== 'production') {
-    globalForTickBus.__tickBus = tickBus;
-}
+// Always cache globally to prevent duplicate instances in production
+globalForTickBus.__tickBus = tickBus;
 
 // ═══════════════════════════════════════════════════════════
 // 🚨 PHASE 0: Memory Logging (Baseline Visibility)

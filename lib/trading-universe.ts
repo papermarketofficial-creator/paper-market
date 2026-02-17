@@ -1,5 +1,7 @@
 export const TRADING_UNIVERSE = {
   indices: [
+    "NIFTY",
+    "BANKNIFTY",
     "NIFTY 50",
     "NIFTY BANK",
     "NIFTY FIN SERVICE",
@@ -73,6 +75,53 @@ export const TRADING_UNIVERSE = {
   },
 } as const; // Make it readonly
 
+const DERIVATIVE_MARKERS = new Set(["FUT", "FUTURE", "CE", "PE", "CALL", "PUT"]);
+
+function normalizeKey(value: string): string {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function extractUnderlyingHints(tradingsymbol: string): string[] {
+  const symbol = tradingsymbol.toUpperCase().trim();
+  if (!symbol) return [];
+
+  const tokens = symbol.split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return [];
+
+  const hints = new Set<string>();
+  hints.add(tokens[0]);
+
+  const markerIndex = tokens.findIndex((token) => DERIVATIVE_MARKERS.has(token));
+  if (markerIndex > 0) {
+    hints.add(tokens.slice(0, markerIndex).join(" "));
+  }
+
+  hints.add(symbol.replace(/\s+/g, ""));
+  return [...hints];
+}
+
+const INDEX_KEYS = TRADING_UNIVERSE.indices.map((item) => normalizeKey(item));
+const EQUITY_KEYS = TRADING_UNIVERSE.equities.map((item) => normalizeKey(item));
+const INDEX_KEY_SET = new Set(INDEX_KEYS);
+const EQUITY_KEY_SET = new Set(EQUITY_KEYS);
+
+function matchesUniverseCandidate(
+  candidateKeys: string[],
+  allowedSet: Set<string>,
+  allowedPrefixKeys: string[]
+): boolean {
+  for (const key of candidateKeys) {
+    if (!key) continue;
+    if (allowedSet.has(key)) return true;
+
+    for (const prefix of allowedPrefixKeys) {
+      if (key.startsWith(prefix)) return true;
+    }
+  }
+
+  return false;
+}
+
 /**
  * Checks if an instrument is allowed to be traded based on the Universe configuration.
  */
@@ -94,12 +143,18 @@ export function isInstrumentAllowed(instrument: {
   }
 
   const symbolUpper = instrument.tradingsymbol.toUpperCase();
-  const isIndex = TRADING_UNIVERSE.indices.includes(symbolUpper as any);
-  const isEquity = TRADING_UNIVERSE.equities.includes(symbolUpper as any);
+  const nameUpper = instrument.name.toUpperCase();
+  const candidateKeys = [
+    normalizeKey(symbolUpper),
+    normalizeKey(nameUpper),
+    ...extractUnderlyingHints(symbolUpper).map((item) => normalizeKey(item)),
+  ];
+  const isIndex = matchesUniverseCandidate(candidateKeys, INDEX_KEY_SET, INDEX_KEYS);
+  const isEquity = matchesUniverseCandidate(candidateKeys, EQUITY_KEY_SET, EQUITY_KEYS);
 
   // 3. Check Underlying existence
   if (!isIndex && !isEquity) {
-      return { allowed: false, reason: `Instrument ${symbolUpper} is not in the allowed list of Indices or Equities` };
+      return { allowed: false, reason: `Instrument ${symbolUpper} / ${nameUpper} is not in the allowed list of Indices or Equities` };
   }
 
   // 4. Check Derivatives Policy

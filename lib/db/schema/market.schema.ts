@@ -42,15 +42,19 @@ export const instruments = pgTable('instruments', {
     segment: text('segment').notNull(),
     exchange: text('exchange').notNull(),
     isActive: boolean('isActive').notNull().default(true),
+    lastSyncedAt: timestamp('lastSyncedAt'),
     createdAt: timestamp('createdAt').defaultNow(),
     updatedAt: timestamp('updatedAt').defaultNow(),
 }, (t) => {
     return {
-        uniqueExchangeToken: uniqueIndex('uniqueExchangeToken').on(t.exchange, t.exchangeToken),
+        // uniqueExchangeToken: uniqueIndex('uniqueExchangeToken').on(t.exchange, t.exchangeToken), // Removed to allow sync of overlapping exchange tokens
         idxSymbol: index('idxInstrumentsSymbol').on(t.tradingsymbol),
         idxName: index('idxInstrumentsName').on(t.name),
         idxExpiry: index('idxInstrumentsExpiry').on(t.expiry),
         idxSegment: index('idxInstrumentsSegment').on(t.segment),
+        idxInstrumentType: index('idxInstrumentsType').on(t.instrumentType),
+        idxIsActive: index('idxInstrumentsIsActive').on(t.isActive),
+        idxLastSyncedAt: index('idxInstrumentsLastSyncedAt').on(t.lastSyncedAt),
     }
 });
 

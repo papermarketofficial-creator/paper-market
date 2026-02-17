@@ -5,6 +5,7 @@ export type TradeStatus = 'FILLED' | 'CLOSED' | 'OPEN' | 'CANCELLED' | 'PENDING'
 export type OrderType = 'MARKET' | 'LIMIT' | 'STOP';
 
 export interface TradeParams {
+  instrumentToken: string;
   symbol: string;
   side: Side;
   quantity: number;
@@ -14,6 +15,7 @@ export interface TradeParams {
 
 export interface Trade {
   id: string;
+  instrumentToken?: string;
   symbol: string;
   name: string;
   side: Side;

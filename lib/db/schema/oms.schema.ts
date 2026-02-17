@@ -2,6 +2,7 @@ import { pgTable, text, integer, numeric, timestamp, pgEnum, uuid, index, unique
 import { sql } from 'drizzle-orm';
 import { type InferSelectModel, type InferInsertModel } from 'drizzle-orm';
 import { users } from './users.schema';
+import { instruments } from './market.schema';
 
 export const OrderSide = pgEnum('order_side', ['BUY', 'SELL']);
 export const OrderType = pgEnum('order_type', ['MARKET', 'LIMIT']);
@@ -11,6 +12,7 @@ export const orders = pgTable('orders', {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: text('userId').notNull().references(() => users.id),
     symbol: text('symbol').notNull(),
+    instrumentToken: text('instrumentToken').notNull().references(() => instruments.instrumentToken),
     side: OrderSide('side').notNull(),
     quantity: integer('quantity').notNull(),
     orderType: OrderType('orderType').notNull(),
@@ -21,6 +23,7 @@ export const orders = pgTable('orders', {
     createdAt: timestamp('createdAt').defaultNow().notNull(),
     updatedAt: timestamp('updatedAt').defaultNow().notNull(),
     rejectionReason: text('rejectionReason'),
+    exitReason: text('exitReason'),
     idempotencyKey: text('idempotencyKey'),
     // New fields for tracking realized P&L on closing orders
     averagePrice: numeric('averagePrice', { precision: 10, scale: 2 }), // Entry price of the position being closed
@@ -29,8 +32,10 @@ export const orders = pgTable('orders', {
     return {
         userIdIdx: index('orders_userId_idx').on(t.userId),
         symbolIdx: index('orders_symbol_idx').on(t.symbol),
+        instrumentTokenIdx: index('orders_instrumentToken_idx').on(t.instrumentToken),
         statusIdx: index('orders_status_idx').on(t.status),
         createdAtIdx: index('orders_createdAt_idx').on(t.createdAt),
+        idempotencyIdx: index('orders_userId_idempotency_idx').on(t.userId, t.idempotencyKey),
         quantityPositive: check('orders_quantity_positive', sql`${t.quantity} > 0`),
         limitPricePositive: check('orders_limitPrice_positive', sql`${t.limitPrice} IS NULL OR ${t.limitPrice} > 0`),
     };
@@ -41,6 +46,7 @@ export const trades = pgTable('trades', {
     orderId: uuid('orderId').notNull().references(() => orders.id),
     userId: text('userId').notNull().references(() => users.id),
     symbol: text('symbol').notNull(),
+    instrumentToken: text('instrumentToken').references(() => instruments.instrumentToken),
     side: OrderSide('side').notNull(),
     quantity: integer('quantity').notNull(),
     price: numeric('price', { precision: 10, scale: 2 }).notNull(),
@@ -59,7 +65,8 @@ export const trades = pgTable('trades', {
 export const positions = pgTable('positions', {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: text('userId').notNull().references(() => users.id),
-    symbol: text('symbol').notNull(),
+    symbol: text('symbol').notNull(), // Display Only (Legacy)
+    instrumentToken: text('instrumentToken').notNull().references(() => instruments.instrumentToken),
     quantity: integer('quantity').notNull(),
     averagePrice: numeric('averagePrice', { precision: 10, scale: 2 }).notNull(),
     realizedPnL: numeric('realizedPnL', { precision: 12, scale: 2 }).notNull().default('0'),
@@ -67,7 +74,9 @@ export const positions = pgTable('positions', {
     updatedAt: timestamp('updatedAt').defaultNow().notNull(),
 }, (t) => {
     return {
-        userSymbolUnique: uniqueIndex('positions_userId_symbol_unique').on(t.userId, t.symbol),
+        // Enforce uniqueness on (UseId, InstrumentToken)
+        userTokenUnique: uniqueIndex('positions_userId_instrumentToken_unique').on(t.userId, t.instrumentToken),
+        instrumentTokenIdx: index('positions_instrumentToken_idx').on(t.instrumentToken),
         averagePricePositive: check('positions_averagePrice_positive', sql`${t.averagePrice} > 0`),
     };
 });

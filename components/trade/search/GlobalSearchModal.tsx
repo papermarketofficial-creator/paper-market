@@ -11,17 +11,20 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Search, Loader2, TrendingUp, Bookmark } from "lucide-react";
+import { Search, TrendingUp, Bookmark } from "lucide-react";
 import { useMarketStore } from "@/stores/trading/market.store";
 import { Stock } from "@/types/equity.types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useAddInstrument, useRemoveInstrument } from "@/hooks/queries/use-watchlists";
+import Spinner from "@/components/ui/spinner";
 
 interface GlobalSearchModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSelectStock?: (stock: Stock) => void;
+  searchMode?: "ALL" | "EQUITY" | "FUTURE" | "OPTION";
+  placeholder?: string;
 }
 
 type SearchCategory = "ALL" | "Cash" | "F&O" | "Currency" | "Commodity";
@@ -30,6 +33,8 @@ export function GlobalSearchModal({
   open,
   onOpenChange,
   onSelectStock,
+  searchMode = "ALL",
+  placeholder = "Search stocks, indices, commodities...",
 }: GlobalSearchModalProps) {
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<SearchCategory>("ALL");
@@ -56,12 +61,12 @@ export function GlobalSearchModal({
   useEffect(() => {
     const handler = setTimeout(() => {
       if (query.length > 1) {
-        searchInstruments(query);
+        searchInstruments(query, searchMode);
       }
     }, 250); // slightly faster
 
     return () => clearTimeout(handler);
-  }, [query, searchInstruments]);
+  }, [query, searchInstruments, searchMode]);
 
   /* ------------------ Reset Modal ------------------ */
   useEffect(() => {
@@ -74,6 +79,10 @@ export function GlobalSearchModal({
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [open]);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [searchResults]);
 
   /* ------------------ Keyboard Navigation ------------------ */
   useEffect(() => {
@@ -153,6 +162,8 @@ export function GlobalSearchModal({
     "Commodity",
   ];
 
+  const showCenteredLoading = query.length > 1 && isSearching && searchResults.length === 0;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl p-0 gap-0">
@@ -171,13 +182,9 @@ export function GlobalSearchModal({
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search stocks, indices, commodities..."
+              placeholder={placeholder}
               className="pl-10 pr-4 h-10 focus-visible:ring-emerald-600"
             />
-
-            {isSearching && (
-              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground" />
-            )}
           </div>
         </div>
 
@@ -210,6 +217,13 @@ export function GlobalSearchModal({
                 <p className="text-sm text-muted-foreground">
                   Start typing to search instruments
                 </p>
+              </div>
+            ) : showCenteredLoading ? (
+              <div className="h-[400px] grid place-items-center">
+                <div className="flex flex-col items-center justify-center gap-3">
+                  <Spinner size={22} />
+                  <p className="text-sm text-muted-foreground">Searching...</p>
+                </div>
               </div>
             ) : searchResults.length === 0 && !isSearching ? (
               <div className="flex items-center justify-center h-full">

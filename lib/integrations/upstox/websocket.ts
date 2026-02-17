@@ -57,8 +57,6 @@ function patchSdkProtoLoad(): void {
 
 
 export class UpstoxWebSocket {
-    private static instance: UpstoxWebSocket | null = null;
-    
     private streamer: any = null; // SDK Streamer instance
     private onUpdate: MarketUpdateCallback | null = null;
     private subscriptions: Set<string> = new Set();
@@ -77,13 +75,17 @@ export class UpstoxWebSocket {
     // 🛠️ SINGLETON ACCESSOR: Get or create instance
     // ═══════════════════════════════════════════════════════════
     public static getInstance(): UpstoxWebSocket {
-        if (!global.__upstoxWebSocketInstance) {
+        const globalRef = globalThis as typeof globalThis & {
+            __upstoxWebSocketInstance?: UpstoxWebSocket;
+        };
+
+        if (!globalRef.__upstoxWebSocketInstance) {
             console.log("🆕 Creating UpstoxWebSocket singleton");
-            global.__upstoxWebSocketInstance = new UpstoxWebSocket();
+            globalRef.__upstoxWebSocketInstance = new UpstoxWebSocket();
         } else {
             console.log("♻️ Reusing UpstoxWebSocket singleton");
         }
-        return global.__upstoxWebSocketInstance;
+        return globalRef.__upstoxWebSocketInstance;
     }
 
     isSocketConnected(): boolean {

@@ -6,5 +6,6 @@ export const INSTRUMENTS: { value: InstrumentType; label: string }[] = [
     { value: "FINNIFTY", label: "FIN NIFTY" },
     { value: "SENSEX", label: "SENSEX" },
     { value: "MIDCAP", label: "MIDCAP NIFTY" },
+    { value: "STOCK FUTURES", label: "STOCK FUTURES" },
     { value: "STOCK OPTIONS", label: "STOCK OPTIONS" },
 ];

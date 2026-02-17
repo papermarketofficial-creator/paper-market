@@ -14,7 +14,7 @@ export const InstrumentSearchSchema = z.object({
         .trim()
         .min(1, { message: "Search query must be at least 1 character" })
         .max(50, { message: "Search query cannot exceed 50 characters" })
-        .regex(/^[a-zA-Z0-9\s\-_]+$/, { message: "Search contains invalid characters" })
+        .regex(/^[a-zA-Z0-9\s\-_&.]+$/, { message: "Search contains invalid characters" })
         .transform((val) => val.toUpperCase()),
 });
 

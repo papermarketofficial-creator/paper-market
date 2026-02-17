@@ -21,6 +21,7 @@ import { cn } from '@/lib/utils';
 import { Check, ChevronsUpDown, Search } from 'lucide-react';
 import { parseOptionSymbol } from '@/lib/fno-utils';
 import { formatExpiryLabel, daysToExpiry, isExpired } from '@/lib/expiry-utils';
+import { toast } from 'sonner';
 
 interface StockSearchProps {
   selectedStock: Stock | null;
@@ -103,9 +104,15 @@ export function StockSearch({
                 )}
                 {displayInstruments.map((stock) => (
                   <CommandItem
-                    key={stock.symbol}
+                    key={`${stock.instrumentToken ?? 'missing-token'}-${stock.name}`}
                     value={`${stock.symbol} ${stock.name}`}
                     onSelect={() => {
+                      if (!stock.instrumentToken) {
+                        toast.error('Instrument resolution failed', {
+                          description: `${stock.symbol} is not available in active instruments.`,
+                        });
+                        return;
+                      }
                       onStockSelect(stock);
                       setOpen(false);
                     }}

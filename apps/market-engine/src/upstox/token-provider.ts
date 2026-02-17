@@ -10,8 +10,7 @@ import { logger } from '../lib/logger.js';
  * TokenProvider manages Upstox access tokens without Next.js dependencies.
  * 
  * Priority:
- * 1. UPSTOX_ACCESS_TOKEN env var (fastest)
- * 2. Database lookup (freshest valid token from any user)
+ * 1. Database lookup (freshest valid token from any user)
  * 
  * This replaces UpstoxService.getSystemToken() for the market-engine.
  */
@@ -28,17 +27,7 @@ class TokenProvider {
             return this.cachedToken;
         }
 
-        // Priority 1: Environment variable
-        const envToken = process.env.UPSTOX_ACCESS_TOKEN;
-        if (envToken) {
-            logger.info('Using UPSTOX_ACCESS_TOKEN from environment');
-            this.cachedToken = envToken;
-            // Cache for 1 hour (tokens are valid for 24 hours, but we refresh more frequently)
-            this.cacheExpiry = Date.now() + 60 * 60 * 1000;
-            return envToken;
-        }
-
-        // Priority 2: Database lookup
+        // Priority 1: Database lookup
         try {
             const tokens = await db
                 .select()
@@ -59,7 +48,7 @@ class TokenProvider {
         }
 
         throw new Error(
-            'No valid Upstox access token found. Set UPSTOX_ACCESS_TOKEN env var or ensure a valid token exists in the database.'
+            'No valid Upstox access token found in database.'
         );
     }
 

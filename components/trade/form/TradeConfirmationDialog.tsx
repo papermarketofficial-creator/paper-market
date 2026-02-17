@@ -22,7 +22,8 @@ interface TradeConfirmationDialogProps {
   requiredMargin: number;
   productType: 'CNC' | 'MIS';
   leverageValue: number;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
+  isProcessing?: boolean;
 }
 
 export function TradeConfirmationDialog({
@@ -36,6 +37,7 @@ export function TradeConfirmationDialog({
   productType,
   leverageValue,
   onConfirm,
+  isProcessing = false,
 }: TradeConfirmationDialogProps) {
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-IN', {
@@ -66,8 +68,14 @@ export function TradeConfirmationDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="border-border hover:bg-muted hover:text-muted-foreground">Cancel</AlertDialogCancel>
+          <AlertDialogCancel
+            disabled={isProcessing}
+            className="border-border hover:bg-muted hover:text-muted-foreground"
+          >
+            Cancel
+          </AlertDialogCancel>
           <AlertDialogAction
+            disabled={isProcessing}
             onClick={onConfirm}
             className={cn(
               side === 'BUY'
@@ -75,7 +83,7 @@ export function TradeConfirmationDialog({
                 : 'bg-destructive hover:bg-destructive/90 text-destructive-foreground'
             )}
           >
-            Confirm {side}
+            {isProcessing ? 'Processing...' : `Confirm ${side}`}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

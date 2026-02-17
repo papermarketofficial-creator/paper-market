@@ -20,6 +20,8 @@ const AnalysisOverlay = dynamic(() => import('../analysis/AnalysisOverlay').then
 
 interface ChartContainerProps {
   symbol: string;
+  headerSymbol?: string;
+  instrumentKey?: string;
   onSearchClick?: () => void;
 }
 
@@ -39,10 +41,11 @@ const INITIAL_VISIBLE_BARS_BY_RANGE: Record<string, number> = {
 };
 
 
-export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
+export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchClick }: ChartContainerProps) {
   const canonicalSymbol = toCanonicalSymbol(symbol);
   const {
     isAnalysisMode,
+    setAnalysisMode,
     activeTool,
     getIndicators,
     getDrawings,
@@ -65,10 +68,12 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     fetchMoreHistory,
     updateLiveCandle
   } = useMarketStore();
-  const resolvedInstrumentKey = useMemo(
-    () => toInstrumentKey(stocksBySymbol?.[canonicalSymbol]?.instrumentToken || canonicalSymbol),
-    [stocksBySymbol, canonicalSymbol]
-  );
+  const resolvedInstrumentKey = useMemo(() => {
+    if (instrumentKey) {
+      return toInstrumentKey(instrumentKey);
+    }
+    return toInstrumentKey(stocksBySymbol?.[canonicalSymbol]?.instrumentToken || canonicalSymbol);
+  }, [instrumentKey, stocksBySymbol, canonicalSymbol]);
   const selectedQuote = useMarketStore((state) => state.quotesByInstrument[resolvedInstrumentKey]);
 
   const indicators = getIndicators(symbol);
@@ -79,8 +84,8 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   const volData = volumeData;
 
   const debouncedInitRef = useRef(
-    debounce((sym: string, tf: string | undefined, rng: string | undefined) => {
-      initializeSimulation(sym, tf, rng);
+    debounce((sym: string, tf: string | undefined, rng: string | undefined, key: string) => {
+      initializeSimulation(sym, tf, rng, key);
     }, 300)
   );
 
@@ -107,7 +112,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
       currentRequestId: (state.currentRequestId || 0) + 1,
     }));
 
-    debouncedInitRef.current(symbol, timeframe, range);
+    debouncedInitRef.current(symbol, timeframe, range, resolvedInstrumentKey);
   }, [symbol, timeframe, range, canonicalSymbol, resolvedInstrumentKey]);
 
   // Live candle updates are applied by use-market-stream.ts.
@@ -420,7 +425,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
           `1D warm-up fetch ${pagesLoaded}/${ONE_DAY_WARMUP_MAX_PAGES}: before ${new Date(firstCandleTime * 1000).toISOString()}`
         );
 
-        await marketState.fetchMoreHistory(symbol, normalizedRange, firstCandleTime);
+        await marketState.fetchMoreHistory(symbol, normalizedRange, firstCandleTime, resolvedInstrumentKey);
       }
 
       if (!cancelled) {
@@ -440,6 +445,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     currentRequestId,
     range,
     symbol,
+    resolvedInstrumentKey,
     canonicalSymbol,
     frameChartToLatest,
     isFetchingHistory,
@@ -465,11 +471,7 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
   };
 
   const handleMaximize = () => {
-     if (!document.fullscreenElement) {
-         document.documentElement.requestFullscreen();
-     } else {
-         document.exitFullscreen();
-     }
+    setAnalysisMode(true);
   };
 
   // Infinite Scroll Handler (Memoized to prevent BaseChart re-creation loop)
@@ -489,17 +491,80 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
     console.log(`🔄 handleLoadMore: Loading more data before ${firstCandleTime}`);
     console.log(`🔄 handleLoadMore: Parameters - symbol=${symbol}, range=${currentRange}, endTime=${firstCandle.time}`);
     
-    await fetchMoreHistory(symbol, currentRange, firstCandle.time as number);
-  }, [historicalData, symbol, range, fetchMoreHistory]); // ✅ Stable dependencies only
+    await fetchMoreHistory(symbol, currentRange, firstCandle.time as number, resolvedInstrumentKey);
+  }, [historicalData, symbol, range, fetchMoreHistory, resolvedInstrumentKey]); // ✅ Stable dependencies only
  
+  const leftToolbar = (
+    <TooltipProvider delayDuration={0}>
+      <div className="w-10 bg-card border-r border-border flex flex-col items-center py-4 gap-4 z-20 shrink-0">
+        {[
+          { id: 'crosshair', label: 'Crosshair', icon: <><path d="M12 3v18"/><path d="M3 12h18"/></> },
+          { id: 'cursor', label: 'Cursor', icon: <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/> },
+          { id: 'trendline', label: 'Trendline', icon: <line x1="2" y1="2" x2="22" y2="22"/> },
+          { id: 'ray', label: 'Ray', icon: <><circle cx="12" cy="12" r="2"/><path d="M12 12l10-6"/></> },
+          { id: 'horizontal-line', label: 'Horizontal Line', icon: <line x1="3" y1="12" x2="21" y2="12"/> },
+          { id: 'rectangle', label: 'Rectangle', icon: <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/> },
+          { id: 'text', label: 'Text', icon: <><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></> }
+        ].map((tool) => (
+          <Tooltip key={tool.id}>
+            <TooltipTrigger asChild>
+              <div
+                onClick={() => useAnalysisStore.getState().setActiveTool(tool.id as any)}
+                className={`p-1.5 rounded-sm cursor-pointer transition-colors ${activeTool === tool.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  {tool.icon}
+                </svg>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent side="right" sideOffset={10} className="bg-popover text-popover-foreground text-xs px-2 py-1">
+              <p>{tool.label}</p>
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </TooltipProvider>
+  );
+
+  const renderChartArea = (chartHeight: number) => (
+    <div className="relative flex-1 h-full min-w-0 bg-transparent flex flex-col">
+      {showTradingPanel && <ChartTradingPanel symbol={symbol} />}
+
+      <div className="flex-1 w-full min-h-0 relative">
+        {isFetchingHistory && isInitialLoad && (
+          <div className="absolute inset-0 z-50 bg-background/50 flex items-center justify-center">
+            <ChartLoadingIndicator />
+          </div>
+        )}
+
+        {!isFetchingHistory && historicalData.length === 0 && (
+          <div className="absolute inset-0 z-40 flex items-center justify-center text-muted-foreground bg-background/50">
+            No historical data available for {symbol}
+          </div>
+        )}
+
+        {historicalData.length > 0 && (
+          <BaseChart
+            {...chartProps}
+            height={chartHeight}
+            symbol={symbol}
+            instrumentKey={resolvedInstrumentKey}
+            range={range}
+            onChartReady={setChartApi}
+            onLoadMore={handleLoadMore}
+          />
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="relative w-full h-full group">
-      {/* Normal View */}
       {!isAnalysisMode && (
         <div className="relative w-full h-full flex flex-col">
-          {/* Top Toolbar (Upstox Style) */}
-          <ChartHeader 
-            symbol={symbol} 
+          <ChartHeader
+            symbol={symbol}
+            displaySymbol={headerSymbol}
             isInstantOrderActive={showTradingPanel}
             onToggleInstantOrder={() => setShowTradingPanel(!showTradingPanel)}
             onUndo={handleUndo}
@@ -507,89 +572,41 @@ export function ChartContainer({ symbol, onSearchClick }: ChartContainerProps) {
             onScreenshot={handleScreenshot}
             onMaximize={handleMaximize}
             onSearchClick={onSearchClick}
-            isLoading={isFetchingHistory && isInitialLoad} // Show loading only during initial chart load
+            isLoading={isFetchingHistory && isInitialLoad}
+            isFullscreen={false}
           />
 
           <div className="flex flex-1 relative min-h-0">
-             {/* Left Vertical Toolbar */}
-             <TooltipProvider delayDuration={0}>
-               <div className="w-10 bg-card border-r border-border flex flex-col items-center py-4 gap-4 z-20 shrink-0">
-                 {[
-                   { id: 'crosshair', label: 'Crosshair', icon: <><path d="M12 3v18"/><path d="M3 12h18"/></> },
-                   { id: 'cursor', label: 'Cursor', icon: <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/> },
-                   { id: 'trendline', label: 'Trendline', icon: <line x1="2" y1="2" x2="22" y2="22"/> },
-                   { id: 'ray', label: 'Ray', icon: <><circle cx="12" cy="12" r="2"/><path d="M12 12l10-6"/></> },
-                   { id: 'horizontal-line', label: 'Horizontal Line', icon: <line x1="3" y1="12" x2="21" y2="12"/> },
-                   { id: 'rectangle', label: 'Rectangle', icon: <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/> },
-                   { id: 'text', label: 'Text', icon: <><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></> }
-                 ].map((tool) => (
-                    <Tooltip key={tool.id}>
-                      <TooltipTrigger asChild>
-                         <div 
-                           onClick={() => useAnalysisStore.getState().setActiveTool(tool.id as any)}
-                           className={`p-1.5 rounded-sm cursor-pointer transition-colors ${activeTool === tool.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
-                         >
-                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                             {tool.icon}
-                           </svg>
-                         </div>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" sideOffset={10} className="bg-popover text-popover-foreground text-xs px-2 py-1">
-                        <p>{tool.label}</p>
-                      </TooltipContent>
-                    </Tooltip>
-                 ))}
-               </div>
-             </TooltipProvider>
-
-             {/* Chart Area */}
-             <div className="relative flex-1 h-full min-w-0 bg-transparent flex flex-col">
-               {/* Trading Panel (Floating - Togglable) */}
-               {showTradingPanel && <ChartTradingPanel symbol={symbol} />}
-               
-
-               {/* Main Chart */}
-               <div className="flex-1 w-full min-h-0 relative">
-                  {/* Loading Overlay - ONLY on initial load */}
-                  {isFetchingHistory && isInitialLoad && (
-                      <div className="absolute inset-0 z-50 bg-background/50 flex items-center justify-center">
-                          <ChartLoadingIndicator />
-                      </div>
-                  )}
-
-                  {/* Empty State */}
-                  {!isFetchingHistory && historicalData.length === 0 && (
-                      <div className="absolute inset-0 z-40 flex items-center justify-center text-muted-foreground bg-background/50">
-                          No historical data available for {symbol}
-                      </div>
-                  )}
-
-                  {historicalData.length > 0 && (
-                   <BaseChart 
-                     {...chartProps} 
-                     height={500}
-                     symbol={symbol} 
-                     instrumentKey={resolvedInstrumentKey}
-                     range={range} // ✅ Pass range for dynamic X-axis formatting
-                     onChartReady={setChartApi}
-                     onLoadMore={handleLoadMore}
-                   />
-                   )}
-               </div>
-
-              
-             </div>
+            {leftToolbar}
+            {renderChartArea(500)}
           </div>
         </div>
       )}
 
-      {/* Analysis Overlay View */}
       {isAnalysisMode && (
-        <AnalysisOverlay symbol={symbol}>
-          <BaseChart {...chartProps} height={window.innerHeight - 60} symbol={symbol} instrumentKey={resolvedInstrumentKey} />
+        <AnalysisOverlay>
+          <div className="relative w-full h-full flex flex-col">
+            <ChartHeader
+              symbol={symbol}
+              displaySymbol={headerSymbol}
+              isInstantOrderActive={showTradingPanel}
+              onToggleInstantOrder={() => setShowTradingPanel(!showTradingPanel)}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              onScreenshot={handleScreenshot}
+              onMaximize={() => setAnalysisMode(false)}
+              onSearchClick={onSearchClick}
+              isLoading={isFetchingHistory && isInitialLoad}
+              isFullscreen={true}
+            />
+
+            <div className="flex flex-1 relative min-h-0">
+              {leftToolbar}
+              {renderChartArea(window.innerHeight - 60)}
+            </div>
+          </div>
         </AnalysisOverlay>
       )}
     </div>
   );
 }
-

@@ -18,6 +18,8 @@ export interface UpstoxConfig {
 export interface SystemQuoteDetail {
   lastPrice: number;
   closePrice: number | null;
+  volume?: number | null;
+  oi?: number | null;
 }
 
 export class UpstoxService {
@@ -390,9 +392,23 @@ export class UpstoxService {
                   const close = resolveUpstoxPreviousClose(value, lastPrice);
                   const closePrice =
                       typeof close === "number" && Number.isFinite(close) && close > 0 ? close : null;
+                  const rawVolume = Number(
+                      (value as any)?.volume ??
+                      (value as any)?.vtt ??
+                      (value as any)?.ltq ??
+                      (value as any)?.last_trade_quantity ??
+                      (value as any)?.market_data?.volume
+                  );
+                  const rawOi = Number(
+                      (value as any)?.oi ??
+                      (value as any)?.open_interest ??
+                      (value as any)?.market_data?.oi
+                  );
                   quotes[key] = {
                       lastPrice,
                       closePrice,
+                      volume: Number.isFinite(rawVolume) ? Math.max(0, rawVolume) : null,
+                      oi: Number.isFinite(rawOi) ? Math.max(0, rawOi) : null,
                   };
               }
 

@@ -83,5 +83,15 @@ class MarketTickJob {
     }
 }
 
-// Singleton instance
-export const marketTickJob = new MarketTickJob();
+declare global {
+    var __marketTickJob: MarketTickJob | undefined;
+}
+
+const globalState = globalThis as unknown as {
+    __marketTickJob?: MarketTickJob;
+};
+
+export const marketTickJob =
+    globalState.__marketTickJob || new MarketTickJob();
+
+globalState.__marketTickJob = marketTickJob;

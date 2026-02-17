@@ -32,7 +32,7 @@ const MAX_SYMBOLS_PER_CLIENT = Number(process.env.WS_MAX_SYMBOLS_PER_CLIENT ?? 1
 const MAX_BUFFERED_BYTES = Number(process.env.WS_MAX_BUFFERED_BYTES ?? 1_000_000);
 const MAX_MESSAGE_SIZE_BYTES = Number(process.env.WS_MAX_MESSAGE_SIZE_BYTES ?? 8192);
 const WS_AUTH_REQUIRED = process.env.WS_AUTH_REQUIRED === 'true';
-const WS_JWT_SECRET = process.env.ENGINE_WS_JWT_SECRET || process.env.AUTH_SECRET || '';
+const WS_JWT_SECRET = process.env.ENGINE_WS_JWT_SECRET
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const METRICS_INTERVAL_MS = 30_000;
 const POLICY_VIOLATION = 1008;

@@ -27,7 +27,7 @@ CREATE TABLE "trades" (
 --> statement-breakpoint
 CREATE TABLE "transactions" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"userId" uuid NOT NULL,
+	"userId" text NOT NULL,
 	"walletId" uuid NOT NULL,
 	"type" "transaction_type" NOT NULL,
 	"amount" numeric(15, 2) NOT NULL,
@@ -43,7 +43,7 @@ CREATE TABLE "transactions" (
 --> statement-breakpoint
 CREATE TABLE "wallets" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"userId" uuid NOT NULL,
+	"userId" text NOT NULL,
 	"balance" numeric(15, 2) DEFAULT '1000000.00' NOT NULL,
 	"blockedBalance" numeric(15, 2) DEFAULT '0.00' NOT NULL,
 	"currency" varchar(3) DEFAULT 'INR' NOT NULL,
@@ -53,12 +53,24 @@ CREATE TABLE "wallets" (
 	CONSTRAINT "wallets_userId_unique" UNIQUE("userId")
 );
 --> statement-breakpoint
-ALTER TABLE "orders" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "orders" ALTER COLUMN "id" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "orders" ALTER COLUMN "id" SET DATA TYPE uuid USING (
+	CASE
+		WHEN "id"::text ~ '^[0-9]+$' THEN md5("id"::text)::uuid
+		ELSE "id"::text::uuid
+	END
+);--> statement-breakpoint
 ALTER TABLE "orders" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
 ALTER TABLE "orders" ALTER COLUMN "status" SET DEFAULT 'PENDING'::"public"."order_status";--> statement-breakpoint
 ALTER TABLE "orders" ALTER COLUMN "status" SET DATA TYPE "public"."order_status" USING "status"::"public"."order_status";--> statement-breakpoint
 ALTER TABLE "orders" ALTER COLUMN "createdAt" SET NOT NULL;--> statement-breakpoint
-ALTER TABLE "positions" ALTER COLUMN "id" SET DATA TYPE uuid;--> statement-breakpoint
+ALTER TABLE "positions" ALTER COLUMN "id" DROP DEFAULT;--> statement-breakpoint
+ALTER TABLE "positions" ALTER COLUMN "id" SET DATA TYPE uuid USING (
+	CASE
+		WHEN "id"::text ~ '^[0-9]+$' THEN md5("id"::text)::uuid
+		ELSE "id"::text::uuid
+	END
+);--> statement-breakpoint
 ALTER TABLE "positions" ALTER COLUMN "id" SET DEFAULT gen_random_uuid();--> statement-breakpoint
 ALTER TABLE "positions" ALTER COLUMN "createdAt" SET NOT NULL;--> statement-breakpoint
 ALTER TABLE "positions" ALTER COLUMN "updatedAt" SET NOT NULL;--> statement-breakpoint

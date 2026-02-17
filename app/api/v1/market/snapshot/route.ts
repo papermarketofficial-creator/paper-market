@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createHash } from "crypto";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { logger } from "@/lib/logger";
@@ -266,29 +266,6 @@ async function buildInstrumentRequestSet(
     pushSymbolCandidate(requestedInstruments, seen, symbolByInstrument, indexInstrumentKey, symbol);
   }
 
-  const unresolvedPositionSymbols = Array.from(
-    new Set(
-      positionRows
-        .filter((row) => !row.instrumentKey && row.symbol)
-        .map((row) => toCanonicalSymbol(String(row.symbol || "")))
-        .filter(Boolean)
-    )
-  );
-
-  if (unresolvedPositionSymbols.length > 0) {
-    const instrumentRows = await db
-      .select({
-        symbol: instruments.tradingsymbol,
-        instrumentKey: instruments.instrumentToken,
-      })
-      .from(instruments)
-      .where(inArray(instruments.tradingsymbol, unresolvedPositionSymbols));
-
-    for (const row of instrumentRows) {
-      pushSymbolCandidate(requestedInstruments, seen, symbolByInstrument, row.instrumentKey, row.symbol);
-    }
-  }
-
   return { requestKeys, requestedInstruments, symbolByInstrument };
 }
 
@@ -326,11 +303,11 @@ export async function GET() {
         .where(eq(watchlists.userId, session.user.id)),
       db
         .select({
-          symbol: positions.symbol,
-          instrumentKey: instruments.instrumentToken,
+          symbol: instruments.tradingsymbol,
+          instrumentKey: positions.instrumentToken,
         })
         .from(positions)
-        .leftJoin(instruments, eq(positions.symbol, instruments.tradingsymbol))
+        .leftJoin(instruments, eq(positions.instrumentToken, instruments.instrumentToken))
         .where(eq(positions.userId, session.user.id)),
     ]);
 

@@ -80,5 +80,15 @@ class OrderExecutionJob {
     }
 }
 
-// Singleton instance
-export const orderExecutionJob = new OrderExecutionJob();
+declare global {
+    var __orderExecutionJob: OrderExecutionJob | undefined;
+}
+
+const globalState = globalThis as unknown as {
+    __orderExecutionJob?: OrderExecutionJob;
+};
+
+export const orderExecutionJob =
+    globalState.__orderExecutionJob || new OrderExecutionJob();
+
+globalState.__orderExecutionJob = orderExecutionJob;

@@ -1,6 +1,7 @@
 import { EventEmitter } from "events";
 import { UpstoxWebSocket } from "@/lib/integrations/upstox/websocket";
 import { SymbolSupervisor } from "./symbol-supervisor";
+import { startMemoryMonitor } from "@/lib/telemetry/memory-monitor";
 
 type SessionState = "NORMAL" | "EXPECTED_SILENCE" | "SUSPECT_OUTAGE";
 
@@ -17,9 +18,11 @@ export class MarketFeedSupervisor extends EventEmitter {
   private circuitBreakerOpen = false;
 
   private sessionState: SessionState = "NORMAL";
-  private healthCheckInterval: NodeJS.Timeout;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
   private isConnected = false;
   private reconnectInProgress = false;
+  private initializePromise: Promise<void> | null = null;
+  private static instanceCount = 0;
 
   private readonly RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000];
   private readonly MAX_FAILURES_PER_WINDOW = 5;
@@ -28,14 +31,26 @@ export class MarketFeedSupervisor extends EventEmitter {
 
   constructor() {
     super();
+    this.setMaxListeners(50); // Prevent EventEmitter memory leak warnings
+    
+    MarketFeedSupervisor.instanceCount++;
+    if (MarketFeedSupervisor.instanceCount > 1) {
+      console.error(`🚨 CRITICAL: MarketFeedSupervisor initialized ${MarketFeedSupervisor.instanceCount} times - singleton violation detected!`);
+    }
+    
     this.ws = UpstoxWebSocket.getInstance();
     this.supervisor = new SymbolSupervisor(this.ws);
+    this.startHealthCheckLoop();
+    startMemoryMonitor();
 
+    console.log("MarketFeedSupervisor initialized");
+  }
+
+  private startHealthCheckLoop(): void {
+    if (this.healthCheckInterval) return;
     this.healthCheckInterval = setInterval(() => {
       this.checkHealth();
     }, 15000);
-
-    console.log("MarketFeedSupervisor initialized");
   }
 
   private syncConnectionState() {
@@ -48,17 +63,29 @@ export class MarketFeedSupervisor extends EventEmitter {
       console.log("Market feed already connected");
       return;
     }
+    if (this.initializePromise) {
+      await this.initializePromise;
+      return;
+    }
 
-    console.log("Connecting to market feed...");
-    await this.ws.connect((data: any) => {
-      this.handleTick(data);
-    });
+    this.initializePromise = (async () => {
+      console.log("Connecting to market feed...");
+      await this.ws.connect((data: any) => {
+        this.handleTick(data);
+      });
 
-    this.syncConnectionState();
-    if (this.isConnected) {
-      console.log("Market feed connected");
-    } else {
-      console.log("Market feed connect initiated (awaiting open event)");
+      this.syncConnectionState();
+      if (this.isConnected) {
+        console.log("Market feed connected");
+      } else {
+        console.log("Market feed connect initiated (awaiting open event)");
+      }
+    })();
+
+    try {
+      await this.initializePromise;
+    } finally {
+      this.initializePromise = null;
     }
   }
 
@@ -270,11 +297,24 @@ export class MarketFeedSupervisor extends EventEmitter {
   }
 
   destroy() {
-    clearInterval(this.healthCheckInterval);
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
     this.ws.disconnect();
     this.removeAllListeners();
     console.log("MarketFeedSupervisor destroyed");
   }
 }
 
-export const marketFeedSupervisor = new MarketFeedSupervisor();
+declare global {
+  var __marketFeedSupervisor: MarketFeedSupervisor | undefined;
+}
+
+const globalRef = globalThis as typeof globalThis & {
+  __marketFeedSupervisor?: MarketFeedSupervisor;
+};
+
+export const marketFeedSupervisor =
+  globalRef.__marketFeedSupervisor ??
+  (globalRef.__marketFeedSupervisor = new MarketFeedSupervisor());

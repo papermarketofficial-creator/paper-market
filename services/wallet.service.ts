@@ -1,313 +1,700 @@
+import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
-import { wallets, transactions, users, type Wallet, type Transaction, type TransactionType } from "@/lib/db/schema";
-import { logger } from "@/lib/logger";
+import {
+    ledgerAccounts,
+    ledgerEntries,
+    wallets,
+    type LedgerAccountType,
+    type LedgerReferenceType,
+    type Wallet,
+} from "@/lib/db/schema";
 import { ApiError } from "@/lib/errors";
-import { eq, and, gte, lte, desc } from "drizzle-orm";
-import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import { logger } from "@/lib/logger";
+import { LedgerService } from "@/services/ledger.service";
+import { WriteAheadJournalService } from "@/services/write-ahead-journal.service";
+import type { WriteAheadOperationType } from "@/lib/db/schema";
 
-/**
- * WalletService - Manages user wallet operations and transaction ledger
- * Following backend-dev SKILL.md:
- * - All business logic in services
- * - Accepts tx (transaction) objects for atomicity
- * - Returns POJOs, not NextResponse
- * - Framework-agnostic
- */
+type TxLike = typeof db | any;
+type LegacyTransactionType = "CREDIT" | "DEBIT" | "BLOCK" | "UNBLOCK" | "SETTLEMENT";
+
+const DEFAULT_WALLET_BALANCE = LedgerService.normalizeAmount(
+    process.env.DEFAULT_WALLET_BALANCE ?? "1000000"
+);
+
+const REFERENCE_TYPE_MAP: Record<string, LedgerReferenceType> = {
+    TRADE: "TRADE",
+    ORDER: "ORDER",
+    LIQUIDATION: "LIQUIDATION",
+    EXPIRY: "EXPIRY",
+    ADJUSTMENT: "ADJUSTMENT",
+    DEPOSIT: "ADJUSTMENT",
+    WITHDRAWAL: "ADJUSTMENT",
+    MARGIN_BLOCK: "ORDER",
+    FEE: "ADJUSTMENT",
+};
+
+function toLedgerReferenceType(raw?: string): LedgerReferenceType {
+    const key = String(raw || "").trim().toUpperCase();
+    return REFERENCE_TYPE_MAP[key] || "ADJUSTMENT";
+}
+
+function toAmountString(amount: string | number): string {
+    return LedgerService.normalizeAmount(amount);
+}
+
+function toNumber(value: string): number {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function buildReferenceId(prefix: string, referenceId?: string | null): string {
+    const normalized = String(referenceId || "").trim();
+    if (!normalized) {
+        throw new ApiError(
+            `Reference ID is required for ${prefix}`,
+            400,
+            "IDEMPOTENCY_REFERENCE_REQUIRED"
+        );
+    }
+    return normalized;
+}
+
+function buildLedgerIdempotencyKey(
+    referenceType: LedgerReferenceType,
+    referenceId: string,
+    leg: string
+): string {
+    const normalizedRef = String(referenceId || "").trim();
+    const normalizedLeg = String(leg || "").trim().toUpperCase();
+    const normalizedType = String(referenceType || "").trim().toUpperCase();
+    if (!normalizedRef || !normalizedLeg || !normalizedType) {
+        throw new ApiError("Unable to build ledger idempotency key", 500, "LEDGER_IDEMPOTENCY_BUILD_FAILED");
+    }
+    return `${normalizedType}-${normalizedRef}-${normalizedLeg}`;
+}
+
+function ensurePositiveAmount(amount: string): void {
+    if (LedgerService.compare(amount, "0") <= 0) {
+        throw new ApiError("Amount must be positive", 400, "INVALID_AMOUNT");
+    }
+}
+
+type TransactionQueryFilters = {
+    type?: LegacyTransactionType;
+    referenceType?: string;
+    startDate?: Date;
+    endDate?: Date;
+    limit?: number;
+    page?: number;
+};
+
+type WalletTransactionView = {
+    id: string;
+    userId: string;
+    walletId: string;
+    type: LegacyTransactionType;
+    amount: string;
+    balanceBefore: string;
+    balanceAfter: string;
+    blockedBefore: string;
+    blockedAfter: string;
+    referenceType: string | null;
+    referenceId: string | null;
+    description: string | null;
+    createdAt: Date;
+};
+
+function deriveTransactionType(debitType: LedgerAccountType, creditType: LedgerAccountType): LegacyTransactionType {
+    if (debitType === "MARGIN_BLOCKED" && creditType === "CASH") return "BLOCK";
+    if (debitType === "CASH" && creditType === "MARGIN_BLOCKED") return "UNBLOCK";
+    if (debitType === "CASH") return "CREDIT";
+    if (creditType === "CASH") return "DEBIT";
+    return "SETTLEMENT";
+}
+
+function deriveDebitAccountType(referenceType: string): LedgerAccountType {
+    const normalized = String(referenceType || "").trim().toUpperCase();
+    if (normalized === "MARGIN_BLOCK") return "MARGIN_BLOCKED";
+    if (normalized === "FEE") return "FEES";
+    return "REALIZED_PNL";
+}
+
+function deriveWajOperationType(referenceType: string): WriteAheadOperationType {
+    const normalized = String(referenceType || "").trim().toUpperCase();
+    if (normalized === "DEPOSIT" || normalized === "WITHDRAWAL" || normalized === "ADJUSTMENT") {
+        return "MANUAL_ADJUSTMENT";
+    }
+    return "LEDGER_ENTRY";
+}
+
+type WalletJournalOptions = {
+    ledgerReferenceType?: LedgerReferenceType;
+    skipWaj?: boolean;
+    wajOperationType?: WriteAheadOperationType;
+    wajJournalId?: string;
+    sequenceCollector?: number[];
+    idempotencyKey?: string;
+};
+
 export class WalletService {
-    /**
-     * Get or create wallet for user
-     * MUST be called within a transaction for consistency
-     */
-    static async getWallet(userId: string, tx?: any): Promise<Wallet> {
+    static async createWallet(userId: string, tx?: TxLike): Promise<Wallet> {
+        return this.getWallet(userId, tx);
+    }
+
+    static async getWallet(userId: string, tx?: TxLike): Promise<Wallet> {
         const executor = tx || db;
 
-        const [wallet] = await executor
+        let [wallet] = await executor
             .select()
             .from(wallets)
             .where(eq(wallets.userId, userId))
             .limit(1);
 
         if (!wallet) {
-            // Create wallet with default balance. Concurrent first requests can race on unique(userId).
             try {
-                const [newWallet] = await executor
+                [wallet] = await executor
                     .insert(wallets)
                     .values({ userId })
                     .returning();
-
-                logger.info({ userId, walletId: newWallet.id }, "Wallet created");
-                return newWallet;
             } catch (error: any) {
                 if (error?.code === "23505") {
-                    const [existingWallet] = await executor
+                    const existing = await executor
                         .select()
                         .from(wallets)
                         .where(eq(wallets.userId, userId))
                         .limit(1);
-
-                    if (existingWallet) {
-                        return existingWallet;
-                    }
+                    wallet = existing[0];
+                } else {
+                    throw error;
                 }
-                throw error;
             }
         }
 
+        if (!wallet) {
+            throw new ApiError("Failed to initialize wallet", 500, "WALLET_INIT_FAILED");
+        }
+
+        await this.ensureLedgerSeed(userId, wallet, executor);
         return wallet;
     }
 
-    /**
-     * Check if user has sufficient available balance
-     * Available Balance = Total Balance (No blocking in simplified mode)
-     */
     static async checkMargin(userId: string, requiredAmount: number): Promise<boolean> {
-        const wallet = await this.getWallet(userId);
-        const availableBalance = parseFloat(wallet.balance);
-
-        logger.debug(
-            { userId, requiredAmount, availableBalance },
-            "Margin check (Simplified)"
-        );
-
-        return availableBalance >= requiredAmount;
+        const available = await this.getAvailableBalance(userId);
+        return available >= requiredAmount;
     }
 
-    /**
-     * Get available balance for user
-     */
     static async getAvailableBalance(userId: string): Promise<number> {
         const wallet = await this.getWallet(userId);
-        // Simplified: Blocked balance is ignored/deprecated
-        return parseFloat(wallet.balance);
+        const available = LedgerService.subtract(wallet.balance, wallet.blockedBalance);
+        return toNumber(available);
     }
 
-    /* 
-    DEPRECATED: Blocking logic removed per user request for simplified "instant" trading.
-    
-    static async blockFunds(...) { ... }
-    static async unblockFunds(...) { ... }
-    static async settleTrade(...) { ... }
-    */
+    static async creditBalance(
+        userId: string,
+        amount: number | string,
+        referenceType: string,
+        referenceId: string | null,
+        description?: string,
+        tx?: TxLike,
+        options: WalletJournalOptions = {}
+    ): Promise<void> {
+        const normalizedAmount = toAmountString(amount);
+        ensurePositiveAmount(normalizedAmount);
 
-    /**
-     * Credit balance when position is closed or profit realized
-     * MUST be called within a transaction
-     */
+        const apply = async (executor: TxLike): Promise<void> => {
+            await this.getWallet(userId, executor);
+            const ledgerReferenceType = options.ledgerReferenceType || toLedgerReferenceType(referenceType);
+            const ledgerReferenceId = buildReferenceId(`WALLET_CREDIT_${ledgerReferenceType}`, referenceId);
+            const ledgerIdempotencyKey =
+                options.idempotencyKey ||
+                buildLedgerIdempotencyKey(ledgerReferenceType, ledgerReferenceId, "CREDIT");
+            const shouldJournal = !options.skipWaj;
+
+            let preparedJournalId: string | null = null;
+            if (shouldJournal) {
+                const prepared = await WriteAheadJournalService.prepare(
+                    {
+                        journalId: options.wajJournalId,
+                        operationType: options.wajOperationType || deriveWajOperationType(referenceType),
+                        userId,
+                        referenceId: ledgerReferenceId,
+                        payload: {
+                            userId,
+                            direction: "CREDIT",
+                            amount: normalizedAmount,
+                            referenceType,
+                            referenceId: ledgerReferenceId,
+                            idempotencyKey: ledgerIdempotencyKey,
+                            description: description || null,
+                        },
+                    },
+                    executor
+                );
+                preparedJournalId = prepared.journalId;
+            }
+
+            try {
+                const entry = await LedgerService.recordEntry(
+                    { userId, accountType: "CASH" },
+                    { userId, accountType: "REALIZED_PNL" },
+                    normalizedAmount,
+                    {
+                        referenceType: ledgerReferenceType,
+                        referenceId: ledgerReferenceId,
+                        idempotencyKey: ledgerIdempotencyKey,
+                    },
+                    executor
+                );
+                if (options.sequenceCollector) {
+                    options.sequenceCollector.push(entry.globalSequence);
+                }
+
+                await this.syncWalletCacheFromLedger(userId, executor);
+
+                if (shouldJournal && preparedJournalId) {
+                    await WriteAheadJournalService.commit(preparedJournalId, executor, {
+                        ledgerSequences: [entry.globalSequence],
+                    });
+                }
+
+                logger.info(
+                    {
+                        event: "WALLET_LEDGER_CREDIT",
+                        userId,
+                        amount: normalizedAmount,
+                        ledgerReferenceType,
+                        ledgerReferenceId,
+                        idempotencyKey: ledgerIdempotencyKey,
+                        description: description || null,
+                    },
+                    "WALLET_LEDGER_CREDIT"
+                );
+            } catch (error) {
+                if (shouldJournal && preparedJournalId) {
+                    await WriteAheadJournalService.abort(
+                        preparedJournalId,
+                        executor,
+                        error instanceof Error ? error.message : "WALLET_CREDIT_FAILED"
+                    );
+                }
+                throw error;
+            }
+        };
+
+        if (tx) {
+            await apply(tx);
+            return;
+        }
+
+        await db.transaction(async (transaction) => {
+            await apply(transaction);
+        });
+    }
+
     static async creditProceeds(
         userId: string,
-        amount: number,
-        positionId: string,
-        tx: any,
-        description?: string
+        amount: number | string,
+        referenceId: string,
+        tx: TxLike,
+        description?: string,
+        options: WalletJournalOptions = {}
     ): Promise<void> {
-        const wallet = await this.getWallet(userId, tx);
-        const newBalance = parseFloat(wallet.balance) + amount;
+        const normalizedAmount = toAmountString(amount);
+        ensurePositiveAmount(normalizedAmount);
 
-        // Record transaction
+        await this.getWallet(userId, tx);
+
+        const ledgerReferenceType = options.ledgerReferenceType || "TRADE";
+        const ledgerReferenceId = buildReferenceId(`WALLET_PROCEEDS_${ledgerReferenceType}`, referenceId);
+        const ledgerIdempotencyKey =
+            options.idempotencyKey ||
+            buildLedgerIdempotencyKey(ledgerReferenceType, ledgerReferenceId, "CREDIT_PROCEEDS");
+        const shouldJournal = !options.skipWaj;
+
+        let preparedJournalId: string | null = null;
+        if (shouldJournal) {
+            const prepared = await WriteAheadJournalService.prepare(
+                {
+                    journalId: options.wajJournalId,
+                    operationType: options.wajOperationType || "LEDGER_ENTRY",
+                    userId,
+                    referenceId: ledgerReferenceId,
+                    payload: {
+                        userId,
+                        direction: "CREDIT_PROCEEDS",
+                        amount: normalizedAmount,
+                        referenceId: ledgerReferenceId,
+                        ledgerReferenceType,
+                        idempotencyKey: ledgerIdempotencyKey,
+                        description: description || null,
+                    },
+                },
+                tx
+            );
+            preparedJournalId = prepared.journalId;
+        }
+
         try {
-            await tx.insert(transactions).values({
-                userId,
-                walletId: wallet.id,
-                type: "CREDIT" as TransactionType,
-                amount: amount.toFixed(2),
-                balanceBefore: wallet.balance,
-                balanceAfter: newBalance.toFixed(2),
-                blockedBefore: wallet.blockedBalance,
-                blockedAfter: wallet.blockedBalance,
-                referenceType: "POSITION",
-                referenceId: positionId,
-                description: description || `Proceeds from closing position ${positionId}`,
-            });
-        } catch (error: any) {
-            if (error.code === "23505") {
-                logger.info({ userId, positionId }, "Duplicate credit transaction (idempotent)");
-                return;
+            const entry = await LedgerService.recordEntry(
+                { userId, accountType: "CASH" },
+                { userId, accountType: "REALIZED_PNL" },
+                normalizedAmount,
+                {
+                    referenceType: ledgerReferenceType,
+                    referenceId: ledgerReferenceId,
+                    idempotencyKey: ledgerIdempotencyKey,
+                },
+                tx
+            );
+            if (options.sequenceCollector) {
+                options.sequenceCollector.push(entry.globalSequence);
+            }
+
+            await this.syncWalletCacheFromLedger(userId, tx);
+            if (shouldJournal && preparedJournalId) {
+                await WriteAheadJournalService.commit(preparedJournalId, tx, {
+                    ledgerSequences: [entry.globalSequence],
+                });
+            }
+
+            logger.info(
+                {
+                    event: "WALLET_LEDGER_PROCEEDS",
+                    userId,
+                    amount: normalizedAmount,
+                    ledgerReferenceType,
+                    ledgerReferenceId,
+                    idempotencyKey: ledgerIdempotencyKey,
+                    description: description || null,
+                },
+                "WALLET_LEDGER_PROCEEDS"
+            );
+        } catch (error) {
+            if (shouldJournal && preparedJournalId) {
+                await WriteAheadJournalService.abort(
+                    preparedJournalId,
+                    tx,
+                    error instanceof Error ? error.message : "WALLET_PROCEEDS_FAILED"
+                );
             }
             throw error;
         }
-
-        // Update wallet cache
-        await tx
-            .update(wallets)
-            .set({
-                balance: newBalance.toFixed(2),
-                updatedAt: new Date(),
-            })
-            .where(eq(wallets.id, wallet.id));
-
-        logger.info({ userId, positionId, amount, newBalance }, "Proceeds credited");
     }
 
-    /**
-     * Direct debit (for fees, charges, etc.)
-     * MUST be called within a transaction
-     */
     static async debitBalance(
         userId: string,
-        amount: number,
+        amount: number | string,
         referenceType: string,
         referenceId: string | null,
-        tx: any,
-        description?: string
+        tx: TxLike,
+        description?: string,
+        options: WalletJournalOptions = {}
     ): Promise<void> {
-        const wallet = await this.getWallet(userId, tx);
-        const availableBalance = parseFloat(wallet.balance) - parseFloat(wallet.blockedBalance);
+        const normalizedAmount = toAmountString(amount);
+        ensurePositiveAmount(normalizedAmount);
 
-        if (availableBalance < amount) {
+        await this.getWallet(userId, tx);
+
+        const snapshot = await LedgerService.reconstructUserEquity(userId, tx);
+        if (LedgerService.compare(snapshot.cash, normalizedAmount) < 0) {
             throw new ApiError(
-                `Insufficient balance for debit. Available: ₹${availableBalance.toFixed(2)}`,
+                `Insufficient balance. Available: ${snapshot.cash}`,
                 400,
                 "INSUFFICIENT_FUNDS"
             );
         }
 
-        const newBalance = parseFloat(wallet.balance) - amount;
+        const debitAccountType = deriveDebitAccountType(referenceType);
+        const ledgerReferenceType = options.ledgerReferenceType || toLedgerReferenceType(referenceType);
+        const ledgerReferenceId = buildReferenceId(`WALLET_DEBIT_${ledgerReferenceType}`, referenceId);
+        const ledgerIdempotencyKey =
+            options.idempotencyKey ||
+            buildLedgerIdempotencyKey(ledgerReferenceType, ledgerReferenceId, `DEBIT_${debitAccountType}`);
+        const shouldJournal = !options.skipWaj;
 
-        // Record transaction
-        await tx.insert(transactions).values({
-            userId,
-            walletId: wallet.id,
-            type: "DEBIT" as TransactionType,
-            amount: amount.toFixed(2),
-            balanceBefore: wallet.balance,
-            balanceAfter: newBalance.toFixed(2),
-            blockedBefore: wallet.blockedBalance,
-            blockedAfter: wallet.blockedBalance,
-            referenceType,
-            referenceId,
-            description: description || `Debit: ${referenceType}`,
-        });
-
-        // Update wallet cache
-        await tx
-            .update(wallets)
-            .set({
-                balance: newBalance.toFixed(2),
-                updatedAt: new Date(),
-            })
-            .where(eq(wallets.id, wallet.id));
-
-        logger.info({ userId, amount, newBalance, referenceType }, "Balance debited");
-    }
-
-    /**
-     * Get transaction history with filters
-     */
-    static async getTransactions(
-        userId: string,
-        filters: {
-            type?: TransactionType;
-            referenceType?: string;
-            startDate?: Date;
-            endDate?: Date;
-            limit?: number;
-            page?: number;
-        } = {}
-    ): Promise<{ transactions: Transaction[]; total: number }> {
-        const limit = filters.limit || 20;
-        const page = filters.page || 1;
-        const offset = (page - 1) * limit;
-
-        const conditions = [eq(transactions.userId, userId)];
-
-        if (filters.type) {
-            conditions.push(eq(transactions.type, filters.type));
+        let preparedJournalId: string | null = null;
+        if (shouldJournal) {
+            const prepared = await WriteAheadJournalService.prepare(
+                {
+                    journalId: options.wajJournalId,
+                    operationType: options.wajOperationType || deriveWajOperationType(referenceType),
+                    userId,
+                    referenceId: ledgerReferenceId,
+                    payload: {
+                        userId,
+                        direction: "DEBIT",
+                        amount: normalizedAmount,
+                        referenceType,
+                        referenceId: ledgerReferenceId,
+                        debitAccountType,
+                        idempotencyKey: ledgerIdempotencyKey,
+                        description: description || null,
+                    },
+                },
+                tx
+            );
+            preparedJournalId = prepared.journalId;
         }
 
-        if (filters.referenceType) {
-            conditions.push(eq(transactions.referenceType, filters.referenceType));
-        }
-
-        if (filters.startDate) {
-            conditions.push(gte(transactions.createdAt, filters.startDate));
-        }
-
-        if (filters.endDate) {
-            conditions.push(lte(transactions.createdAt, filters.endDate));
-        }
-
-        const results = await db
-            .select()
-            .from(transactions)
-            .where(and(...conditions))
-            .orderBy(desc(transactions.createdAt))
-            .limit(limit)
-            .offset(offset);
-
-        // Get total count (for pagination)
-        const [{ count }] = await db
-            .select({ count: transactions.id })
-            .from(transactions)
-            .where(and(...conditions));
-
-        return {
-            transactions: results,
-            total: results.length, // Simplified - in production, use proper count
-        };
-    }
-
-    /**
-     * Recalculate wallet from ledger (admin recovery tool)
-     * Use when wallet cache is suspected to be inconsistent
-     */
-    static async recalculateFromLedger(userId: string): Promise<void> {
-        await db.transaction(async (tx) => {
-            const wallet = await this.getWallet(userId, tx);
-
-            // Fetch all transactions in chronological order
-            const ledger = await tx
-                .select()
-                .from(transactions)
-                .where(eq(transactions.userId, userId))
-                .orderBy(transactions.createdAt);
-
-            let computedBalance = 1000000; // Initial balance (₹10L)
-            let computedBlocked = 0;
-
-            for (const txn of ledger) {
-                const amount = parseFloat(txn.amount);
-
-                switch (txn.type) {
-                    case "CREDIT":
-                        computedBalance += amount;
-                        break;
-                    case "DEBIT":
-                        computedBalance -= amount;
-                        break;
-                    case "BLOCK":
-                        computedBlocked += amount;
-                        break;
-                    case "UNBLOCK":
-                        computedBlocked -= amount;
-                        break;
-                    case "SETTLEMENT":
-                        computedBalance -= amount;
-                        computedBlocked -= amount;
-                        break;
-                }
+        try {
+            const entry = await LedgerService.recordEntry(
+                { userId, accountType: debitAccountType },
+                { userId, accountType: "CASH" },
+                normalizedAmount,
+                {
+                    referenceType: ledgerReferenceType,
+                    referenceId: ledgerReferenceId,
+                    idempotencyKey: ledgerIdempotencyKey,
+                },
+                tx
+            );
+            if (options.sequenceCollector) {
+                options.sequenceCollector.push(entry.globalSequence);
             }
 
-            // Update wallet with computed values
-            await tx
-                .update(wallets)
-                .set({
-                    balance: computedBalance.toFixed(2),
-                    blockedBalance: computedBlocked.toFixed(2),
-                    lastReconciled: new Date(),
-                    updatedAt: new Date(),
-                })
-                .where(eq(wallets.id, wallet.id));
+            await this.syncWalletCacheFromLedger(userId, tx);
+            if (shouldJournal && preparedJournalId) {
+                await WriteAheadJournalService.commit(preparedJournalId, tx, {
+                    ledgerSequences: [entry.globalSequence],
+                });
+            }
 
             logger.info(
                 {
+                    event: "WALLET_LEDGER_DEBIT",
                     userId,
-                    computedBalance,
-                    computedBlocked,
-                    previousBalance: wallet.balance,
-                    previousBlocked: wallet.blockedBalance,
+                    amount: normalizedAmount,
+                    debitAccountType,
+                    ledgerReferenceType,
+                    ledgerReferenceId,
+                    idempotencyKey: ledgerIdempotencyKey,
+                    description: description || null,
                 },
-                "Wallet recalculated from ledger"
+                "WALLET_LEDGER_DEBIT"
             );
+        } catch (error) {
+            if (shouldJournal && preparedJournalId) {
+                await WriteAheadJournalService.abort(
+                    preparedJournalId,
+                    tx,
+                    error instanceof Error ? error.message : "WALLET_DEBIT_FAILED"
+                );
+            }
+            throw error;
+        }
+    }
+
+    static async getTransactions(
+        userId: string,
+        filters: TransactionQueryFilters = {}
+    ): Promise<{ transactions: WalletTransactionView[]; total: number }> {
+        const wallet = await this.getWallet(userId);
+
+        const accounts = await db
+            .select({
+                id: ledgerAccounts.id,
+                accountType: ledgerAccounts.accountType,
+            })
+            .from(ledgerAccounts)
+            .where(eq(ledgerAccounts.userId, userId));
+
+        const accountIds = accounts.map((row) => row.id);
+        if (accountIds.length === 0) {
+            return { transactions: [], total: 0 };
+        }
+
+        const debitAccounts = alias(ledgerAccounts, "debit_accounts");
+        const creditAccounts = alias(ledgerAccounts, "credit_accounts");
+        const transactionTypeCase = sql<string>`
+            case
+                when ${debitAccounts.accountType} = 'MARGIN_BLOCKED' and ${creditAccounts.accountType} = 'CASH' then 'BLOCK'
+                when ${debitAccounts.accountType} = 'CASH' and ${creditAccounts.accountType} = 'MARGIN_BLOCKED' then 'UNBLOCK'
+                when ${debitAccounts.accountType} = 'CASH' then 'CREDIT'
+                when ${creditAccounts.accountType} = 'CASH' then 'DEBIT'
+                else 'SETTLEMENT'
+            end
+        `;
+
+        const whereConditions: any[] = [
+            or(
+                inArray(ledgerEntries.debitAccountId, accountIds),
+                inArray(ledgerEntries.creditAccountId, accountIds)
+            ),
+        ];
+
+        if (filters.referenceType) {
+            whereConditions.push(eq(ledgerEntries.referenceType, toLedgerReferenceType(filters.referenceType)));
+        }
+
+        if (filters.startDate) {
+            whereConditions.push(gte(ledgerEntries.createdAt, filters.startDate));
+        }
+
+        if (filters.endDate) {
+            whereConditions.push(lte(ledgerEntries.createdAt, filters.endDate));
+        }
+
+        if (filters.type) {
+            whereConditions.push(sql`${transactionTypeCase} = ${filters.type}`);
+        }
+
+        // PERFORMANCE FIX: Move pagination into SQL instead of loading all rows
+        const limit = Math.max(1, Math.min(100, Number(filters.limit || 20)));
+        const page = Math.max(1, Number(filters.page || 1));
+        const offset = (page - 1) * limit;
+
+        // Get total count first
+        const [countRow] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(ledgerEntries)
+            .innerJoin(debitAccounts, eq(ledgerEntries.debitAccountId, debitAccounts.id))
+            .innerJoin(creditAccounts, eq(ledgerEntries.creditAccountId, creditAccounts.id))
+            .where(and(...whereConditions));
+        
+        const totalCount = countRow?.count || 0;
+
+        // Fetch only the page we need
+        const rawEntries = await db
+            .select({
+                id: ledgerEntries.id,
+                debitAccountId: ledgerEntries.debitAccountId,
+                creditAccountId: ledgerEntries.creditAccountId,
+                amount: ledgerEntries.amount,
+                referenceType: ledgerEntries.referenceType,
+                referenceId: ledgerEntries.referenceId,
+                createdAt: ledgerEntries.createdAt,
+                debitType: debitAccounts.accountType,
+                creditType: creditAccounts.accountType,
+            })
+            .from(ledgerEntries)
+            .innerJoin(debitAccounts, eq(ledgerEntries.debitAccountId, debitAccounts.id))
+            .innerJoin(creditAccounts, eq(ledgerEntries.creditAccountId, creditAccounts.id))
+            .where(and(...whereConditions))
+            .orderBy(desc(ledgerEntries.createdAt))
+            .limit(limit)
+            .offset(offset);
+
+        const transactions = rawEntries.map((entry) => {
+            const debitType = entry.debitType || "REALIZED_PNL";
+            const creditType = entry.creditType || "REALIZED_PNL";
+            const type = deriveTransactionType(debitType, creditType);
+
+            return {
+                id: entry.id,
+                userId,
+                walletId: wallet.id,
+                type,
+                amount: LedgerService.normalizeAmount(entry.amount),
+                balanceBefore: "0",
+                balanceAfter: "0",
+                blockedBefore: "0",
+                blockedAfter: "0",
+                referenceType: entry.referenceType,
+                referenceId: entry.referenceId,
+                description: null,
+                createdAt: entry.createdAt,
+            } satisfies WalletTransactionView;
         });
+
+        return {
+            transactions,
+            total: totalCount,
+        };
+    }
+
+    static async recalculateFromLedger(userId: string): Promise<void> {
+        await db.transaction(async (tx) => {
+            await this.getWallet(userId, tx);
+            await this.syncWalletCacheFromLedger(userId, tx);
+        });
+    }
+
+    private static async ensureLedgerSeed(userId: string, wallet: Wallet, tx: TxLike): Promise<void> {
+        await LedgerService.ensureUserAccounts(userId, tx);
+
+        const [cashAccount, blockedAccount] = await Promise.all([
+            LedgerService.getAccountIdByType(userId, "CASH", tx),
+            LedgerService.getAccountIdByType(userId, "MARGIN_BLOCKED", tx),
+        ]);
+
+        const hasEntriesConditions = [
+            eq(ledgerEntries.debitAccountId, cashAccount),
+            eq(ledgerEntries.creditAccountId, cashAccount),
+            eq(ledgerEntries.debitAccountId, blockedAccount),
+            eq(ledgerEntries.creditAccountId, blockedAccount),
+        ];
+
+        const [existing] = await tx
+            .select({ id: ledgerEntries.id })
+            .from(ledgerEntries)
+            .where(or(...hasEntriesConditions))
+            .limit(1);
+
+        if (existing) return;
+
+        const normalizedTotalBalance = toAmountString(wallet.balance || DEFAULT_WALLET_BALANCE);
+        const normalizedBlocked = toAmountString(wallet.blockedBalance || "0");
+
+        let freeCash = LedgerService.subtract(normalizedTotalBalance, normalizedBlocked);
+        if (LedgerService.compare(freeCash, "0") < 0) {
+            freeCash = normalizedTotalBalance;
+        }
+
+        if (LedgerService.compare(freeCash, "0") > 0) {
+            await LedgerService.recordEntry(
+                { userId, accountType: "CASH" },
+                { userId, accountType: "REALIZED_PNL" },
+                freeCash,
+                {
+                    referenceType: "ADJUSTMENT",
+                    referenceId: `WALLET_BOOTSTRAP_CASH-${userId}`,
+                    idempotencyKey: `ADJUSTMENT-WALLET_BOOTSTRAP_CASH-${userId}`,
+                },
+                tx
+            );
+        }
+
+        if (LedgerService.compare(normalizedBlocked, "0") > 0) {
+            await LedgerService.recordEntry(
+                { userId, accountType: "MARGIN_BLOCKED" },
+                { userId, accountType: "REALIZED_PNL" },
+                normalizedBlocked,
+                {
+                    referenceType: "ADJUSTMENT",
+                    referenceId: `WALLET_BOOTSTRAP_MARGIN-${userId}`,
+                    idempotencyKey: `ADJUSTMENT-WALLET_BOOTSTRAP_MARGIN-${userId}`,
+                },
+                tx
+            );
+        }
+
+        await this.syncWalletCacheFromLedger(userId, tx);
+
+        logger.info(
+            {
+                event: "WALLET_LEDGER_BOOTSTRAPPED",
+                userId,
+                freeCash,
+                blockedBalance: normalizedBlocked,
+            },
+            "WALLET_LEDGER_BOOTSTRAPPED"
+        );
+    }
+
+    private static async syncWalletCacheFromLedger(userId: string, tx: TxLike): Promise<void> {
+        const snapshot = await LedgerService.reconstructUserEquity(userId, tx);
+        const totalBalance = LedgerService.add(snapshot.cash, snapshot.marginBlocked);
+
+        await tx
+            .update(wallets)
+            .set({
+                balance: totalBalance,
+                blockedBalance: snapshot.marginBlocked,
+                equity: snapshot.equity,
+                lastReconciled: new Date(),
+                updatedAt: new Date(),
+            })
+            .where(eq(wallets.userId, userId));
     }
 }

@@ -213,11 +213,12 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
       <ScrollArea className="flex-1">
         <div className="flex flex-col">
           {localMatches.map((stock, i) => {
-            const quoteKey = toInstrumentKey(stock.instrumentToken || stock.symbol);
-            const quote =
-              quotesByInstrument[quoteKey] ||
-              selectQuote(quoteKey) ||
-              selectQuote(stock.symbol);
+            const quoteKey = stock.instrumentToken
+              ? toInstrumentKey(stock.instrumentToken)
+              : "";
+            const quote = quoteKey
+              ? (quotesByInstrument[quoteKey] || selectQuote(quoteKey))
+              : null;
             const fallbackPrice = Number(stock.price);
             const fallbackChange = Number(stock.change);
             const fallbackChangePercent = Number(stock.changePercent);

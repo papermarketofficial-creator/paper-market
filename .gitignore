@@ -37,6 +37,8 @@ node_modules/
 .env.production
 .env.development
 .env.example
+/.env.production
+/apps/market-engine/.env.production
 
 
 # Antigravity

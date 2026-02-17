@@ -1,17 +1,15 @@
 "use client";
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { TradingForm } from '@/components/trade/TradingForm';
+import { OptionsTradeForm } from '@/components/trade/OptionsTradeForm';
 import { OptionsChain } from '@/components/trade/OptionsChain';
+import { OptionsStrategyEngine } from '@/components/trade/OptionsStrategyEngine';
 import { Stock } from '@/types/equity.types';
 import { useGlobalStore } from '@/stores/global.store';
-import { useMarketStore } from '@/stores/trading/market.store';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { InstrumentType } from '@/components/trade/form/InstrumentSelector';
-import { Button } from '@/components/ui/button';
-import { Maximize2 } from 'lucide-react';
-import { useAnalysisStore } from '@/stores/trading/analysis.store';
+import { toast } from 'sonner';
 
 // Dynamic import for Chart to avoid SSR issues
 const CandlestickChartComponent = dynamic(() => import('@/components/trade/CandlestickChart').then(mod => ({ default: mod.CandlestickChart })), {
@@ -19,14 +17,20 @@ const CandlestickChartComponent = dynamic(() => import('@/components/trade/Candl
   ssr: false
 });
 
-export default function OptionsPage() {
-  const { getCurrentInstruments } = useMarketStore();
-  const { selectedSymbol, setSelectedSymbol } = useGlobalStore();
-  const { setAnalysisMode } = useAnalysisStore();
+const OPTIONS_UNDERLYINGS: InstrumentType[] = [
+  "NIFTY",
+  "BANKNIFTY",
+  "FINNIFTY",
+  "SENSEX",
+  "MIDCAP",
+  "STOCK OPTIONS",
+];
 
-  // ✅ Explicitly fetch options
-  const currentInstruments = getCurrentInstruments('options');
-  const [selectedStock, setSelectedStock] = useState<Stock | null>(currentInstruments[0]);
+export default function OptionsPage() {
+  const { selectedSymbol, setSelectedSymbol } = useGlobalStore();
+
+  const [currentInstruments, setCurrentInstruments] = useState<Stock[]>([]);
+  const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
 
   // Controls the Chart & Form Instrument (NIFTY/BANKNIFTY)
   // Replaced local state with Global Store
@@ -34,8 +38,50 @@ export default function OptionsPage() {
   const setInstrumentType = setSelectedSymbol;
 
   useEffect(() => {
-    if (currentInstruments.length > 0 && !selectedStock) {
-      setSelectedStock(currentInstruments[0]);
+    if (instrumentType === "STOCK FUTURES") {
+      setInstrumentType("NIFTY");
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadOptions = async () => {
+      const params = new URLSearchParams({
+        underlying: instrumentType,
+        instrumentType: 'OPTION',
+      });
+
+      const res = await fetch(`/api/v1/instruments/derivatives?${params.toString()}`, { cache: 'no-store' });
+      const payload = await res.json();
+      const instruments: Stock[] = payload?.data?.instruments || [];
+
+      if (!cancelled) {
+        setCurrentInstruments(instruments);
+        setSelectedStock(instruments[0] || null);
+      }
+    };
+
+    loadOptions().catch(() => {
+      if (!cancelled) {
+        setCurrentInstruments([]);
+        setSelectedStock(null);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [instrumentType, setInstrumentType]);
+
+  useEffect(() => {
+    if (!selectedStock) return;
+
+    const stillExists = currentInstruments.some(
+      (inst) => inst.instrumentToken === selectedStock.instrumentToken
+    );
+
+    if (!stillExists) {
+      setSelectedStock(currentInstruments[0] || null);
     }
   }, [currentInstruments, selectedStock]);
 
@@ -45,13 +91,17 @@ export default function OptionsPage() {
       <div className="grid gap-6 lg:grid-cols-12 items-start">
         {/* Left: Trading Form */}
         <div className="lg:col-span-4 space-y-4">
-          <TradingForm
+          <OptionsTradeForm
             selectedStock={selectedStock}
             onStockSelect={setSelectedStock}
             instruments={currentInstruments}
-            instrumentMode="options"
+            allowedInstrumentTypes={OPTIONS_UNDERLYINGS}
             activeInstrumentType={instrumentType}
             onInstrumentTypeChange={setInstrumentType}
+          />
+          <OptionsStrategyEngine
+            underlying={instrumentType}
+            instruments={currentInstruments}
           />
         </div>
 
@@ -59,22 +109,12 @@ export default function OptionsPage() {
         <div className="lg:col-span-8 h-[600px]">
           <Card className="h-full border-border flex flex-col shadow-sm">
             <CardHeader className="py-3 px-4 border-b bg-card/50">
-              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center justify-between">
+              <CardTitle className="text-sm font-medium text-muted-foreground flex items-center">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-foreground">{instrumentType}</span>
                   <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary">INDEX</span>
                   <span className="text-xs px-2 py-0.5 rounded bg-primary/10 text-primary">INDEX</span>
                 </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setAnalysisMode(true)}
-                  className="gap-2 bg-background/80 backdrop-blur shadow-sm hover:bg-background border-primary/20 hover:border-primary h-8"
-                >
-                  <Maximize2 className="h-3.5 w-3.5 text-primary" />
-                  <span className="text-xs font-medium text-primary">Analyze Chart</span>
-                </Button>
               </CardTitle>
             </CardHeader>
             <CardContent className="flex-1 p-0 relative min-h-0 bg-background/50">
@@ -103,23 +143,12 @@ export default function OptionsPage() {
             <OptionsChain
               onStrikeSelect={(symbol) => {
                 const option = currentInstruments.find(inst => inst.symbol === symbol);
-                if (option) {
+                if (option?.instrumentToken) {
                   setSelectedStock(option);
                 } else {
-                  // Fallback: Create transient object from symbol if not found in pre-loaded mock list
-                  // This allows trading symbols found in the Option Chain (Real DB) but missing from mock store
-                  // We try to parse details from symbol or fetch (Fetch TODO). For now, minimal object.
-                  const dummyStock: Stock = {
-                    symbol: symbol,
-                    name: symbol,
-                    price: 0, // OptionsChain should pass this preferably, or we fetch
-                    change: 0,
-                    changePercent: 0,
-                    volume: 0,
-                    lotSize: instrumentType === 'BANKNIFTY' ? 15 : instrumentType === 'FINNIFTY' ? 25 : 50, // Best guess fallback
-                    expiryDate: new Date(), // Placeholder
-                  };
-                  setSelectedStock(dummyStock);
+                  toast.error('Instrument resolution failed', {
+                    description: `${symbol} is not available in active repository-backed options.`,
+                  });
                 }
               }}
               instrumentType={instrumentType}

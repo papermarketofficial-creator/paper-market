@@ -6,11 +6,9 @@ import { Button } from '@/components/ui/button';
 import { 
  
   Search, 
-  Settings, 
   Camera, 
   Maximize, 
-  LayoutTemplate, 
-  ChevronDown,
+  Minimize2,
   Undo2,
   Redo2,
   CandlestickChart
@@ -19,6 +17,7 @@ import { Separator } from '@/components/ui/separator';
 
 interface ChartHeaderProps {
   symbol: string;
+  displaySymbol?: string;
   isInstantOrderActive: boolean;
   onToggleInstantOrder: () => void;
   onUndo?: () => void;
@@ -27,10 +26,12 @@ interface ChartHeaderProps {
   onMaximize?: () => void;
   onSearchClick?: () => void;
   isLoading?: boolean;
+  isFullscreen?: boolean;
 }
 
 export function ChartHeader({ 
     symbol, 
+    displaySymbol,
     isInstantOrderActive, 
     onToggleInstantOrder,
     onUndo,
@@ -38,9 +39,11 @@ export function ChartHeader({
     onScreenshot,
     onMaximize,
     onSearchClick,
-    isLoading = false
+    isLoading = false,
+    isFullscreen = false
 }: ChartHeaderProps) {
   const { range, setRange } = useAnalysisStore();
+  const headerText = displaySymbol || symbol;
 
   const ranges = ['5Y', '1Y', '6M', '3M', '1M', '5D', '1D'];
 
@@ -61,7 +64,7 @@ export function ChartHeader({
           ) : (
              <Search className="h-4 w-4 text-muted-foreground" />
           )}
-          <span className="uppercase">{symbol}</span>
+          <span className="uppercase">{headerText}</span>
           <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded-sm border border-border">NSE</span>
         </Button>
 
@@ -139,7 +142,7 @@ export function ChartHeader({
               <Camera className="h-4 w-4" />
           </Button>
            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={onMaximize}>
-              <Maximize className="h-4 w-4" />
+              {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
           </Button>
       </div>
     </div>

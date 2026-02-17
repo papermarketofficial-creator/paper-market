@@ -1,4 +1,5 @@
 // @refresh reset
+import "@/lib/startup/preload";
 import '@/globals.css';
 import Providers from '@/components/Providers';
 import { ReactNode } from 'react';

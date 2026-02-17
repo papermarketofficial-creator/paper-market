@@ -45,6 +45,11 @@ export interface CandleUpdate {
  */
 export class CandleEngine extends EventEmitter {
     private contexts = new Map<string, CandleContext>();
+    
+    constructor() {
+        super();
+        this.setMaxListeners(50);
+    }
 
     /**
      * Reset candle context for a symbol (used when switching timeframes)
@@ -238,7 +243,4 @@ export class CandleEngine extends EventEmitter {
 const globalForCandleEngine = globalThis as unknown as { __candleEngine: CandleEngine };
 
 export const candleEngine = globalForCandleEngine.__candleEngine || new CandleEngine();
-
-if (process.env.NODE_ENV !== 'production') {
-    globalForCandleEngine.__candleEngine = candleEngine;
-}
+globalForCandleEngine.__candleEngine = candleEngine;

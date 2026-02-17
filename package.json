@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
+    "migrate:reconcile": "tsx scripts/reconcile-drizzle-migrations.ts",
     "load:users": "node scripts/load/simulate-users.mjs",
     "proto:json": "node -e \"const {execSync}=require('child_process'); const fs=require('fs'); const out=execSync('npx -p protobufjs-cli pbjs -t json public/proto/MarketDataFeedV3.proto',{encoding:'utf8'}); fs.writeFileSync('lib/integrations/upstox/proto.json', out, 'utf8');\""
   },
@@ -50,6 +51,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
+    "csv-parse": "^6.1.0",
     "date-fns": "^3.6.0",
     "dotenv": "^17.2.3",
     "drizzle-orm": "^0.45.1",

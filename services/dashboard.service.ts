@@ -44,10 +44,10 @@ export class DashboardService {
         symbol: positions.symbol,
         quantity: positions.quantity,
         averagePrice: positions.averagePrice,
-        instrumentToken: instruments.instrumentToken,
+        instrumentToken: positions.instrumentToken,
       })
       .from(positions)
-      .leftJoin(instruments, eq(positions.symbol, instruments.tradingsymbol))
+      .leftJoin(instruments, eq(positions.instrumentToken, instruments.instrumentToken))
       .where(eq(positions.userId, userId));
 
     await realTimeMarketService.initialize();
@@ -55,7 +55,8 @@ export class DashboardService {
     const warmSymbols = Array.from(
       new Set(
         positionRows
-          .flatMap((row) => [row.symbol, row.instrumentToken].filter(Boolean))
+          .map((row) => row.instrumentToken)
+          .filter(Boolean)
           .map((value) => String(value))
       )
     );
@@ -70,7 +71,7 @@ export class DashboardService {
       const quantity = Math.abs(Number(row.quantity) || 0);
       const side: "BUY" | "SELL" = Number(row.quantity) < 0 ? "SELL" : "BUY";
       const instrumentKey = row.instrumentToken || undefined;
-      const quote = realTimeMarketService.getQuote(instrumentKey || row.symbol);
+      const quote = instrumentKey ? realTimeMarketService.getQuote(instrumentKey) : null;
 
       const quotedPrice = quote?.price;
       const lastKnownPrice =

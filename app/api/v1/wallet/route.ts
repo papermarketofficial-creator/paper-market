@@ -27,6 +27,7 @@ export async function GET(req: Request) {
 
         // 3. Calculate available balance
         const balance = parseFloat(wallet.balance);
+        const equity = parseFloat(wallet.equity);
         const blockedBalance = parseFloat(wallet.blockedBalance);
         const availableBalance = balance - blockedBalance;
 
@@ -35,8 +36,11 @@ export async function GET(req: Request) {
             success: true,
             data: {
                 balance: balance,
+                equity: equity,
                 blockedBalance: blockedBalance,
                 availableBalance: availableBalance,
+                marginStatus: wallet.marginStatus,
+                accountState: wallet.accountState,
                 currency: wallet.currency,
                 lastReconciled: wallet.lastReconciled,
                 updatedAt: wallet.updatedAt,

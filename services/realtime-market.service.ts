@@ -2,14 +2,13 @@
 import { UpstoxWebSocket } from "@/lib/integrations/upstox/websocket";
 import { logger } from "@/lib/logger";
 import { EventEmitter } from "events";
-import { db } from "@/lib/db";
-import { instruments } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { tickBus } from "@/lib/trading/tick-bus";
 import { UpstoxAdapter } from "@/lib/integrations/upstox/upstox-adapter";
 import "@/lib/trading/init-realtime"; // Auto-wire TickBus subscriptions
 import { marketFeedSupervisor } from "@/lib/trading/market-feed-supervisor";
 import { toInstrumentKey } from "@/lib/market/symbol-normalization";
+import { feedHealthService, recordFeedPrice } from "@/services/feed-health.service";
+import { instrumentRepository } from "@/lib/instruments/repository";
 
 // ═══════════════════════════════════════════════════════════
 // 🛠️ SINGLETON PATTERN: Global declaration for Next.js hot reload
@@ -30,20 +29,26 @@ interface Quote {
 }
 
 class RealTimeMarketService extends EventEmitter {
-    private static instance: RealTimeMarketService | null = null;
-    
     private ws: UpstoxWebSocket;
     private prices: Map<string, Quote> = new Map();
     private quotesByInstrument: Map<string, Quote> = new Map();
     private subscribers: Map<string, number> = new Map();
     private initialized: boolean = false;
     private isInitializing: boolean = false; // Guard against concurrent initialization
-    private instrumentPrefix = "NSE_EQ|";
     
     private isinMap: Map<string, string> = new Map(); // Trading Symbol -> ISIN
     private reverseIsinMap: Map<string, string> = new Map(); // ISIN -> Trading Symbol
     private adapter: UpstoxAdapter | null = null; // Broker adapter
     private snapshotWarmupPromise: Promise<void> | null = null;
+    private supervisorTickAttached = false;
+    private readonly onSupervisorTick = (data: any): void => {
+        this.handleMarketUpdate(data);
+    };
+    
+    private syncFeedConnectionState(): void {
+        const connected = marketFeedSupervisor.getHealthMetrics().isConnected;
+        feedHealthService.setWebsocketConnected(connected);
+    }
 
     private normalizeSymbolKey(value: string): string {
         return value.replace(/\s+/g, "").toUpperCase();
@@ -84,6 +89,7 @@ class RealTimeMarketService extends EventEmitter {
     // ═══════════════════════════════════════════════════════════
     private constructor() {
         super();
+        this.setMaxListeners(50); // Prevent EventEmitter memory leak warnings
         this.ws = UpstoxWebSocket.getInstance();
         this.prices = new Map();
     }
@@ -92,14 +98,17 @@ class RealTimeMarketService extends EventEmitter {
     // 🛠️ SINGLETON ACCESSOR: Get or create instance
     // ═══════════════════════════════════════════════════════════
     public static getInstance(): RealTimeMarketService {
-        // Use Node.js global for true singleton across module reloads
-        if (!global.__realTimeMarketServiceInstance) {
+        const globalRef = globalThis as typeof globalThis & {
+            __realTimeMarketServiceInstance?: RealTimeMarketService;
+        };
+
+        if (!globalRef.__realTimeMarketServiceInstance) {
             console.log("🆕 Creating RealTimeMarketService singleton");
-            global.__realTimeMarketServiceInstance = new RealTimeMarketService();
+            globalRef.__realTimeMarketServiceInstance = new RealTimeMarketService();
         } else {
             console.log("♻️ Reusing RealTimeMarketService singleton");
         }
-        return global.__realTimeMarketServiceInstance;
+        return globalRef.__realTimeMarketServiceInstance;
     }
 
     /**
@@ -147,17 +156,24 @@ class RealTimeMarketService extends EventEmitter {
             // ═══════════════════════════════════════════════════════════
             console.log("🔌 Wiring MarketFeedSupervisor to TickBus...");
             
-            // Wire supervisor ticks to our TickBus
-            marketFeedSupervisor.on('tick', (data: any) => {
-                this.handleMarketUpdate(data);
-            });
+            // Wire supervisor ticks only once per process.
+            if (!this.supervisorTickAttached) {
+                marketFeedSupervisor.on("tick", this.onSupervisorTick);
+                this.supervisorTickAttached = true;
+            }
             
             // Initialize the feed
             await marketFeedSupervisor.initialize();
+            this.syncFeedConnectionState();
+
+            // Start MTM engine after market feed + TickBus wiring are active.
+            const { mtmEngineService } = await import("@/services/mtm-engine.service");
+            await mtmEngineService.initialize();
             
             this.initialized = true;
             logger.info("RealTimeMarketService initialized with MarketFeedSupervisor");
         } catch (error) {
+            this.syncFeedConnectionState();
             logger.error({ err: error }, "Failed to initialize RealTimeMarketService");
             throw error;
         } finally {
@@ -167,37 +183,49 @@ class RealTimeMarketService extends EventEmitter {
 
     /**
      * Resolve a user-facing symbol into the feed key used internally.
+     * Uses the pre-loaded instrument map for segment-aware resolution.
+     * STRICT: No silent fallback - logs error and returns empty string on miss.
      */
     private resolveFeedKey(symbol: string): string {
-        const pureSymbol = symbol.includes("|") ? (symbol.split("|")[1] || symbol) : symbol;
-        const canonicalSymbol = this.canonicalizeSymbol(pureSymbol);
-
-        const isIndex =
-            canonicalSymbol.includes('NIFTY') ||
-            canonicalSymbol.includes('SENSEX') ||
-            canonicalSymbol.includes('BANKEX');
-
-        let prefix = this.instrumentPrefix;
-        let finalSymbol = canonicalSymbol;
-
-        if (isIndex) {
-            prefix = "NSE_INDEX|";
-            finalSymbol = canonicalSymbol
-                .toLowerCase()
-                .split(' ')
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                .join(' ');
+        // Already a proper instrument key (contains segment prefix)
+        if (symbol.includes('|')) {
+            return toInstrumentKey(symbol);
         }
-
-        const fullSymbolKey = symbol.includes("|")
-            ? `${prefix}${finalSymbol}`
-            : `${prefix}${finalSymbol}`;
-        const isinKey =
-            this.isinMap.get(pureSymbol) ||
-            this.isinMap.get(canonicalSymbol) ||
-            this.isinMap.get(fullSymbolKey);
-
-        return isinKey || fullSymbolKey;
+        
+        const canonicalSymbol = this.canonicalizeSymbol(symbol);
+        
+        // Look up from pre-loaded instrument map (Trading Symbol → ISIN)
+        // The isinMap is populated during loadInstruments() with ALL active instruments
+        const isin = this.isinMap.get(symbol) || 
+                     this.isinMap.get(canonicalSymbol) ||
+                     this.isinMap.get(symbol.toUpperCase());
+        
+        if (isin) {
+            // For indices, use special formatting
+            const isIndex = canonicalSymbol.includes('NIFTY') || 
+                           canonicalSymbol.includes('SENSEX') || 
+                           canonicalSymbol.includes('BANKEX');
+            
+            if (isIndex) {
+                // Use mixed-case format for indices
+                const formattedSymbol = canonicalSymbol
+                    .toLowerCase()
+                    .split(' ')
+                    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                    .join(' ');
+                return `NSE_INDEX|${formattedSymbol}`;
+            }
+            
+            // For equity/F&O, return the ISIN-based key
+            // The isinMap stores tradingsymbol → ISIN (which is the second part of instrumentToken)
+            // We need to determine the segment. For now, default to NSE_EQ for equity
+            // F&O instruments will have their full token in the map
+            return isin.includes('|') ? isin : `NSE_EQ|${isin}`;
+        }
+        
+        // STRICT: No silent fallback - log error and return empty
+        logger.warn({ symbol, canonicalSymbol }, 'resolveFeedKey: symbol not found in instrument map, skipping subscription');
+        return '';
     }
 
     /**
@@ -223,6 +251,7 @@ class RealTimeMarketService extends EventEmitter {
         // 🔥 CRITICAL: Delegate to MarketFeedSupervisor
         // It handles ref-counting, batching, and health monitoring
         marketFeedSupervisor.subscribe(keysToSubscribe);
+        this.syncFeedConnectionState();
     }
 
     /**
@@ -251,6 +280,7 @@ class RealTimeMarketService extends EventEmitter {
 
         console.log(`📡 RealTimeMarketService: Unsubscribing from ${approvedKeys.length} symbols`);
         marketFeedSupervisor.unsubscribe(approvedKeys);
+        this.syncFeedConnectionState();
     }
 
     /**
@@ -299,6 +329,7 @@ class RealTimeMarketService extends EventEmitter {
                 this.prices.set(canonicalSymbol, quote);
                 this.prices.set(instrumentKey, quote);
                 this.quotesByInstrument.set(instrumentKey, quote);
+                recordFeedPrice(instrumentKey, price, now);
             }
 
             logger.info(
@@ -314,6 +345,7 @@ class RealTimeMarketService extends EventEmitter {
      * Handle incoming market data from WebSocket
      */
     private handleMarketUpdate(data: any): void {
+        this.syncFeedConnectionState();
         // ═══════════════════════════════════════════════════════════
         // 🛠️ GUARD: Validate data
         // ═══════════════════════════════════════════════════════════
@@ -491,7 +523,7 @@ class RealTimeMarketService extends EventEmitter {
     }
 
     /**
-     * Load all instruments from database to build ISIN maps.
+     * Build symbol/token maps from the in-memory repository.
      */
     private async loadInstruments(): Promise<void> {
         // ═══════════════════════════════════════════════════════════
@@ -504,35 +536,26 @@ class RealTimeMarketService extends EventEmitter {
 
         try {
             console.log("📂 Loading instruments for dynamic mapping...");
-            const allInstruments = await db
-                .select({
-                    instrumentToken: instruments.instrumentToken, // "NSE_EQ|INE..."
-                    tradingsymbol: instruments.tradingsymbol,     // "RELIANCE"
-                    exchangeToken: instruments.exchangeToken      // "2885"
-                })
-                .from(instruments)
-                .where(eq(instruments.isActive, true));
+            await instrumentRepository.ensureInitialized();
 
             this.isinMap.clear();
             this.reverseIsinMap.clear();
 
-            for (const instr of allInstruments) {
-                // Map: RELIANCE -> NSE_EQ|INE...
+            let count = 0;
+            for (const instr of instrumentRepository.getAll()) {
+                count += 1;
                 this.isinMap.set(instr.tradingsymbol, instr.instrumentToken);
-                
-                // Map: INE... -> RELIANCE (for reverse lookup from feed)
-                // instrumentToken is usually "NSE_EQ|INE..."
+
                 const parts = instr.instrumentToken.split("|");
                 if (parts.length === 2) {
-                    const isin = parts[1]; // INE...
+                    const isin = parts[1];
                     this.reverseIsinMap.set(isin, instr.tradingsymbol);
                 } else {
-                    // Fallback using whole token
                     this.reverseIsinMap.set(instr.instrumentToken, instr.tradingsymbol);
                 }
             }
 
-            logger.info({ count: allInstruments.length }, "Instruments loaded & mapped");
+            logger.info({ count }, "Instruments loaded & mapped");
         } catch (error) {
             logger.error({ err: error }, "Failed to load instruments map");
         }

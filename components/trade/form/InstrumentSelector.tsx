@@ -9,18 +9,28 @@ import {
 } from "@/components/ui/select";
 import { INSTRUMENTS } from "@/content/instruments";
 
-export type InstrumentType = "NIFTY" | "BANKNIFTY" | "FINNIFTY" | "SENSEX" | "MIDCAP" | "STOCK OPTIONS";
+export type InstrumentType =
+    | "NIFTY"
+    | "BANKNIFTY"
+    | "FINNIFTY"
+    | "SENSEX"
+    | "MIDCAP"
+    | "STOCK FUTURES"
+    | "STOCK OPTIONS";
 
 interface InstrumentSelectorProps {
     value: InstrumentType;
     onChange: (value: InstrumentType) => void;
     hideStockOptions?: boolean;
+    allowedValues?: InstrumentType[];
 }
 
-export function InstrumentSelector({ value, onChange, hideStockOptions }: InstrumentSelectorProps) {
-    const filteredInstruments = INSTRUMENTS.filter(
-        (inst) => !(hideStockOptions && inst.value === "STOCK OPTIONS")
-    );
+export function InstrumentSelector({ value, onChange, hideStockOptions, allowedValues }: InstrumentSelectorProps) {
+    const filteredInstruments = INSTRUMENTS.filter((inst) => {
+        if (hideStockOptions && inst.value === "STOCK OPTIONS") return false;
+        if (allowedValues && allowedValues.length > 0 && !allowedValues.includes(inst.value)) return false;
+        return true;
+    });
 
     return (
         <div className="space-y-2">

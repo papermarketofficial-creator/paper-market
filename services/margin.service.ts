@@ -67,26 +67,39 @@ export class MarginService {
                 // Cash segment: Full amount required (100% margin)
                 return quantity * price;
 
-            case "FUTURES": {
-                // Futures: SPAN margin (simplified to 15% of notional value)
+            case "FUTURE": {
+                // Futures: SPAN margin
                 // In production, this should use actual SPAN margin from exchange
                 const notionalValue = quantity * price;
-                const spanMargin = notionalValue * 0.15; // 15% SPAN margin
+                const spanMargin = notionalValue * 0.15; // 15% SPAN margin (Mock)
                 return spanMargin;
             }
 
             case "OPTION":
-                // Options margin depends on BUY vs SELL
+                // Options:
+                // BUY: Premium only (no margin required)
+                // SELL: Premium + SPAN margin
+                // NOTE: quantity already includes lotSize multiplication (Total Units)
+
                 if (side === "BUY") {
-                    // Buying options: Premium only (no margin required)
-                    const premium = quantity * price * lotSize;
+                    const premium = quantity * price;
                     return premium;
                 } else {
-                    // Selling options: Premium + SPAN margin
-                    const premium = quantity * price * lotSize;
-                    const spanMargin = premium * 0.20; // 20% additional margin for option selling
+                    // Start with basic premium credit
+                    // Block collateral: Premium + Safe Margin (e.g., 20% of Spot or Notional if missing)
+                    // For Mock, assume 20% of Premium + Premium (Very conservative)
+                    const premium = quantity * price;
+                    const spanMargin = premium * 0.20; // 20% additional margin for option selling (Mock)
                     return premium + spanMargin;
                 }
+
+            case "INDEX":
+                // Indices are not tradable directly
+                throw new ApiError(
+                    "Indices cannot be traded directly",
+                    400,
+                    "INVALID_INSTRUMENT_TYPE"
+                );
 
             default:
                 throw new ApiError(

@@ -48,6 +48,9 @@ export async function POST(req: NextRequest) {
                 await tx.update(wallets)
                     .set({
                         balance: '1000000.00', // Reset to 10 Lakh
+                        equity: '1000000.00',
+                        marginStatus: 'NORMAL',
+                        accountState: 'NORMAL',
                         blockedBalance: '0.00',
                         updatedAt: new Date()
                     })

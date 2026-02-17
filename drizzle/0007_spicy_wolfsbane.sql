@@ -1,1 +1,1 @@
-ALTER TABLE "instruments" DROP COLUMN "lastPrice";
+ALTER TABLE "instruments" DROP COLUMN IF EXISTS "lastPrice";

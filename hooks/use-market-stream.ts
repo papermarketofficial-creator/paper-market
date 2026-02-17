@@ -54,6 +54,10 @@ export const useMarketStream = () => {
     const updateLiveCandle = useMarketStore((state) => state.updateLiveCandle);
     const stocks = useMarketStore((state) => state.stocks);
     const indices = useMarketStore((state) => state.indices);
+    const futures = useMarketStore((state) => state.futures);
+    const options = useMarketStore((state) => state.options);
+    const simulatedInstrumentKey = useMarketStore((state) => state.simulatedInstrumentKey);
+    const simulatedSymbol = useMarketStore((state) => state.simulatedSymbol);
     const [isConnected, setIsConnected] = useState(false);
     const wsRef = useRef<ReturnType<typeof getMarketWebSocket> | null>(null);
     const subscribedKeysRef = useRef<Set<string>>(new Set());
@@ -62,24 +66,36 @@ export const useMarketStream = () => {
         const state = useMarketStore.getState();
         const keys = new Set<string>();
 
-        for (const item of state.stocks || []) {
+        // Collect keys from ALL instrument types (not just stocks and indices)
+        const allInstruments = [
+            ...(state.stocks || []),
+            ...(state.indices || []),
+            ...(state.futures || []),
+            ...(state.options || []),
+        ];
+
+        for (const item of allInstruments) {
             const key = toInstrumentKey(item.instrumentToken || item.symbol || '');
             if (key) keys.add(key);
         }
 
-        for (const item of state.indices || []) {
-            const key = toInstrumentKey(item.instrumentToken || item.symbol || '');
-            if (key) keys.add(key);
-        }
-
+        // Always include core indices
         for (const key of CORE_INDEX_KEYS) {
             keys.add(key);
         }
 
+        // Include chart instrument
         const chartKey = toInstrumentKey(state.simulatedInstrumentKey || state.simulatedSymbol || '');
         if (chartKey) keys.add(chartKey);
 
-        return Array.from(keys);
+        // Per-user subscription cap: 150 instruments max
+        const keysArray = Array.from(keys);
+        if (keysArray.length > 150) {
+            console.warn(`⚠️  Subscription cap reached: ${keysArray.length} instruments requested, limiting to 150`);
+            return keysArray.slice(0, 150);
+        }
+
+        return keysArray;
     }, []);
 
     const syncSubscriptions = useCallback(() => {
@@ -107,12 +123,21 @@ export const useMarketStream = () => {
         subscribedKeysRef.current = desired;
     }, [collectDesiredKeys]);
 
-    // Re-sync subscriptions when stocks or indices change (e.g., watchlist loads)
+    // Re-sync subscriptions when instrument universe OR active chart instrument changes.
     useEffect(() => {
         if (isConnected) {
             syncSubscriptions();
         }
-    }, [stocks, indices, isConnected, syncSubscriptions]);
+    }, [
+        stocks,
+        indices,
+        futures,
+        options,
+        simulatedInstrumentKey,
+        simulatedSymbol,
+        isConnected,
+        syncSubscriptions,
+    ]);
 
     useEffect(() => {
         let cancelled = false;

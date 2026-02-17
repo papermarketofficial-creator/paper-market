@@ -1,7 +1,5 @@
 import { Stock } from '@/types/equity.types';
 import { WatchlistInstrument, MarketSlice } from '../types';
-import { futuresList } from '@/content/futures';
-import { optionsList } from '@/content/options';
 import { indicesList } from '@/content/indices';
 
 function buildStocksBySymbol(stocks: Stock[]): Record<string, Stock> {
@@ -21,8 +19,8 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
   instruments: [], // All tradable instruments
   activeWatchlistId: null, // UI state: which watchlist is selected
   
-  futures: futuresList,
-  options: optionsList,
+  futures: [],
+  options: [],
   indices: indicesList,
 
   // ✅ Search functionality
@@ -95,14 +93,17 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
     }
   },
 
-  searchInstruments: async (query: string) => {
+  searchInstruments: async (query: string, type?: string) => {
     if (!query) {
       set({ searchResults: [] });
       return;
     }
     set({ isSearching: true });
     try {
-      const res = await fetch(`/api/v1/instruments/search?q=${query}`);
+      const params = new URLSearchParams({ q: query });
+      if (type) params.set('mode', type);
+
+      const res = await fetch(`/api/v1/instruments/search?${params.toString()}`);
       const data = await res.json();
 
       if (data.success) {

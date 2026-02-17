@@ -176,4 +176,15 @@ class MarketSimulationService {
 }
 
 // Singleton instance
-export const marketSimulation = new MarketSimulationService();
+declare global {
+    var __marketSimulationServiceInstance: MarketSimulationService | undefined;
+}
+
+const globalState = globalThis as unknown as {
+    __marketSimulationServiceInstance?: MarketSimulationService;
+};
+
+export const marketSimulation =
+    globalState.__marketSimulationServiceInstance || new MarketSimulationService();
+
+globalState.__marketSimulationServiceInstance = marketSimulation;

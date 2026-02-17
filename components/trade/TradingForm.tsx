@@ -9,8 +9,8 @@ import { AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
 import { useRiskStore } from '@/stores/trading/risk.store';
-import { useMarketStore } from '@/stores/trading/market.store';
 import { useWalletStore } from '@/stores/wallet.store';
+import { useMarketStore } from '@/stores/trading/market.store';
 import { Stock } from '@/types/equity.types';
 import { InstrumentMode } from '@/types/general.types';
 import { cn } from '@/lib/utils';
@@ -25,6 +25,8 @@ import {
   OrderTypeToggle,
   QuantityInput,
   RiskPreview,
+  PostTradeRiskPreview,
+  OrderProcessingDialog,
   OptionsRiskMetrics,
   OptionsPayoffChart,
   ProductTypeSelector,
@@ -39,9 +41,26 @@ interface TradingFormProps {
   onStockSelect: (stock: Stock) => void;
   instruments: Stock[];
   instrumentMode: InstrumentMode;
+  allowedInstrumentTypes?: InstrumentType[];
 }
 
-export function TradingForm({ selectedStock, onStockSelect, instruments: propInstruments, instrumentMode, activeInstrumentType, onInstrumentTypeChange }: TradingFormProps & { activeInstrumentType?: InstrumentType, onInstrumentTypeChange?: (type: InstrumentType) => void }) {
+function parseExpiryDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+function toExpiryIso(value: unknown): string {
+  const parsed = parseExpiryDate(value);
+  return parsed ? parsed.toISOString() : '';
+}
+
+export function TradingForm({ selectedStock, onStockSelect, instruments: propInstruments, instrumentMode, allowedInstrumentTypes, activeInstrumentType, onInstrumentTypeChange }: TradingFormProps & { activeInstrumentType?: InstrumentType, onInstrumentTypeChange?: (type: InstrumentType) => void }) {
   // New State for Redesign
   const [localInstrumentType, setLocalInstrumentType] = useState<InstrumentType>("NIFTY");
 
@@ -73,20 +92,46 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const executeTrade = useTradeExecutionStore((state) => state.executeTrade);
+  const isOrderProcessing = useTradeExecutionStore((state) => state.isOrderProcessing);
+  const orderProcessingError = useTradeExecutionStore((state) => state.orderProcessingError);
+  const clearOrderProcessingError = useTradeExecutionStore((state) => state.clearOrderProcessingError);
   // const balance = useRiskStore((state) => state.balance); // Removed
-  const { getCurrentInstruments } = useMarketStore();
 
   // Use real wallet balance for validation
-  const { availableBalance: balance, fetchWallet } = useWalletStore(); // Aliased as balance
+  const fetchWallet = useWalletStore((state) => state.fetchWallet);
+  const balance = useWalletStore((state) => state.availableBalance);
+  const walletEquity = useWalletStore((state) => state.equity);
+  const blockedBalance = useWalletStore((state) => state.blockedBalance);
+  const accountState = useWalletStore((state) => state.accountState);
+  const liveTokenPrice = useMarketStore((state) => {
+    const token = selectedStock?.instrumentToken;
+    if (!token) return 0;
+    const price = Number(state.quotesByInstrument[token]?.price);
+    return Number.isFinite(price) && price > 0 ? price : 0;
+  });
+  const liveSymbolPrice = useMarketStore((state) => {
+    const symbol = selectedStock?.symbol;
+    if (!symbol) return 0;
+    const price = Number(state.selectPrice(symbol));
+    return Number.isFinite(price) && price > 0 ? price : 0;
+  });
+  const liveUnderlyingPrice = useMarketStore((state) => {
+    const price = Number(state.selectPrice(instrumentType));
+    return Number.isFinite(price) && price > 0 ? price : 0;
+  });
+
+  useEffect(() => {
+    fetchWallet().catch(() => undefined);
+  }, [fetchWallet]);
 
   // --- LOGIC FOR INSTRUMENT SELECTION ---
 
   // 1. Get relevant instruments based on selection
   const isEquityMode = instrumentMode === 'equity';
 
-  // Fetch all F&O instruments (Futures + Options) if in F&O mode
-  const allFutures = useMemo(() => getCurrentInstruments('futures'), [getCurrentInstruments]);
-  const allOptions = useMemo(() => getCurrentInstruments('options'), [getCurrentInstruments]);
+  // For derivatives, the page now passes repository-backed instruments as props.
+  const allFutures = useMemo(() => (instrumentMode === 'futures' ? propInstruments : []), [instrumentMode, propInstruments]);
+  const allOptions = useMemo(() => (instrumentMode === 'options' ? propInstruments : []), [instrumentMode, propInstruments]);
 
   // Filter based on InstrumentType (NIFTY, BANKNIFTY...)
   const filteredInstruments = useMemo(() => {
@@ -97,66 +142,77 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
     if (instrumentMode === 'futures') source = allFutures;
     if (instrumentMode === 'options') source = allOptions;
 
-    if (instrumentType === "STOCK OPTIONS") {
-      // In Options mode, "STOCK OPTIONS" means all options (filtered later by search)
+    if (instrumentType === "STOCK OPTIONS" || instrumentType === "STOCK FUTURES") {
+      // Search-driven derivatives (stock options/futures).
       return source;
     }
 
-    // Filter by Index Name (e.g. symbol starts with "NIFTY")
-    return source.filter(inst => inst.symbol.startsWith(instrumentType));
+    // Derivatives pages already pass instrument lists filtered by selected underlying.
+    return source;
   }, [isEquityMode, propInstruments, instrumentMode, allFutures, allOptions, instrumentType]);
 
 
   // 2. Logic to Auto-Select Contract for Indices
+  const isSearchDrivenDerivative = instrumentType === "STOCK OPTIONS" || instrumentType === "STOCK FUTURES";
+  const showQuickFuturesSearch = instrumentMode === "futures";
+
   useEffect(() => {
-    if (isEquityMode || instrumentType === "STOCK OPTIONS") return;
+    if (isEquityMode || isSearchDrivenDerivative) return;
 
-    // Reset selection when type changes
-    if (!selectedExpiry) {
-      // Default to nearest expiry
-      const expiries = Array.from(new Set(filteredInstruments
-        .filter(i => i.expiryDate)
-        .map(i => i.expiryDate!.toISOString())
-      )).sort();
+    const expiries = Array.from(new Set(filteredInstruments
+      .filter(i => i.expiryDate)
+      .map(i => toExpiryIso(i.expiryDate))
+      .filter(Boolean)
+    )).sort();
 
-      if (expiries.length > 0) setSelectedExpiry(expiries[0]);
+    if (expiries.length === 0) {
+      if (selectedExpiry) setSelectedExpiry("");
+      return;
     }
-  }, [filteredInstruments, isEquityMode, instrumentType, selectedExpiry]);
+
+    if (!selectedExpiry || !expiries.includes(selectedExpiry)) {
+      setSelectedExpiry(expiries[0]);
+    }
+  }, [filteredInstruments, isEquityMode, isSearchDrivenDerivative, selectedExpiry]);
 
 
   // 3. Find the specific contract based on user selection
   useEffect(() => {
-    if (isEquityMode || instrumentType === "STOCK OPTIONS") return;
+    if (isEquityMode || isSearchDrivenDerivative) return;
 
     let match: Stock | undefined;
 
     if (instrumentMode === 'futures') {
       // Find future with selected expiry
-      match = filteredInstruments.find(i => i.expiryDate?.toISOString() === selectedExpiry);
+      match = filteredInstruments.find(i => toExpiryIso(i.expiryDate) === selectedExpiry);
       // Fallback to first if not found (e.g. expiry changed)
       if (!match && filteredInstruments.length > 0) match = filteredInstruments[0];
     } else {
       // Options: Need Expiry + Strike + CE/PE
       if (selectedExpiry && selectedStrike) {
         match = filteredInstruments.find(i =>
-          i.expiryDate?.toISOString() === selectedExpiry &&
+          toExpiryIso(i.expiryDate) === selectedExpiry &&
           parseOptionSymbol(i.symbol)?.strike === parseFloat(selectedStrike) &&
           parseOptionSymbol(i.symbol)?.type === optionType
         );
       }
     }
 
+    if (match && !match.instrumentToken) {
+      return;
+    }
+
     if (match && match.symbol !== selectedStock?.symbol) {
       onStockSelect(match);
     }
-  }, [isEquityMode, instrumentType, instrumentMode, selectedExpiry, selectedStrike, optionType, filteredInstruments, onStockSelect, selectedStock]);
+  }, [isEquityMode, isSearchDrivenDerivative, instrumentMode, selectedExpiry, selectedStrike, optionType, filteredInstruments, onStockSelect, selectedStock]);
 
 
   // --- DERIVED DATA FOR UI SELECTORS ---
   const availableExpiries = useMemo(() => {
     const dates = filteredInstruments
-      .filter(i => i.expiryDate)
-      .map(i => i.expiryDate!);
+      .map(i => parseExpiryDate(i.expiryDate))
+      .filter((date): date is Date => Boolean(date));
 
     // Unique dates by time value
     const uniqueDates = Array.from(new Set(dates.map(d => d.getTime())))
@@ -169,7 +225,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
   const availableStrikes = useMemo(() => {
     if (instrumentMode !== 'options') return [];
     // Filter by expiry first
-    const withExpiry = filteredInstruments.filter(i => i.expiryDate?.toISOString() === selectedExpiry);
+    const withExpiry = filteredInstruments.filter(i => toExpiryIso(i.expiryDate) === selectedExpiry);
     const strikes = new Set<number>();
     withExpiry.forEach(i => {
       const p = parseOptionSymbol(i.symbol);
@@ -180,7 +236,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
 
 
   // --- STANDARD FORM LOGIC ---
-  const currentPrice = selectedStock?.price || 0;
+  const currentPrice = liveTokenPrice || liveSymbolPrice || liveUnderlyingPrice || selectedStock?.price || 0;
   const leverageValue = parseInt(leverage);
   const inputValue = parseInt(quantity) || 0;
 
@@ -214,13 +270,22 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
   }
 
   const isQuantityValid = inputValue > 0;
+  const hasInstrumentToken = Boolean(selectedStock?.instrumentToken);
+  const hasValidPrice = Number.isFinite(currentPrice) && currentPrice > 0;
   // Use real wallet balance for validation
   const hasSufficientMargin = requiredMargin <= balance;
   const balanceShortfall = requiredMargin - balance;
-  const canTrade = selectedStock && isQuantityValid && hasSufficientMargin && isSlValid && isTargetValid;
+  const canTrade = selectedStock && hasInstrumentToken && hasValidPrice && !isOrderProcessing && isQuantityValid && hasSufficientMargin && isSlValid && isTargetValid;
 
   const handleSubmit = () => {
+    if (isOrderProcessing) return;
     if (!selectedStock || !canTrade) return;
+    if (!selectedStock.instrumentToken) {
+      toast.error('Instrument routing key missing', {
+        description: `Cannot place order for ${selectedStock.symbol} without instrumentToken.`,
+      });
+      return;
+    }
 
     // Force blur on any focused input to ensure state is synced
     if (document.activeElement instanceof HTMLElement) {
@@ -233,10 +298,18 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
     }, 50);
   };
 
-  const confirmTrade = () => {
+  const confirmTrade = async () => {
+    if (isOrderProcessing) return;
     if (!selectedStock) return;
+    if (!selectedStock.instrumentToken) {
+      toast.error('Instrument routing key missing', {
+        description: `Cannot place order for ${selectedStock.symbol} without instrumentToken.`,
+      });
+      return;
+    }
 
     console.log('[DEBUG TradingForm] confirmTrade called:', {
+      instrumentToken: selectedStock.instrumentToken,
       quantity: quantity,
       inputValue: inputValue,
       lotSize: lotSize,
@@ -244,37 +317,44 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
       selectedStock: selectedStock.symbol
     });
 
-    executeTrade({
-      symbol: selectedStock.symbol,
-      side,
-      quantity: totalQuantity,
-      entryPrice: currentPrice,
-    }, lotSize, instrumentMode);
+    try {
+      await executeTrade({
+        instrumentToken: selectedStock.instrumentToken,
+        symbol: selectedStock.symbol,
+        side,
+        quantity: totalQuantity,
+        entryPrice: currentPrice,
+      }, lotSize, instrumentMode);
 
-    toast.success('Trade Sent', {
-      description: `${side} ${totalQuantity} shares (${inputValue} Lots) of ${selectedStock.symbol} at market.`,
-    });
+      toast.success('Trade Sent', {
+        description: `${side} ${totalQuantity} shares (${inputValue} Lots) of ${selectedStock.symbol} at market.`,
+      });
 
-    // Close dialog first, then reset form after a small delay
-    setShowConfirmDialog(false);
+      // Close dialog first, then reset form after a small delay
+      setShowConfirmDialog(false);
 
-    // Reset form fields after dialog animation completes
-    setTimeout(() => {
-      setQuantity('1');
-      setStopLoss('');
-      setTarget('');
-    }, 300);
+      // Reset form fields after dialog animation completes
+      setTimeout(() => {
+        setQuantity('1');
+        setStopLoss('');
+        setTarget('');
+      }, 300);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Order placement failed';
+      toast.error('Order Failed', { description: message });
+    }
   };
 
   return (
     <TooltipProvider>
-      <Card className="bg-card border-border h-full rounded-sm shadow-none">
+      <Card className="bg-card border-border h-full rounded-sm shadow-none flex flex-col min-h-0">
         {!isEquityMode && (
           <CardHeader className="pb-2 p-3">
             <InstrumentSelector
               value={instrumentType}
               onChange={setInstrumentType}
               hideStockOptions={instrumentMode === 'futures'}
+              allowedValues={allowedInstrumentTypes}
             />
           </CardHeader>
         )}
@@ -284,21 +364,56 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
           {isEquityMode && <CardTitle className="text-foreground">Place Order</CardTitle>}
         </CardHeader>
 
-        <CardContent className="space-y-4 p-3">
-          {/* SEARCH ONLY FOR EQUITY OR STOCK OPTIONS */}
-          {(isEquityMode || instrumentType === "STOCK OPTIONS") && (
+        <CardContent className="space-y-4 p-3 flex-1 min-h-0 overflow-y-auto">
+          {showQuickFuturesSearch && (
             <StockSearch
               selectedStock={selectedStock}
               onStockSelect={onStockSelect}
-              instruments={instrumentType === "STOCK OPTIONS" ? allOptions : propInstruments}
-              instrumentMode={instrumentType === "STOCK OPTIONS" ? 'options' : instrumentMode}
-              label={instrumentType === "STOCK OPTIONS" ? "Search Stock Option" : "Select Stock"}
-              placeholder={instrumentType === "STOCK OPTIONS" ? "e.g. RELIANCE, TCS..." : "Search stocks..."}
+              instruments={allFutures}
+              instrumentMode="futures"
+              label="Quick Futures Search"
+              placeholder="Search and pick any futures contract (index or stock)"
+            />
+          )}
+
+          {/* SEARCH FOR EQUITY + SEARCH-DRIVEN DERIVATIVES */}
+          {(isEquityMode || (instrumentMode === 'options' && isSearchDrivenDerivative)) && (
+            <StockSearch
+              selectedStock={selectedStock}
+              onStockSelect={onStockSelect}
+              instruments={
+                instrumentType === "STOCK OPTIONS"
+                  ? allOptions
+                  : instrumentType === "STOCK FUTURES"
+                    ? allFutures
+                    : propInstruments
+              }
+              instrumentMode={
+                instrumentType === "STOCK OPTIONS"
+                  ? 'options'
+                  : instrumentType === "STOCK FUTURES"
+                    ? 'futures'
+                    : instrumentMode
+              }
+              label={
+                instrumentType === "STOCK OPTIONS"
+                  ? "Search Stock Option"
+                  : instrumentType === "STOCK FUTURES"
+                    ? "Search Stock Future"
+                    : "Select Stock"
+              }
+              placeholder={
+                instrumentType === "STOCK OPTIONS"
+                  ? "e.g. RELIANCE, TCS..."
+                  : instrumentType === "STOCK FUTURES"
+                    ? "e.g. RELIANCE, SBIN..."
+                    : "Search stocks..."
+              }
             />
           )}
 
           {/* INDEX F&O SELECTORS */}
-          {!isEquityMode && instrumentType !== "STOCK OPTIONS" && (
+          {!isEquityMode && !isSearchDrivenDerivative && (
             <div className="space-y-4 rounded-sm bg-muted/30 p-3 border border-border">
               {/* Expiry Selector */}
               <div className="space-y-2">
@@ -359,7 +474,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                   {selectedStock.symbol}
                 </span>
                 <span className={cn("text-lg font-bold font-mono", selectedStock.change >= 0 ? "text-trade-buy" : "text-trade-sell")}>
-                  ₹{selectedStock.price.toLocaleString()}
+                  ₹{currentPrice.toLocaleString()}
                 </span>
               </div>
 
@@ -428,6 +543,12 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                 <ProductTypeSelector productType={productType} onProductTypeChange={setProductType} />
                 <LeverageSelector leverage={leverage} onLeverageChange={setLeverage} />
                 <MarginDisplay selectedStock={selectedStock} currentPrice={currentPrice} requiredMargin={requiredMargin} balance={balance} />
+                <PostTradeRiskPreview
+                  projectedAdditionalMargin={requiredMargin}
+                  equity={walletEquity}
+                  blockedMargin={blockedBalance}
+                  accountState={accountState}
+                />
 
                 <InsufficientFundsAlert requiredAmount={requiredMargin} />
 
@@ -454,6 +575,12 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
         </CardContent>
       </Card>
 
+      <OrderProcessingDialog
+        isProcessing={isOrderProcessing}
+        errorMessage={orderProcessingError}
+        onDismissError={clearOrderProcessingError}
+      />
+
       <TradeConfirmationDialog
         open={showConfirmDialog}
         onOpenChange={setShowConfirmDialog}
@@ -464,8 +591,10 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
         requiredMargin={requiredMargin}
         productType={productType}
         leverageValue={leverageValue}
+        isProcessing={isOrderProcessing}
         onConfirm={confirmTrade}
       />
     </TooltipProvider>
   );
 }
+

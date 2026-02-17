@@ -92,7 +92,9 @@ export function useWatchlistInstruments(watchlistId: string | null) {
         const instrumentKeys = Array.from(
           new Set(
             baseStocks
-              .map((stock) => toInstrumentKey(stock.instrumentToken || stock.symbol))
+              .map((stock) => stock.instrumentToken)
+              .filter((token): token is string => Boolean(token))
+              .map((token) => toInstrumentKey(token))
               .filter(Boolean)
           )
         );
@@ -115,7 +117,8 @@ export function useWatchlistInstruments(watchlistId: string | null) {
         const quoteLookup = toQuoteLookup(quotesJson.data as Record<string, QuoteApiItem>);
 
         return baseStocks.map((stock) => {
-          const key = toInstrumentKey(stock.instrumentToken || stock.symbol);
+          if (!stock.instrumentToken) return stock;
+          const key = toInstrumentKey(stock.instrumentToken);
           const quote = quoteLookup.get(key);
           if (!quote) return stock;
 

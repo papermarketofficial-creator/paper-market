@@ -4,7 +4,9 @@ import { logger } from "@/lib/logger";
 import { ApiError } from "@/lib/errors";
 import { eq, and } from "drizzle-orm";
 import type { PgTransaction } from "drizzle-orm/pg-core";
-import type { PostgresJsQueryResultHKT } from "drizzle-orm/postgres-js";
+import { InstrumentRepository } from "@/lib/instruments/repository";
+import { requireInstrumentTokenForIdentityLookup } from "@/lib/trading/token-identity-guard";
+import { realTimeMarketService } from "@/services/realtime-market.service";
 
 type DbTransaction = any; // PgTransaction<PostgresJsQueryResultHKT, Record<string, never>, any>;
 
@@ -15,14 +17,22 @@ export class PositionService {
      */
     static async updatePosition(tx: DbTransaction, trade: Trade): Promise<void> {
         try {
-            // Fetch existing position
+            const instrumentToken = requireInstrumentTokenForIdentityLookup({
+                context: "PositionService.updatePosition",
+                instrumentToken: trade.instrumentToken,
+                symbol: trade.symbol,
+            });
+
+            // Fetch existing position using strict token identity.
             const [existingPosition] = await tx
                 .select()
                 .from(positions)
-                .where(and(
-                    eq(positions.userId, trade.userId),
-                    eq(positions.symbol, trade.symbol)
-                ))
+                .where(
+                    and(
+                        eq(positions.userId, trade.userId),
+                        eq(positions.instrumentToken, instrumentToken)
+                    )
+                )
                 .limit(1);
 
             const tradePrice = parseFloat(trade.price);
@@ -33,6 +43,7 @@ export class PositionService {
                 const newPosition: NewPosition = {
                     userId: trade.userId,
                     symbol: trade.symbol,
+                    instrumentToken,
                     quantity: trade.side === "BUY" ? tradeQuantity : -tradeQuantity,
                     averagePrice: tradePrice.toString(),
                     realizedPnL: "0",
@@ -74,10 +85,12 @@ export class PositionService {
                     // Position closed, delete record
                     await tx
                         .delete(positions)
-                        .where(and(
-                            eq(positions.userId, trade.userId),
-                            eq(positions.symbol, trade.symbol)
-                        ));
+                        .where(
+                            and(
+                                eq(positions.userId, trade.userId),
+                                eq(positions.instrumentToken, instrumentToken)
+                            )
+                        );
                     logger.debug({ userId: trade.userId, symbol: trade.symbol, pnl: tradeRealizedPnL }, "Position closed");
                 } else {
                     // Update position
@@ -89,10 +102,12 @@ export class PositionService {
                             realizedPnL: newRealizedPnL.toString(),
                             updatedAt: new Date(),
                         })
-                        .where(and(
-                            eq(positions.userId, trade.userId),
-                            eq(positions.symbol, trade.symbol)
-                        ));
+                        .where(
+                            and(
+                                eq(positions.userId, trade.userId),
+                                eq(positions.instrumentToken, instrumentToken)
+                            )
+                        );
                     logger.debug({ userId: trade.userId, symbol: trade.symbol }, "Position updated");
                 }
             }
@@ -135,12 +150,15 @@ export class PositionService {
                     }
                 })
                 .from(positions)
-                .leftJoin(instruments, eq(positions.symbol, instruments.tradingsymbol))
+                // STRICT JOIN on instrumentToken
+                // Phase-0 Step 2: Symbol is display only.
+                .leftJoin(instruments, eq(positions.instrumentToken, instruments.instrumentToken))
                 .where(eq(positions.userId, userId));
 
             return userPositions.map(({ position, instrument }) => {
                 const avgPrice = parseFloat(position.averagePrice);
-                const currentPrice = 0;
+                const quote = realTimeMarketService.getQuote(position.instrumentToken);
+                const currentPrice = Number(quote?.price) || avgPrice;
 
                 // Calculate PnL: (Current - Avg) * SignedQuantity
                 const quantity = position.quantity;
@@ -149,7 +167,7 @@ export class PositionService {
                 const mappedPosition = {
                     id: position.id,
                     symbol: position.symbol,
-                    instrumentToken: instrument?.instrumentToken || undefined,
+                    instrumentToken: position.instrumentToken,
                     name: position.symbol, // Use symbol as name for now
                     quantity: Math.abs(quantity), // Frontend expects absolute
                     side: quantity > 0 ? "BUY" : "SELL" as "BUY" | "SELL",
@@ -252,11 +270,20 @@ export class PositionService {
             }
 
             // Get instrument for validation
-            const [instrument] = await db
-                .select()
-                .from(instruments)
-                .where(eq(instruments.tradingsymbol, position.symbol))
-                .limit(1);
+            // Get from Repository (Fast & Consistent)
+            const repo = InstrumentRepository.getInstance();
+            if (!repo) {
+                throw new Error("InstrumentRepository failed to initialize");
+            }
+            await repo.ensureInitialized();
+
+            const instrumentToken = requireInstrumentTokenForIdentityLookup({
+                context: "PositionService.closePosition",
+                instrumentToken: position.instrumentToken,
+                symbol: position.symbol,
+            });
+
+            const instrument = repo.get(instrumentToken);
 
             if (!instrument) {
                 throw new ApiError("Instrument not found", 404, "INSTRUMENT_NOT_FOUND");
@@ -282,6 +309,7 @@ export class PositionService {
             
             const closeOrder = await OrderService.placeOrder(userId, {
                 symbol: position.symbol,
+                instrumentToken,
                 side: oppositeSide,
                 quantity: closeQuantity,
                 orderType: "MARKET", // Always use MARKET for closing

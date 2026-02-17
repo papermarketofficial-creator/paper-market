@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   calculateAnnualizedSharpeRatioFromEquityCurve,
   calculateMaxDrawdownPct,
-} from "./dashboard-metrics.ts";
+} from "./dashboard-metrics";
 
 test("calculateMaxDrawdownPct returns 0 for empty input", () => {
   assert.equal(calculateMaxDrawdownPct([]), 0);

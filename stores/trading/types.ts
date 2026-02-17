@@ -74,10 +74,10 @@ export interface ChartDataSlice {
   currentRequestId: number; // 🔥 CRITICAL: Prevent stale fetch overwrites
 
   // Actions
-  initializeSimulation: (symbol: string, timeframe?: string, range?: string) => Promise<void>;
+  initializeSimulation: (symbol: string, timeframe?: string, range?: string, instrumentKey?: string) => Promise<void>;
   startSimulation: () => void;
   stopSimulation: () => void;
-  fetchMoreHistory: (symbol: string, range: string, endTime: number) => Promise<void>;
+  fetchMoreHistory: (symbol: string, range: string, endTime: number, instrumentKey?: string) => Promise<void>;
 }
 
 export interface LiveUpdatesSlice {

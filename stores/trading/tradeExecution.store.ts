@@ -9,14 +9,26 @@ import { useWalletStore } from '@/stores/wallet.store';
 import { parseOptionSymbol, calculateOptionRiskMetrics } from '@/lib/fno-utils';
 import { JournalEntry, ExitReason } from '@/types/journal.types';
 
+type OrderPlacementParams = {
+  instrumentToken: string;
+  symbol: string;
+  side: Position['side'];
+  quantity: number;
+  entryPrice?: number;
+};
+
 interface TradeExecutionState {
   // ✅ State
   pendingOrders: Trade[];
   pendingOrderDetails: Record<string, { leverage: number, lotSize: number }>; // Store metadata needed for Position creation
+  isOrderProcessing: boolean;
+  processingOrderCount: number;
+  orderProcessingError: string | null;
+  clearOrderProcessingError: () => void;
 
   // ✅ New Action: Place Order (Replaces simple executeTrade)
   placeOrder: (
-    tradeParams: Pick<Position, 'symbol' | 'side' | 'quantity' | 'entryPrice'>,
+    tradeParams: OrderPlacementParams,
     lotSize: number,
     instrumentMode: InstrumentMode,
     orderType?: 'MARKET' | 'LIMIT' | 'STOP',
@@ -30,7 +42,7 @@ interface TradeExecutionState {
 
   // Legacy alias
   executeTrade: (
-    trade: Pick<Position, 'symbol' | 'side' | 'quantity' | 'entryPrice'>,
+    trade: OrderPlacementParams,
     lotSize: number,
     instrumentMode: InstrumentMode
   ) => Promise<void>;
@@ -44,16 +56,37 @@ const randomRange = (min: number, max: number) => Math.random() * (max - min) + 
 export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => ({
   pendingOrders: [],
   pendingOrderDetails: {},
+  isOrderProcessing: false,
+  processingOrderCount: 0,
+  orderProcessingError: null,
+  clearOrderProcessingError: () => set({ orderProcessingError: null }),
 
   placeOrder: async (tradeParams, lotSize, instrumentMode, orderType = 'MARKET', triggerPrice) => {
+    let markedProcessing = false;
     try {
+      if (!tradeParams.instrumentToken || tradeParams.instrumentToken.trim().length === 0) {
+        throw new Error('instrumentToken is required for order placement');
+      }
+
+      set((state) => {
+        const nextCount = state.processingOrderCount + 1;
+        return {
+          processingOrderCount: nextCount,
+          isOrderProcessing: nextCount > 0,
+          orderProcessingError: null,
+        };
+      });
+      markedProcessing = true;
+
       console.log('[DEBUG] placeOrder called with:', {
+        instrumentToken: tradeParams.instrumentToken,
         symbol: tradeParams.symbol,
         quantity: tradeParams.quantity,
         lotSize
       });
 
       const payload: any = {
+        instrumentToken: tradeParams.instrumentToken,
         symbol: tradeParams.symbol,
         side: tradeParams.side,
         quantity: tradeParams.quantity,
@@ -76,10 +109,7 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
 
       if (!data.success) {
         console.error("❌ Place Order API Failed:", data);
-        console.error("❌ Error Details:", data.error);
-        if (data.error?.message) {
-            alert(`Order Failed: ${data.error.message}`); // Temporary alert to force visibility
-        }
+        console.error("❌ Error Details:", data.error);
         throw new Error(data.error?.message || "Order placement failed");
       }
 
@@ -90,10 +120,21 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
       console.log('🔄 Refreshing wallet balance after order placement...');
       useWalletStore.getState().fetchWallet();
 
-    } catch (error: any) {
-      console.error("🔥 STOCK STORE ERROR:", error);
-      // alert(`Exception: ${error.message}`); // Temporary alert
+        } catch (error: any) {
+      const message = error instanceof Error ? error.message : "Order placement failed";
+      set({ orderProcessingError: message });
+      console.error("[TradeExecution] Order placement failed", error);
       throw error;
+    } finally {
+      if (markedProcessing) {
+        set((state) => {
+          const nextCount = Math.max(0, state.processingOrderCount - 1);
+          return {
+            processingOrderCount: nextCount,
+            isOrderProcessing: nextCount > 0,
+          };
+        });
+      }
     }
   },
 
@@ -119,7 +160,7 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
 
   // Legacy alias for compatibility during refactor
   executeTrade: async (trade, lotSize, mode) => {
-    get().placeOrder(trade, lotSize, mode, 'MARKET');
+    return get().placeOrder(trade, lotSize, mode, 'MARKET');
   },
 
   closePosition: async (positionId: string, exitPrice: number, reason = 'MANUAL') => {
@@ -136,11 +177,15 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
 
       // Determine opposing side
       const exitSide = position.side === 'BUY' ? 'SELL' : 'BUY';
+      if (!position.instrumentToken) {
+        throw new Error(`Missing instrumentToken for position ${position.symbol}`);
+      }
 
       // Place opposing Market Order to exit
       // We reuse the existing placeOrder API integration
       await get().placeOrder(
         {
+          instrumentToken: position.instrumentToken,
           symbol: position.symbol,
           side: exitSide,
           quantity: position.quantity, // Quantity is already absolute in frontend model
@@ -183,3 +228,13 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
     console.warn("settleExpiredPositions is deprecated. Backend handles expiry.");
   }
 }));
+
+
+
+
+
+
+
+
+
+

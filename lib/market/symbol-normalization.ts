@@ -38,10 +38,13 @@ export function toCanonicalSymbol(symbol: string): string {
  * 
  * For equities: Converts to uppercase (e.g., "NSE_EQ|INE002A01018")
  * For indices: Preserves Upstox's mixed-case format (e.g., "NSE_INDEX|Nifty 50")
+ * For F&O: Converts to uppercase (e.g., "NSE_FO|NIFTY25FEB22000CE")
  * 
  * This is critical because Upstox WebSocket expects exact format matching:
  * - Subscribe with "NSE_INDEX|Nifty 50" (mixed case)
  * - Receive ticks with "NSE_INDEX|Nifty 50" (mixed case)
+ * - Subscribe with "NSE_FO|NIFTY25FEB22000CE" (uppercase)
+ * - Receive ticks with "NSE_FO|NIFTY25FEB22000CE" (uppercase)
  */
 export function toInstrumentKey(value: string): string {
   if (!value) return "";
@@ -67,7 +70,17 @@ export function toInstrumentKey(value: string): string {
     }
   }
   
-  // For non-index instruments, convert to uppercase
+  // For F&O instruments (NSE_FO|...), convert to uppercase
+  if (upperNormalized.startsWith("NSE_FO|")) {
+    return upperNormalized;
+  }
+  
+  // For equity instruments (NSE_EQ|...), convert to uppercase
+  if (upperNormalized.startsWith("NSE_EQ|")) {
+    return upperNormalized;
+  }
+  
+  // For other segments (BSE_EQ, MCX_FO, etc.), convert to uppercase
   return normalized.toUpperCase();
 }
 
