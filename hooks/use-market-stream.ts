@@ -263,7 +263,7 @@ export const useMarketStream = () => {
             // ═══════════════════════════════════════════════════════════
             // 🔌 STEP 2: Connect to market-engine WebSocket
             // ═══════════════════════════════════════════════════════════
-            const wsUrl = process.env.NEXT_PUBLIC_MARKET_ENGINE_WS_URL || 'ws://localhost:4201';
+            const wsUrl = process.env.NEXT_PUBLIC_MARKET_ENGINE_WS_URL || 'ws://localhost:4200';
 
             const ws = getMarketWebSocket({
                 url: wsUrl,

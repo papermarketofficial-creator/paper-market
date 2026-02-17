@@ -1,5 +1,5 @@
 import WebSocket, { WebSocketServer } from 'ws';
-import type { IncomingMessage } from 'http';
+import type { IncomingMessage, Server as HttpServer } from 'http';
 import { jwtVerify } from 'jose';
 import { tickBus } from '../core/tick-bus.js';
 import { candleEngine } from '../core/candle-engine.js';
@@ -141,10 +141,10 @@ function totalSubscriptionCount(): number {
     return total;
 }
 
-export function createWebSocketServer(port: number): WebSocketServer {
-    const wss = new WebSocketServer({ port, maxPayload: MAX_MESSAGE_SIZE_BYTES });
+export function createWebSocketServer(server: HttpServer): WebSocketServer {
+    const wss = new WebSocketServer({ server, maxPayload: MAX_MESSAGE_SIZE_BYTES });
 
-    logger.info({ port }, 'WebSocket server starting');
+    logger.info('WebSocket server attached to HTTP server');
 
     wss.on('connection', (ws: WebSocket, request: IncomingMessage) => {
         void onConnection(ws, request);

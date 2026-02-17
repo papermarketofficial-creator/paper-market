@@ -14,7 +14,7 @@ import { getMarketWebSocket } from '@/lib/market-ws';
 function initializeCandleSubscription() {
     console.log("🔌 Subscribing to candle updates from market-engine...");
     
-    const wsUrl = process.env.NEXT_PUBLIC_MARKET_ENGINE_WS_URL || 'ws://localhost:4201';
+    const wsUrl = process.env.NEXT_PUBLIC_MARKET_ENGINE_WS_URL || 'ws://localhost:4200';
     
     const ws = getMarketWebSocket({
         url: wsUrl,

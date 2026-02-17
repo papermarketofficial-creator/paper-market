@@ -10,7 +10,6 @@ import { logger } from './lib/logger.js';
 // ═══════════════════════════════════════════════════════════
 
 const PORT = parseInt(process.env.PORT || '4200', 10);
-const WS_PORT = parseInt(process.env.WS_PORT || '4201', 10);
 
 async function main() {
     logger.info('Starting Market Engine...');
@@ -30,17 +29,14 @@ async function main() {
     await initializeEngine();
 
     // ═══════════════════════════════════════════════════════════
-    // 📡 STEP 3: Start WebSocket server
-    // ═══════════════════════════════════════════════════════════
-    const wss = createWebSocketServer(WS_PORT);
-    logger.info({ port: WS_PORT }, 'WebSocket server started');
-
-    // ═══════════════════════════════════════════════════════════
-    // 🌐 STEP 4: Start HTTP server (health check)
+    // 🌐 STEP 3: Start HTTP server (health check + websocket upgrades)
     // ═══════════════════════════════════════════════════════════
     const fastify = Fastify({
         logger: false // Use our pino logger instead
     });
+
+    // Attach websocket server to the same HTTP server/port.
+    const wss = createWebSocketServer(fastify.server);
 
     fastify.get('/health', async () => {
         return {
@@ -55,7 +51,7 @@ async function main() {
     });
 
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    logger.info({ port: PORT }, 'HTTP server started');
+    logger.info({ port: PORT }, 'HTTP + WebSocket server started');
 
     logger.info('✅ Market Engine is running');
 
