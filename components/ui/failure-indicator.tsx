@@ -32,7 +32,10 @@ export default function FailureIndicator({
         className="h-full w-full overflow-visible"
         initial={false}
         animate={{ scale: [1, 1.06, 1] }}
-        transition={{ type: "spring", stiffness: 260, damping: 16 }}
+        transition={{
+          duration: shouldReduceMotion ? 0.1 : 0.3,
+          ease: "easeOut",
+        }}
       >
         <circle
           cx={50}

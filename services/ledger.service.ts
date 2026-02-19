@@ -7,17 +7,10 @@ import {
     type LedgerReferenceType,
 } from "@/lib/db/schema";
 import { ApiError } from "@/lib/errors";
+import { ledgerCacheService } from "@/services/ledger-cache.service";
 
 const LEDGER_SCALE = 8;
 const LEDGER_FACTOR = BigInt(10) ** BigInt(LEDGER_SCALE);
-const ACCOUNT_TYPES: readonly LedgerAccountType[] = [
-    "CASH",
-    "MARGIN_BLOCKED",
-    "UNREALIZED_PNL",
-    "REALIZED_PNL",
-    "FEES",
-];
-
 type DecimalInput = string | number | bigint;
 type TxExecutor = typeof db;
 type TxLike = TxExecutor | any;
@@ -105,17 +98,7 @@ export class LedgerService {
     }
 
     static async ensureUserAccounts(userId: string, tx?: TxLike): Promise<void> {
-        const executor = tx || db;
-        await Promise.all(
-            ACCOUNT_TYPES.map((accountType) =>
-                executor
-                    .insert(ledgerAccounts)
-                    .values({ userId, accountType })
-                    .onConflictDoNothing({
-                        target: [ledgerAccounts.userId, ledgerAccounts.accountType],
-                    })
-            )
-        );
+        await ledgerCacheService.warmUser(userId, tx);
     }
 
     static async recordEntry(
@@ -124,7 +107,7 @@ export class LedgerService {
         amount: DecimalInput,
         reference: LedgerReference,
         tx?: TxLike
-    ): Promise<{ entryId: string; amount: string; globalSequence: number }> {
+    ): Promise<{ entryId: string; amount: string; globalSequence: number; duplicate: boolean }> {
         const executor = tx || db;
         const normalizedAmount = this.normalizeAmount(amount);
         if (this.compare(normalizedAmount, "0") <= 0) {
@@ -168,44 +151,15 @@ export class LedgerService {
                 entryId: entry.id,
                 amount: normalizedAmount,
                 globalSequence: Number(entry.globalSequence),
+                duplicate: false,
             };
         }
 
-        const [existing] = await executor
-            .select({
-                id: ledgerEntries.id,
-                globalSequence: ledgerEntries.globalSequence,
-                debitAccountId: ledgerEntries.debitAccountId,
-                creditAccountId: ledgerEntries.creditAccountId,
-                amount: ledgerEntries.amount,
-                referenceType: ledgerEntries.referenceType,
-                referenceId: ledgerEntries.referenceId,
-            })
-            .from(ledgerEntries)
-            .where(eq(ledgerEntries.idempotencyKey, normalizedIdempotencyKey))
-            .limit(1);
-
-        if (!existing?.id || !Number.isFinite(Number(existing.globalSequence))) {
-            throw new ApiError("Failed to record ledger entry", 500, "LEDGER_WRITE_FAILED");
-        }
-        const matchesIntent =
-            existing.debitAccountId === debitId &&
-            existing.creditAccountId === creditId &&
-            this.compare(existing.amount, normalizedAmount) === 0 &&
-            existing.referenceType === reference.referenceType &&
-            existing.referenceId === reference.referenceId;
-        if (!matchesIntent) {
-            throw new ApiError(
-                "Ledger idempotency conflict: key reused with different mutation intent",
-                409,
-                "LEDGER_IDEMPOTENCY_CONFLICT"
-            );
-        }
-
         return {
-            entryId: existing.id,
+            entryId: "",
             amount: normalizedAmount,
-            globalSequence: Number(existing.globalSequence),
+            globalSequence: 0,
+            duplicate: true,
         };
     }
 
@@ -238,27 +192,8 @@ export class LedgerService {
 
     static async reconstructUserEquity(userId: string, tx?: TxLike): Promise<UserLedgerSnapshot> {
         const executor = tx || db;
-        await this.ensureUserAccounts(userId, executor);
-
-        const accountRows = await executor
-            .select({
-                id: ledgerAccounts.id,
-                accountType: ledgerAccounts.accountType,
-            })
-            .from(ledgerAccounts)
-            .where(eq(ledgerAccounts.userId, userId));
-
-        const accountIds = accountRows.map((r: { id: string; accountType: LedgerAccountType }) => r.id);
-        if (accountIds.length === 0) {
-            return {
-                cash: "0",
-                marginBlocked: "0",
-                unrealizedPnl: "0",
-                realizedPnl: "0",
-                fees: "0",
-                equity: "0",
-            };
-        }
+        const accountSet = await ledgerCacheService.getAccountSet(userId, executor);
+        const accountIds = Object.values(accountSet);
 
         const balanceRows = await executor
             .select({
@@ -316,24 +251,7 @@ export class LedgerService {
         accountType: LedgerAccountType,
         tx?: TxLike
     ): Promise<string> {
-        const executor = tx || db;
-        await this.ensureUserAccounts(userId, executor);
-
-        const [row] = await executor
-            .select({ id: ledgerAccounts.id })
-            .from(ledgerAccounts)
-            .where(
-                and(
-                    eq(ledgerAccounts.userId, userId),
-                    eq(ledgerAccounts.accountType, accountType)
-                )
-            )
-            .limit(1);
-
-        if (!row?.id) {
-            throw new ApiError("Ledger account missing", 500, "LEDGER_ACCOUNT_MISSING");
-        }
-        return row.id;
+        return ledgerCacheService.getAccountIdByType(userId, accountType, tx);
     }
 
     private static async resolveAccountId(ref: LedgerAccountRef, tx: TxLike): Promise<string> {

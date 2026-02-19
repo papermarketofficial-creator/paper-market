@@ -8,7 +8,7 @@ import "@/lib/trading/init-realtime"; // Auto-wire TickBus subscriptions
 import { marketFeedSupervisor } from "@/lib/trading/market-feed-supervisor";
 import { toInstrumentKey } from "@/lib/market/symbol-normalization";
 import { feedHealthService, recordFeedPrice } from "@/services/feed-health.service";
-import { instrumentRepository } from "@/lib/instruments/repository";
+import { instrumentStore } from "@/stores/instrument.store";
 
 // ═══════════════════════════════════════════════════════════
 // 🛠️ SINGLETON PATTERN: Global declaration for Next.js hot reload
@@ -166,10 +166,6 @@ class RealTimeMarketService extends EventEmitter {
             await marketFeedSupervisor.initialize();
             this.syncFeedConnectionState();
 
-            // Start MTM engine after market feed + TickBus wiring are active.
-            const { mtmEngineService } = await import("@/services/mtm-engine.service");
-            await mtmEngineService.initialize();
-            
             this.initialized = true;
             logger.info("RealTimeMarketService initialized with MarketFeedSupervisor");
         } catch (error) {
@@ -536,13 +532,13 @@ class RealTimeMarketService extends EventEmitter {
 
         try {
             console.log("📂 Loading instruments for dynamic mapping...");
-            await instrumentRepository.ensureInitialized();
+            await instrumentStore.initialize();
 
             this.isinMap.clear();
             this.reverseIsinMap.clear();
 
             let count = 0;
-            for (const instr of instrumentRepository.getAll()) {
+            for (const instr of instrumentStore.getAll()) {
                 count += 1;
                 this.isinMap.set(instr.tradingsymbol, instr.instrumentToken);
 

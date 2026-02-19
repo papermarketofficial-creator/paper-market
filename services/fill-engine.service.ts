@@ -152,22 +152,29 @@ export class FillEngineService {
     }
 
     private static resolveTick(instrument: Instrument): { price: number; timestampMs: number | null; source: TickDataSource } | null {
-        const liveQuote = realTimeMarketService.getQuote(instrument.instrumentToken);
-        if (liveQuote && Number.isFinite(liveQuote.price) && liveQuote.price > 0) {
+        const candidates = [
+            realTimeMarketService.getQuote(instrument.instrumentToken),
+            realTimeMarketService.getQuote(instrument.tradingsymbol),
+            realTimeMarketService.getQuote(instrument.name),
+        ];
+
+        for (const liveQuote of candidates) {
+            if (!liveQuote || !Number.isFinite(liveQuote.price) || liveQuote.price <= 0) continue;
             const timestampMs = liveQuote.lastUpdated instanceof Date ? liveQuote.lastUpdated.getTime() : null;
             const ageMs = timestampMs ? Date.now() - timestampMs : Number.POSITIVE_INFINITY;
             if (!timestampMs || !Number.isFinite(ageMs) || ageMs < -5000 || ageMs > FILL_TICK_MAX_AGE_MS) {
-                // Ignore stale realtime tick and fall back to simulation source.
-            } else {
-                return {
-                    price: Number(liveQuote.price),
-                    timestampMs,
-                    source: "REALTIME",
-                };
+                continue;
             }
+            return {
+                price: Number(liveQuote.price),
+                timestampMs,
+                source: "REALTIME",
+            };
         }
 
-        const simulatedQuote = marketSimulation.getQuote(instrument.tradingsymbol);
+        const simulatedQuote =
+            marketSimulation.getQuote(instrument.tradingsymbol) ||
+            marketSimulation.getQuote(instrument.name);
         if (simulatedQuote && Number.isFinite(simulatedQuote.price) && simulatedQuote.price > 0) {
             return {
                 price: Number(simulatedQuote.price),

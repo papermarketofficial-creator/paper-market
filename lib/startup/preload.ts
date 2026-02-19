@@ -1,9 +1,10 @@
-import { instrumentRepository } from "@/lib/instruments/repository";
+import { prewarmCore } from "@/lib/startup/prewarm";
 
 export async function preloadCore() {
-  await instrumentRepository.initialize();
+    await prewarmCore();
 }
 
 preloadCore().catch((err) => {
-  console.error("[FATAL] Instrument repository preload failed:", err);
+    console.error("[FATAL] Core preload failed:", err);
 });
+

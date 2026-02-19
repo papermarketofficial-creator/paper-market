@@ -11,6 +11,7 @@ import { useTradeExecutionStore } from '@/stores/trading/tradeExecution.store';
 import { useRiskStore } from '@/stores/trading/risk.store';
 import { useWalletStore } from '@/stores/wallet.store';
 import { useMarketStore } from '@/stores/trading/market.store';
+import { usePositionsStore } from '@/stores/trading/positions.store';
 import { Stock } from '@/types/equity.types';
 import { InstrumentMode } from '@/types/general.types';
 import { cn } from '@/lib/utils';
@@ -103,6 +104,8 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
   const walletEquity = useWalletStore((state) => state.equity);
   const blockedBalance = useWalletStore((state) => state.blockedBalance);
   const accountState = useWalletStore((state) => state.accountState);
+  const positions = usePositionsStore((state) => state.positions);
+  const fetchPositions = usePositionsStore((state) => state.fetchPositions);
   const liveTokenPrice = useMarketStore((state) => {
     const token = selectedStock?.instrumentToken;
     if (!token) return 0;
@@ -123,6 +126,10 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
   useEffect(() => {
     fetchWallet().catch(() => undefined);
   }, [fetchWallet]);
+
+  useEffect(() => {
+    fetchPositions(true).catch(() => undefined);
+  }, [fetchPositions]);
 
   // --- LOGIC FOR INSTRUMENT SELECTION ---
 
@@ -253,7 +260,31 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
 
   const lotSize = getLotSize();
   const totalQuantity = inputValue * lotSize;
-  const requiredMargin = (currentPrice * totalQuantity) / leverageValue;
+  const existingPosition = useMemo(() => {
+    const token = selectedStock?.instrumentToken;
+    if (!token) return null;
+    return (
+      positions.find(
+        (position) =>
+          String(position.instrumentToken || "") === token &&
+          Number(position.quantity || 0) > 0
+      ) || null
+    );
+  }, [positions, selectedStock?.instrumentToken]);
+
+  const existingPositionQty = existingPosition ? Math.abs(Number(existingPosition.quantity || 0)) : 0;
+  const existingPositionSide = existingPosition?.side || null;
+  const fullExitGuardEnabled = instrumentMode === 'equity' || instrumentMode === 'futures';
+  const isOppositeExitFlow =
+    fullExitGuardEnabled &&
+    existingPositionQty > 0 &&
+    ((existingPositionSide === 'BUY' && side === 'SELL') ||
+      (existingPositionSide === 'SELL' && side === 'BUY'));
+  const effectiveQuantity = isOppositeExitFlow ? existingPositionQty : totalQuantity;
+  const effectiveInputValue = isOppositeExitFlow
+    ? Math.max(1, Math.round(effectiveQuantity / Math.max(1, lotSize)))
+    : inputValue;
+  const requiredMargin = (currentPrice * effectiveQuantity) / leverageValue;
 
   const slValue = parseFloat(stopLoss);
   const targetValue = parseFloat(target);
@@ -269,7 +300,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
     isTargetValid = side === 'BUY' ? targetValue > currentPrice : targetValue < currentPrice;
   }
 
-  const isQuantityValid = inputValue > 0;
+  const isQuantityValid = isOppositeExitFlow ? existingPositionQty > 0 : inputValue > 0;
   const hasInstrumentToken = Boolean(selectedStock?.instrumentToken);
   const hasValidPrice = Number.isFinite(currentPrice) && currentPrice > 0;
   // Use real wallet balance for validation
@@ -322,12 +353,12 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
         instrumentToken: selectedStock.instrumentToken,
         symbol: selectedStock.symbol,
         side,
-        quantity: totalQuantity,
+        quantity: effectiveQuantity,
         entryPrice: currentPrice,
       }, lotSize, instrumentMode);
 
       toast.success('Trade Sent', {
-        description: `${side} ${totalQuantity} shares (${inputValue} Lots) of ${selectedStock.symbol} at market.`,
+        description: `${side} ${effectiveQuantity} units of ${selectedStock.symbol} at market.`,
       });
 
       // Close dialog first, then reset form after a small delay
@@ -340,7 +371,10 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
         setTarget('');
       }, 300);
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Order placement failed';
+      const fallbackMessage = error instanceof Error ? error.message : 'Order placement failed';
+      const message = fallbackMessage.includes('PARTIAL_EXIT_NOT_ALLOWED')
+        ? 'Partial exit is disabled in paper trading mode.'
+        : fallbackMessage;
       toast.error('Order Failed', { description: message });
     }
   };
@@ -480,7 +514,15 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
 
               <OrderTypeToggle side={side} onSideChange={setSide} />
               <div className="mt-6">
-                <QuantityInput quantity={quantity} onQuantityChange={setQuantity} lotSize={lotSize} />
+                {isOppositeExitFlow ? (
+                  <div className="space-y-2 rounded-sm border border-border bg-muted/20 p-3">
+                    <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Exit Full Position</Label>
+                    <p className="text-sm font-semibold text-foreground">Position: {existingPositionQty} units</p>
+                    <p className="text-xs text-muted-foreground">Exit: {existingPositionQty} units only</p>
+                  </div>
+                ) : (
+                  <QuantityInput quantity={quantity} onQuantityChange={setQuantity} lotSize={lotSize} />
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
@@ -513,7 +555,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
               <div className="space-y-4 mt-6">
                 <RiskPreview
                   selectedStock={selectedStock}
-                  quantityValue={inputValue}
+                  quantityValue={effectiveInputValue}
                   currentPrice={currentPrice}
                   balance={balance}
                 />
@@ -523,14 +565,14 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                   <>
                     <OptionsRiskMetrics
                       selectedStock={selectedStock}
-                      quantityValue={inputValue}
+                      quantityValue={effectiveInputValue}
                       currentPrice={currentPrice}
                       lotSize={lotSize}
                       side={side}
                     />
                     <OptionsPayoffChart
                       selectedStock={selectedStock}
-                      quantityValue={inputValue}
+                      quantityValue={effectiveInputValue}
                       currentPrice={currentPrice}
                       lotSize={lotSize}
                       side={side}

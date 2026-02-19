@@ -18,10 +18,6 @@ import type { WriteAheadOperationType } from "@/lib/db/schema";
 type TxLike = typeof db | any;
 type LegacyTransactionType = "CREDIT" | "DEBIT" | "BLOCK" | "UNBLOCK" | "SETTLEMENT";
 
-const DEFAULT_WALLET_BALANCE = LedgerService.normalizeAmount(
-    process.env.DEFAULT_WALLET_BALANCE ?? "1000000"
-);
-
 const REFERENCE_TYPE_MAP: Record<string, LedgerReferenceType> = {
     TRADE: "TRADE",
     ORDER: "ORDER",
@@ -131,6 +127,7 @@ function deriveWajOperationType(referenceType: string): WriteAheadOperationType 
 type WalletJournalOptions = {
     ledgerReferenceType?: LedgerReferenceType;
     skipWaj?: boolean;
+    skipWalletSync?: boolean;
     wajOperationType?: WriteAheadOperationType;
     wajJournalId?: string;
     sequenceCollector?: number[];
@@ -144,6 +141,7 @@ export class WalletService {
 
     static async getWallet(userId: string, tx?: TxLike): Promise<Wallet> {
         const executor = tx || db;
+        let created = false;
 
         let [wallet] = await executor
             .select()
@@ -157,6 +155,7 @@ export class WalletService {
                     .insert(wallets)
                     .values({ userId })
                     .returning();
+                created = true;
             } catch (error: any) {
                 if (error?.code === "23505") {
                     const existing = await executor
@@ -175,7 +174,9 @@ export class WalletService {
             throw new ApiError("Failed to initialize wallet", 500, "WALLET_INIT_FAILED");
         }
 
-        await this.ensureLedgerSeed(userId, wallet, executor);
+        if (created) {
+            logger.info({ userId }, "Wallet row created");
+        }
         return wallet;
     }
 
@@ -246,13 +247,15 @@ export class WalletService {
                     },
                     executor
                 );
-                if (options.sequenceCollector) {
+                if (!entry.duplicate && options.sequenceCollector && entry.globalSequence > 0) {
                     options.sequenceCollector.push(entry.globalSequence);
                 }
 
-                await this.syncWalletCacheFromLedger(userId, executor);
+                if (!options.skipWalletSync) {
+                    await this.syncWalletCacheFromLedger(userId, executor);
+                }
 
-                if (shouldJournal && preparedJournalId) {
+                if (shouldJournal && preparedJournalId && !entry.duplicate) {
                     await WriteAheadJournalService.commit(preparedJournalId, executor, {
                         ledgerSequences: [entry.globalSequence],
                     });
@@ -347,12 +350,14 @@ export class WalletService {
                 },
                 tx
             );
-            if (options.sequenceCollector) {
+            if (!entry.duplicate && options.sequenceCollector && entry.globalSequence > 0) {
                 options.sequenceCollector.push(entry.globalSequence);
             }
 
-            await this.syncWalletCacheFromLedger(userId, tx);
-            if (shouldJournal && preparedJournalId) {
+            if (!options.skipWalletSync) {
+                await this.syncWalletCacheFromLedger(userId, tx);
+            }
+            if (shouldJournal && preparedJournalId && !entry.duplicate) {
                 await WriteAheadJournalService.commit(preparedJournalId, tx, {
                     ledgerSequences: [entry.globalSequence],
                 });
@@ -449,12 +454,14 @@ export class WalletService {
                 },
                 tx
             );
-            if (options.sequenceCollector) {
+            if (!entry.duplicate && options.sequenceCollector && entry.globalSequence > 0) {
                 options.sequenceCollector.push(entry.globalSequence);
             }
 
-            await this.syncWalletCacheFromLedger(userId, tx);
-            if (shouldJournal && preparedJournalId) {
+            if (!options.skipWalletSync) {
+                await this.syncWalletCacheFromLedger(userId, tx);
+            }
+            if (shouldJournal && preparedJournalId && !entry.duplicate) {
                 await WriteAheadJournalService.commit(preparedJournalId, tx, {
                     ledgerSequences: [entry.globalSequence],
                 });
@@ -479,6 +486,108 @@ export class WalletService {
                     preparedJournalId,
                     tx,
                     error instanceof Error ? error.message : "WALLET_DEBIT_FAILED"
+                );
+            }
+            throw error;
+        }
+    }
+
+    static async releaseMarginBlock(
+        userId: string,
+        amount: number | string,
+        referenceId: string,
+        tx: TxLike,
+        description?: string,
+        options: WalletJournalOptions = {}
+    ): Promise<void> {
+        const normalizedAmount = toAmountString(amount);
+        ensurePositiveAmount(normalizedAmount);
+
+        await this.getWallet(userId, tx);
+
+        const snapshot = await LedgerService.reconstructUserEquity(userId, tx);
+        const releasableAmount =
+            LedgerService.compare(snapshot.marginBlocked, normalizedAmount) < 0
+                ? LedgerService.normalizeAmount(snapshot.marginBlocked)
+                : normalizedAmount;
+
+        if (LedgerService.compare(releasableAmount, "0") <= 0) {
+            return;
+        }
+
+        const ledgerReferenceType = options.ledgerReferenceType || "TRADE";
+        const ledgerReferenceId = buildReferenceId(`WALLET_UNBLOCK_${ledgerReferenceType}`, referenceId);
+        const ledgerIdempotencyKey =
+            options.idempotencyKey ||
+            buildLedgerIdempotencyKey(ledgerReferenceType, ledgerReferenceId, "UNBLOCK_MARGIN");
+        const shouldJournal = !options.skipWaj;
+
+        let preparedJournalId: string | null = null;
+        if (shouldJournal) {
+            const prepared = await WriteAheadJournalService.prepare(
+                {
+                    journalId: options.wajJournalId,
+                    operationType: options.wajOperationType || "LEDGER_ENTRY",
+                    userId,
+                    referenceId: ledgerReferenceId,
+                    payload: {
+                        userId,
+                        direction: "MARGIN_UNBLOCK",
+                        amount: releasableAmount,
+                        referenceId: ledgerReferenceId,
+                        ledgerReferenceType,
+                        idempotencyKey: ledgerIdempotencyKey,
+                        description: description || null,
+                    },
+                },
+                tx
+            );
+            preparedJournalId = prepared.journalId;
+        }
+
+        try {
+            const entry = await LedgerService.recordEntry(
+                { userId, accountType: "CASH" },
+                { userId, accountType: "MARGIN_BLOCKED" },
+                releasableAmount,
+                {
+                    referenceType: ledgerReferenceType,
+                    referenceId: ledgerReferenceId,
+                    idempotencyKey: ledgerIdempotencyKey,
+                },
+                tx
+            );
+            if (!entry.duplicate && options.sequenceCollector && entry.globalSequence > 0) {
+                options.sequenceCollector.push(entry.globalSequence);
+            }
+
+            if (!options.skipWalletSync) {
+                await this.syncWalletCacheFromLedger(userId, tx);
+            }
+            if (shouldJournal && preparedJournalId && !entry.duplicate) {
+                await WriteAheadJournalService.commit(preparedJournalId, tx, {
+                    ledgerSequences: [entry.globalSequence],
+                });
+            }
+
+            logger.info(
+                {
+                    event: "WALLET_MARGIN_UNBLOCKED",
+                    userId,
+                    amount: releasableAmount,
+                    ledgerReferenceType,
+                    ledgerReferenceId,
+                    idempotencyKey: ledgerIdempotencyKey,
+                    description: description || null,
+                },
+                "WALLET_MARGIN_UNBLOCKED"
+            );
+        } catch (error) {
+            if (shouldJournal && preparedJournalId) {
+                await WriteAheadJournalService.abort(
+                    preparedJournalId,
+                    tx,
+                    error instanceof Error ? error.message : "WALLET_MARGIN_UNBLOCK_FAILED"
                 );
             }
             throw error;
@@ -603,83 +712,17 @@ export class WalletService {
         };
     }
 
-    static async recalculateFromLedger(userId: string): Promise<void> {
-        await db.transaction(async (tx) => {
+    static async recalculateFromLedger(userId: string, tx?: TxLike): Promise<void> {
+        if (tx) {
             await this.getWallet(userId, tx);
             await this.syncWalletCacheFromLedger(userId, tx);
+            return;
+        }
+
+        await db.transaction(async (transaction) => {
+            await this.getWallet(userId, transaction);
+            await this.syncWalletCacheFromLedger(userId, transaction);
         });
-    }
-
-    private static async ensureLedgerSeed(userId: string, wallet: Wallet, tx: TxLike): Promise<void> {
-        await LedgerService.ensureUserAccounts(userId, tx);
-
-        const [cashAccount, blockedAccount] = await Promise.all([
-            LedgerService.getAccountIdByType(userId, "CASH", tx),
-            LedgerService.getAccountIdByType(userId, "MARGIN_BLOCKED", tx),
-        ]);
-
-        const hasEntriesConditions = [
-            eq(ledgerEntries.debitAccountId, cashAccount),
-            eq(ledgerEntries.creditAccountId, cashAccount),
-            eq(ledgerEntries.debitAccountId, blockedAccount),
-            eq(ledgerEntries.creditAccountId, blockedAccount),
-        ];
-
-        const [existing] = await tx
-            .select({ id: ledgerEntries.id })
-            .from(ledgerEntries)
-            .where(or(...hasEntriesConditions))
-            .limit(1);
-
-        if (existing) return;
-
-        const normalizedTotalBalance = toAmountString(wallet.balance || DEFAULT_WALLET_BALANCE);
-        const normalizedBlocked = toAmountString(wallet.blockedBalance || "0");
-
-        let freeCash = LedgerService.subtract(normalizedTotalBalance, normalizedBlocked);
-        if (LedgerService.compare(freeCash, "0") < 0) {
-            freeCash = normalizedTotalBalance;
-        }
-
-        if (LedgerService.compare(freeCash, "0") > 0) {
-            await LedgerService.recordEntry(
-                { userId, accountType: "CASH" },
-                { userId, accountType: "REALIZED_PNL" },
-                freeCash,
-                {
-                    referenceType: "ADJUSTMENT",
-                    referenceId: `WALLET_BOOTSTRAP_CASH-${userId}`,
-                    idempotencyKey: `ADJUSTMENT-WALLET_BOOTSTRAP_CASH-${userId}`,
-                },
-                tx
-            );
-        }
-
-        if (LedgerService.compare(normalizedBlocked, "0") > 0) {
-            await LedgerService.recordEntry(
-                { userId, accountType: "MARGIN_BLOCKED" },
-                { userId, accountType: "REALIZED_PNL" },
-                normalizedBlocked,
-                {
-                    referenceType: "ADJUSTMENT",
-                    referenceId: `WALLET_BOOTSTRAP_MARGIN-${userId}`,
-                    idempotencyKey: `ADJUSTMENT-WALLET_BOOTSTRAP_MARGIN-${userId}`,
-                },
-                tx
-            );
-        }
-
-        await this.syncWalletCacheFromLedger(userId, tx);
-
-        logger.info(
-            {
-                event: "WALLET_LEDGER_BOOTSTRAPPED",
-                userId,
-                freeCash,
-                blockedBalance: normalizedBlocked,
-            },
-            "WALLET_LEDGER_BOOTSTRAPPED"
-        );
     }
 
     private static async syncWalletCacheFromLedger(userId: string, tx: TxLike): Promise<void> {

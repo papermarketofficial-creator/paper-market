@@ -1,8 +1,9 @@
 import { db } from "@/lib/db";
-import { orders, instruments, positions, type Instrument, type NewOrder } from "@/lib/db/schema";
+import { orders, positions, type Instrument, type NewOrder } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { ApiError } from "@/lib/errors";
 import { eq, and, sql } from "drizzle-orm";
+import { performance } from "node:perf_hooks";
 import type { PlaceOrder, OrderQuery } from "@/lib/validation/oms";
 import { WalletService } from "@/services/wallet.service";
 import { MarginService } from "@/services/margin.service";
@@ -13,9 +14,9 @@ import { assertTradingEnabled } from "@/lib/system-control";
 import { assertFeedHealthy } from "@/services/feed-health.service";
 import { OrderAcceptanceService } from "@/services/order-acceptance.service";
 
-import { InstrumentRepository } from "@/lib/instruments/repository";
-import { TRADING_UNIVERSE, isInstrumentAllowed } from "@/lib/trading-universe";
+import { isInstrumentAllowed } from "@/lib/trading-universe";
 import { requireInstrumentTokenForIdentityLookup } from "@/lib/trading/token-identity-guard";
+import { instrumentStore } from "@/stores/instrument.store";
 
 const IST_TIME_ZONE = "Asia/Kolkata";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -23,6 +24,20 @@ const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const ALLOW_AFTER_HOURS_ORDER_STAGING =
     process.env.NODE_ENV !== "production" &&
     TRUE_VALUES.has(String(process.env.ALLOW_AFTER_HOURS_ORDER_STAGING ?? "false").trim().toLowerCase());
+const PAPER_TRADING_MODE =
+    String(process.env.PAPER_TRADING_MODE ?? "true").trim().toLowerCase() !== "false";
+
+function isApiErrorLike(
+    error: unknown
+): error is { message: string; statusCode: number; code: string } {
+    if (!error || typeof error !== "object") return false;
+    const maybe = error as { message?: unknown; statusCode?: unknown; code?: unknown };
+    return (
+        typeof maybe.message === "string" &&
+        typeof maybe.statusCode === "number" &&
+        typeof maybe.code === "string"
+    );
+}
 
 function toIstDayNumber(date: Date): number {
     const parts = new Intl.DateTimeFormat("en-US", {
@@ -102,6 +117,11 @@ export class OrderService {
         payload: PlaceOrder,
         options: { force?: boolean } = {}
     ) {
+        const startMs = performance.now();
+        let orderValidationMs = 0;
+        let marginMs = 0;
+        let executionMs = 0;
+
         try {
             assertTradingEnabled({ force: options.force, context: "OrderService.placeOrder" });
             // Check idempotency key if provided
@@ -110,12 +130,10 @@ export class OrderService {
 
             // Validate instrument exists and is active
             logger.info({ lookupSymbol: payload.symbol, lookupToken: payload.instrumentToken }, "Looking up instrument");
-            
-            const repo = InstrumentRepository.getInstance();
-            if (!repo) {
-                throw new Error("InstrumentRepository failed to initialize");
+
+            if (!instrumentStore.isReady()) {
+                throw new ApiError("Instrument store not ready", 503, "INSTRUMENT_STORE_NOT_READY");
             }
-            await repo.ensureInitialized();
 
             let instrumentToken: string;
             try {
@@ -128,7 +146,7 @@ export class OrderService {
                 throw new ApiError("Instrument Token REQUIRED", 400, "MISSING_INSTRUMENT_TOKEN");
             }
 
-            const instrument = repo.get(instrumentToken);
+            const instrument = instrumentStore.getByToken(instrumentToken);
 
             if (instrument && instrument.tradingsymbol !== payload.symbol) {
                     logger.warn({ 
@@ -173,21 +191,28 @@ export class OrderService {
                 );
             }
 
+            const validationStartMs = performance.now();
             if (!stageAfterHours && !isForcedRiskFlow) {
                 assertFeedHealthy(instrument.instrumentToken);
-                OrderAcceptanceService.validateOrder(payload, instrument, { userId });
-                const safetyValidation = await TradingSafetyService.validate(
-                    userId,
-                    payload,
-                    instrument,
-                    { skipExpiryCheck: payload.exitReason === "EXPIRY" }
-                );
-                if (process.env.NODE_ENV !== "production" && !safetyValidation?.validatedAt) {
-                    throw new Error("OrderService safety validation missing");
+                await OrderAcceptanceService.validateOrder(payload, instrument, { userId });
+
+                if (!PAPER_TRADING_MODE) {
+                    const safetyValidation = await TradingSafetyService.validate(
+                        userId,
+                        payload,
+                        instrument,
+                        { skipExpiryCheck: payload.exitReason === "EXPIRY" }
+                    );
+                    if (process.env.NODE_ENV !== "production" && !safetyValidation?.validatedAt) {
+                        throw new Error("OrderService safety validation missing");
+                    }
                 }
             } else {
-                await PreTradeRiskService.validateOrder(userId, payload, instrument);
+                if (!PAPER_TRADING_MODE) {
+                    await PreTradeRiskService.validateOrder(userId, payload, instrument);
+                }
             }
+            orderValidationMs = performance.now() - validationStartMs;
 
             if (stageAfterHours) {
                 logger.warn(
@@ -202,7 +227,9 @@ export class OrderService {
             }
 
             // Calculate required margin
+            const marginStartMs = performance.now();
             const requiredMargin = await MarginService.calculateRequiredMargin(payload, instrument);
+            marginMs = performance.now() - marginStartMs;
             logger.info({ userId, symbol: payload.symbol, requiredMargin }, "Margin calculated");
 
             // 🎯 PAPER TRADING: Simple balance check using wallet
@@ -243,21 +270,42 @@ export class OrderService {
             if (payload.orderType === "MARKET" && !stageAfterHours) {
                 try {
                     logger.info({ orderId: order.id }, "Executing MARKET order immediately");
-                    if (options.force) {
-                        await ExecutionService.tryExecuteOrder(order, { force: true });
-                    } else {
-                        await ExecutionService.executeOpenOrders();
-                    }
+                    const executionStartMs = performance.now();
+                    await ExecutionService.tryExecuteOrder(order, { force: options.force });
+                    executionMs = performance.now() - executionStartMs;
                 } catch (error) {
                     logger.error({ err: error, orderId: order.id }, "Failed to execute MARKET order");
                     // Don't throw - order is placed, execution will be retried
                 }
+            }
+
+            const totalMs = performance.now() - startMs;
+            const metricPayload = {
+                event: "ORDER_PATH_TIMING",
+                userId,
+                orderId: order.id,
+                instrumentToken: instrument.instrumentToken,
+                order_validation_ms: Number(orderValidationMs.toFixed(2)),
+                margin_ms: Number(marginMs.toFixed(2)),
+                ledger_ms: 0,
+                execution_ms: Number(executionMs.toFixed(2)),
+                total_ms: Number(totalMs.toFixed(2)),
+            };
+            if (totalMs > 500) {
+                logger.error(metricPayload, "ORDER_PATH_TIMING");
+            } else if (totalMs > 250) {
+                logger.warn(metricPayload, "ORDER_PATH_TIMING");
+            } else {
+                logger.info(metricPayload, "ORDER_PATH_TIMING");
             }
             
             return order;
         } catch (error) {
             console.error(error); // DEBUG: Raw stack trace
             if (error instanceof ApiError) throw error;
+            if (isApiErrorLike(error)) {
+                throw new ApiError(error.message, error.statusCode, error.code);
+            }
             logger.error({ err: error, userId, payload }, "Failed to place order");
             throw new ApiError("Failed to place order", 500, "ORDER_PLACEMENT_FAILED");
         }
@@ -396,3 +444,4 @@ export class OrderService {
         }
     }
 }
+

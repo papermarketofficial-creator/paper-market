@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMarketStore } from '@/stores/trading/market.store';
+import { usePositionsStore } from '@/stores/trading/positions.store';
 import { getMarketWebSocket } from '@/lib/market-ws';
 import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normalization';
 
@@ -58,6 +59,7 @@ export const useMarketStream = () => {
     const options = useMarketStore((state) => state.options);
     const simulatedInstrumentKey = useMarketStore((state) => state.simulatedInstrumentKey);
     const simulatedSymbol = useMarketStore((state) => state.simulatedSymbol);
+    const positions = usePositionsStore((state) => state.positions);
     const [isConnected, setIsConnected] = useState(false);
     const wsRef = useRef<ReturnType<typeof getMarketWebSocket> | null>(null);
     const subscribedKeysRef = useRef<Set<string>>(new Set());
@@ -87,6 +89,13 @@ export const useMarketStream = () => {
         // Include chart instrument
         const chartKey = toInstrumentKey(state.simulatedInstrumentKey || state.simulatedSymbol || '');
         if (chartKey) keys.add(chartKey);
+
+        // Include open position instruments so Current/P&L stay live.
+        const openPositions = usePositionsStore.getState().positions || [];
+        for (const position of openPositions) {
+            const key = toInstrumentKey(position.instrumentToken || position.symbol || '');
+            if (key) keys.add(key);
+        }
 
         // Per-user subscription cap: 150 instruments max
         const keysArray = Array.from(keys);
@@ -133,6 +142,7 @@ export const useMarketStream = () => {
         indices,
         futures,
         options,
+        positions,
         simulatedInstrumentKey,
         simulatedSymbol,
         isConnected,

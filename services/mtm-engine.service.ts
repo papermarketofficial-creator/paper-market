@@ -1,10 +1,11 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { instruments, positions, wallets } from "@/lib/db/schema";
 import { logger } from "@/lib/logger";
 import { toInstrumentKey } from "@/lib/market/symbol-normalization";
 import { marketFeedSupervisor } from "@/lib/trading/market-feed-supervisor";
 import { tickBus, type NormalizedTick } from "@/lib/trading/tick-bus";
+import { eventBus } from "@/lib/event-bus";
 import { marginCurveService } from "@/services/margin-curve.service";
 import { liquidationEngineService } from "@/services/liquidation-engine.service";
 
@@ -61,10 +62,8 @@ export type MtmSnapshot = {
 
 const MTM_STALE_TICK_MAX_AGE_MS =
     Number(process.env.MTM_STALE_TICK_MAX_AGE_SECONDS ?? "10") * 1000;
-const MTM_FLUSH_INTERVAL_MS = Number(process.env.MTM_FLUSH_INTERVAL_MS ?? "3000");
-const MTM_POSITION_REFRESH_INTERVAL_MS = Number(process.env.MTM_POSITION_REFRESH_INTERVAL_MS ?? "5000");
-
 const EPSILON = 0.005;
+const MTM_EXCLUDED_USER_PREFIXES = ["token-separation-", "snapshot-token-"];
 
 function toNumber(value: unknown): number {
     const parsed = Number(value);
@@ -94,17 +93,20 @@ function computeRequiredMargin(position: PositionCache, markPrice: number): numb
     return notional;
 }
 
+function isMtmExcludedUser(userId: string): boolean {
+    const normalized = String(userId || "").trim();
+    return MTM_EXCLUDED_USER_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
 export class MtmEngineService {
     private initialized = false;
     private initializePromise: Promise<void> | null = null;
-    private refreshing = false;
-    private refreshRequested = false;
+    private refreshingUsers = new Set<string>();
     private flushing = false;
-
-    private flushTimer: NodeJS.Timeout | null = null;
-    private refreshTimer: NodeJS.Timeout | null = null;
+    private flushScheduled = false;
 
     private positionsByUser = new Map<string, PositionCache[]>();
+    private userTokens = new Map<string, Set<string>>();
     private tokenToUsers = new Map<string, Set<string>>();
     private latestPriceByToken = new Map<string, TickPrice>();
     private walletsByUser = new Map<string, WalletState>();
@@ -134,12 +136,33 @@ export class MtmEngineService {
             timestampMs: tickTimestampMs,
         });
 
+        eventBus.emit("price.tick", {
+            instrumentToken,
+            price,
+            timestampMs: tickTimestampMs,
+        });
+
         const affectedUsers = this.tokenToUsers.get(instrumentToken);
         if (!affectedUsers || affectedUsers.size === 0) return;
 
         for (const userId of affectedUsers) {
             this.revalueUser(userId, nowMs);
         }
+        this.scheduleFlush();
+    };
+
+    private readonly onOrderExecuted = (payload: { userId: string }): void => {
+        if (!this.initialized) return;
+        if (!payload?.userId) return;
+        this.dirtyUsers.delete(payload.userId);
+        void this.refreshUsers([payload.userId]);
+    };
+
+    private readonly onPositionChanged = (payload: { userId: string }): void => {
+        if (!this.initialized) return;
+        if (!payload?.userId) return;
+        this.dirtyUsers.delete(payload.userId);
+        void this.refreshUsers([payload.userId]);
     };
 
     async initialize(): Promise<void> {
@@ -150,22 +173,12 @@ export class MtmEngineService {
         }
 
         this.initializePromise = (async () => {
-            await this.refreshOpenState("init");
-
             tickBus.on("tick", this.onTick);
-            if (!this.flushTimer) {
-                this.flushTimer = setInterval(() => {
-                    void this.flushSnapshots();
-                }, MTM_FLUSH_INTERVAL_MS);
-            }
-            if (!this.refreshTimer) {
-                this.refreshTimer = setInterval(() => {
-                    void this.refreshOpenState("interval");
-                }, MTM_POSITION_REFRESH_INTERVAL_MS);
-            }
+            eventBus.on("order.executed", this.onOrderExecuted);
+            eventBus.on("position.changed", this.onPositionChanged);
 
             this.initialized = true;
-            logger.info("MTM engine initialized");
+            logger.info("MTM engine initialized (event-driven)");
         })();
 
         try {
@@ -179,24 +192,37 @@ export class MtmEngineService {
         if (!this.initialized) return;
 
         tickBus.off("tick", this.onTick);
-        if (this.flushTimer) clearInterval(this.flushTimer);
-        if (this.refreshTimer) clearInterval(this.refreshTimer);
+        eventBus.off("order.executed", this.onOrderExecuted);
+        eventBus.off("position.changed", this.onPositionChanged);
 
-        this.flushTimer = null;
-        this.refreshTimer = null;
         this.initialized = false;
     }
 
-    requestRefresh(): void {
+    requestRefresh(userId?: string): void {
         if (!this.initialized) return;
-        this.refreshRequested = true;
-        if (!this.refreshing) {
-            void this.refreshOpenState("manual");
+        if (userId) {
+            void this.refreshUsers([userId]);
+            return;
+        }
+
+        const loadedUsers = Array.from(this.walletsByUser.keys());
+        if (loadedUsers.length > 0) {
+            void this.refreshUsers(loadedUsers);
         }
     }
 
     async forceRefreshOpenState(): Promise<void> {
-        await this.refreshOpenState("manual");
+        const loadedUsers = Array.from(this.walletsByUser.keys());
+        if (loadedUsers.length === 0) return;
+        await this.refreshUsers(loadedUsers);
+    }
+
+    async refreshUserNow(userId: string): Promise<void> {
+        if (!this.initialized) return;
+        const normalizedUserId = String(userId || "").trim();
+        if (!normalizedUserId) return;
+        await this.refreshUsers([normalizedUserId]);
+        await this.flushSnapshots();
     }
 
     async forceFlush(): Promise<void> {
@@ -205,7 +231,13 @@ export class MtmEngineService {
 
     getUserSnapshot(userId: string): MtmSnapshot | null {
         const state = this.walletsByUser.get(userId);
-        if (!state) return null;
+        if (!state) {
+            if (this.initialized) {
+                void this.refreshUsers([userId]);
+            }
+            return null;
+        }
+
         return {
             balance: state.balance,
             equity: state.equity,
@@ -234,6 +266,10 @@ export class MtmEngineService {
 
     getUserRiskPositions(userId: string): MtmRiskPosition[] {
         const positions = this.positionsByUser.get(userId) || [];
+        if (positions.length === 0 && this.initialized) {
+            void this.refreshUsers([userId]);
+        }
+
         const nowMs = Date.now();
 
         return positions
@@ -262,143 +298,140 @@ export class MtmEngineService {
             });
     }
 
-    private async refreshOpenState(reason: "init" | "interval" | "manual"): Promise<void> {
-        if (this.refreshing) {
-            this.refreshRequested = true;
+    private async refreshUsers(userIds: string[]): Promise<void> {
+        const unique = Array.from(new Set(userIds.map((id) => String(id || "").trim()).filter(Boolean)));
+        if (unique.length === 0) return;
+
+        const pending = unique
+            .filter((userId) => !this.refreshingUsers.has(userId))
+            .map(async (userId) => {
+                this.refreshingUsers.add(userId);
+                try {
+                    await this.refreshUserState(userId);
+                } finally {
+                    this.refreshingUsers.delete(userId);
+                }
+            });
+
+        if (pending.length === 0) return;
+        await Promise.all(pending);
+    }
+
+    private async refreshUserState(userId: string): Promise<void> {
+        if (isMtmExcludedUser(userId)) {
+            this.clearUser(userId);
             return;
         }
 
-        this.refreshing = true;
-        this.refreshRequested = false;
+        const [wallet] = await db
+            .select({
+                id: wallets.id,
+                userId: wallets.userId,
+                balance: wallets.balance,
+                equity: wallets.equity,
+                marginStatus: wallets.marginStatus,
+                accountState: wallets.accountState,
+            })
+            .from(wallets)
+            .where(eq(wallets.userId, userId))
+            .limit(1);
 
-        try {
-            const previousUsers = new Set(this.walletsByUser.keys());
-
-            const rows = await db
-                .select({
-                    userId: positions.userId,
-                    instrumentToken: positions.instrumentToken,
-                    quantity: positions.quantity,
-                    averagePrice: positions.averagePrice,
-                    realizedPnL: positions.realizedPnL,
-                    instrumentType: instruments.instrumentType,
-                })
-                .from(positions)
-                .leftJoin(instruments, eq(positions.instrumentToken, instruments.instrumentToken));
-
-            const nextPositionsByUser = new Map<string, PositionCache[]>();
-            const nextTokenToUsers = new Map<string, Set<string>>();
-            const nextTokens = new Set<string>();
-
-            for (const row of rows) {
-                const instrumentToken = toInstrumentKey(String(row.instrumentToken || ""));
-                const quantity = Number(row.quantity);
-                if (!instrumentToken || !Number.isFinite(quantity) || quantity === 0) continue;
-
-                const entry: PositionCache = {
-                    userId: row.userId,
-                    instrumentToken,
-                    quantity,
-                    averagePrice: toNumber(row.averagePrice),
-                    realizedPnL: toNumber(row.realizedPnL),
-                    instrumentType: String(row.instrumentType || "EQUITY"),
-                };
-
-                if (!nextPositionsByUser.has(row.userId)) {
-                    nextPositionsByUser.set(row.userId, []);
-                }
-                nextPositionsByUser.get(row.userId)!.push(entry);
-
-                if (!nextTokenToUsers.has(instrumentToken)) {
-                    nextTokenToUsers.set(instrumentToken, new Set<string>());
-                }
-                nextTokenToUsers.get(instrumentToken)!.add(row.userId);
-                nextTokens.add(instrumentToken);
-            }
-
-            const allUsers = new Set<string>([
-                ...Array.from(nextPositionsByUser.keys()),
-                ...Array.from(previousUsers),
-            ]);
-            const userIds = Array.from(allUsers);
-            const walletRows = userIds.length
-                ? await db
-                    .select({
-                        id: wallets.id,
-                        userId: wallets.userId,
-                        balance: wallets.balance,
-                        equity: wallets.equity,
-                        marginStatus: wallets.marginStatus,
-                        accountState: wallets.accountState,
-                    })
-                    .from(wallets)
-                    .where(inArray(wallets.userId, userIds))
-                : [];
-
-            const walletByUser = new Map(walletRows.map((row) => [row.userId, row]));
-            const nextWalletsByUser = new Map<string, WalletState>();
-
-            for (const userId of userIds) {
-                const wallet = walletByUser.get(userId);
-                const previous = this.walletsByUser.get(userId);
-
-                const balance = wallet ? toNumber(wallet.balance) : previous?.balance ?? 0;
-                const equity = wallet ? toNumber(wallet.equity) : previous?.equity ?? balance;
-                const marginStatus = wallet?.marginStatus === "MARGIN_STRESSED" ? "MARGIN_STRESSED" : "NORMAL";
-                const accountState = normalizeAccountState(wallet?.accountState || previous?.accountState || "NORMAL");
-
-                nextWalletsByUser.set(userId, {
-                    walletId: wallet?.id || previous?.walletId || "",
-                    balance,
-                    equity,
-                    unrealizedPnL: previous?.unrealizedPnL ?? 0,
-                    realizedPnL: previous?.realizedPnL ?? 0,
-                    requiredMargin: previous?.requiredMargin ?? 0,
-                    maintenanceMargin: previous?.maintenanceMargin ?? 0,
-                    marginStatus,
-                    accountState,
-                    lastComputedAt: previous?.lastComputedAt ?? null,
-                });
-            }
-
-            const unsubscribeTokens = Array.from(this.subscribedTokens).filter((token) => !nextTokens.has(token));
-            if (unsubscribeTokens.length > 0) {
-                marketFeedSupervisor.unsubscribe(unsubscribeTokens);
-            }
-
-            const subscribeTokens = Array.from(nextTokens).filter((token) => !this.subscribedTokens.has(token));
-            if (subscribeTokens.length > 0) {
-                marketFeedSupervisor.subscribe(subscribeTokens);
-            }
-
-            this.positionsByUser = nextPositionsByUser;
-            this.tokenToUsers = nextTokenToUsers;
-            this.walletsByUser = nextWalletsByUser;
-            this.subscribedTokens = nextTokens;
-
-            const nowMs = Date.now();
-            for (const userId of userIds) {
-                this.revalueUser(userId, nowMs);
-            }
-
-            logger.debug(
-                {
-                    reason,
-                    users: userIds.length,
-                    positions: rows.length,
-                    tokens: nextTokens.size,
-                },
-                "MTM open state refreshed"
+        const rows = await db
+            .select({
+                userId: positions.userId,
+                instrumentToken: positions.instrumentToken,
+                quantity: positions.quantity,
+                averagePrice: positions.averagePrice,
+                realizedPnL: positions.realizedPnL,
+                instrumentType: instruments.instrumentType,
+            })
+            .from(positions)
+            .leftJoin(instruments, eq(positions.instrumentToken, instruments.instrumentToken))
+            .where(
+                and(
+                    eq(positions.userId, userId),
+                    ne(positions.quantity, 0)
+                )
             );
-        } catch (error) {
-            logger.error({ err: error }, "MTM refresh failed");
-        } finally {
-            this.refreshing = false;
-            if (this.refreshRequested) {
-                this.refreshRequested = false;
-                void this.refreshOpenState("interval");
+
+        const parsed: PositionCache[] = [];
+        for (const row of rows) {
+            const token = toInstrumentKey(String(row.instrumentToken || ""));
+            const qty = Number(row.quantity);
+            if (!token || !Number.isFinite(qty) || qty === 0) continue;
+            parsed.push({
+                userId,
+                instrumentToken: token,
+                quantity: qty,
+                averagePrice: toNumber(row.averagePrice),
+                realizedPnL: toNumber(row.realizedPnL),
+                instrumentType: String(row.instrumentType || "EQUITY"),
+            });
+        }
+
+        const previousWallet = this.walletsByUser.get(userId);
+        const nextWallet: WalletState = {
+            walletId: wallet?.id || previousWallet?.walletId || "",
+            balance: wallet ? toNumber(wallet.balance) : previousWallet?.balance ?? 0,
+            equity: wallet ? toNumber(wallet.equity) : previousWallet?.equity ?? 0,
+            unrealizedPnL: previousWallet?.unrealizedPnL ?? 0,
+            realizedPnL: previousWallet?.realizedPnL ?? 0,
+            requiredMargin: previousWallet?.requiredMargin ?? 0,
+            maintenanceMargin: previousWallet?.maintenanceMargin ?? 0,
+            marginStatus: wallet?.marginStatus === "MARGIN_STRESSED" ? "MARGIN_STRESSED" : "NORMAL",
+            accountState: normalizeAccountState(wallet?.accountState || previousWallet?.accountState || "NORMAL"),
+            lastComputedAt: previousWallet?.lastComputedAt ?? null,
+        };
+
+        this.walletsByUser.set(userId, nextWallet);
+        this.positionsByUser.set(userId, parsed);
+        this.updateTokenIndexForUser(userId, parsed.map((item) => item.instrumentToken));
+
+        this.revalueUser(userId, Date.now());
+        this.scheduleFlush();
+    }
+
+    private updateTokenIndexForUser(userId: string, tokens: string[]): void {
+        const prev = this.userTokens.get(userId) || new Set<string>();
+        const next = new Set(tokens);
+
+        for (const token of prev) {
+            if (next.has(token)) continue;
+            const users = this.tokenToUsers.get(token);
+            if (!users) continue;
+            users.delete(userId);
+            if (users.size === 0) {
+                this.tokenToUsers.delete(token);
             }
         }
+
+        for (const token of next) {
+            let users = this.tokenToUsers.get(token);
+            if (!users) {
+                users = new Set<string>();
+                this.tokenToUsers.set(token, users);
+            }
+            users.add(userId);
+        }
+
+        this.userTokens.set(userId, next);
+        this.syncSupervisorSubscriptions();
+    }
+
+    private syncSupervisorSubscriptions(): void {
+        const desiredTokens = new Set(this.tokenToUsers.keys());
+
+        const unsubscribeTokens = Array.from(this.subscribedTokens).filter((token) => !desiredTokens.has(token));
+        if (unsubscribeTokens.length > 0) {
+            marketFeedSupervisor.unsubscribe(unsubscribeTokens);
+        }
+
+        const subscribeTokens = Array.from(desiredTokens).filter((token) => !this.subscribedTokens.has(token));
+        if (subscribeTokens.length > 0) {
+            marketFeedSupervisor.subscribe(subscribeTokens);
+        }
+
+        this.subscribedTokens = desiredTokens;
     }
 
     private revalueUser(userId: string, nowMs: number): void {
@@ -408,16 +441,13 @@ export class MtmEngineService {
         const userPositions = this.positionsByUser.get(userId) || [];
         if (userPositions.length === 0) {
             const nextEquity = round2(walletState.balance);
-            const nextStatus: MarginStatus = "NORMAL";
-            const nextAccountState: AccountState = "NORMAL";
             const changed =
                 Math.abs(walletState.equity - nextEquity) > EPSILON ||
-                walletState.marginStatus !== nextStatus ||
-                walletState.accountState !== nextAccountState ||
                 Math.abs(walletState.unrealizedPnL) > EPSILON ||
-                Math.abs(walletState.realizedPnL) > EPSILON ||
                 Math.abs(walletState.requiredMargin) > EPSILON ||
-                Math.abs(walletState.maintenanceMargin) > EPSILON;
+                Math.abs(walletState.maintenanceMargin) > EPSILON ||
+                walletState.marginStatus !== "NORMAL" ||
+                walletState.accountState !== "NORMAL";
 
             if (changed) {
                 walletState.equity = nextEquity;
@@ -425,8 +455,8 @@ export class MtmEngineService {
                 walletState.realizedPnL = 0;
                 walletState.requiredMargin = 0;
                 walletState.maintenanceMargin = 0;
-                walletState.marginStatus = nextStatus;
-                walletState.accountState = nextAccountState;
+                walletState.marginStatus = "NORMAL";
+                walletState.accountState = "NORMAL";
                 walletState.lastComputedAt = nowMs;
                 this.dirtyUsers.add(userId);
             }
@@ -435,35 +465,20 @@ export class MtmEngineService {
         }
 
         let unrealizedPnL = 0;
-        let realizedPnL = 0;
         let requiredMargin = 0;
 
         for (const position of userPositions) {
             const priceState = this.latestPriceByToken.get(position.instrumentToken);
-            if (!priceState) {
-                return;
-            }
-
-            const ageMs = nowMs - priceState.timestampMs;
-            if (ageMs > MTM_STALE_TICK_MAX_AGE_MS || ageMs < -5000) {
-                return;
-            }
+            const markPrice = priceState?.price || position.averagePrice;
+            if (!Number.isFinite(markPrice) || markPrice <= 0) continue;
 
             const qty = position.quantity;
             const avg = position.averagePrice;
-            const price = priceState.price;
-
-            if (qty >= 0) {
-                unrealizedPnL += (price - avg) * qty;
-            } else {
-                unrealizedPnL += (avg - price) * Math.abs(qty);
-            }
-
-            realizedPnL += position.realizedPnL;
-            requiredMargin += computeRequiredMargin(position, price);
+            unrealizedPnL += (markPrice - avg) * qty;
+            requiredMargin += computeRequiredMargin(position, markPrice);
         }
 
-        const nextEquity = round2(walletState.balance + realizedPnL + unrealizedPnL);
+        const nextEquity = round2(walletState.balance + unrealizedPnL);
         const nextMaintenanceMargin = marginCurveService.getMaintenanceMargin(requiredMargin);
         const nextStatus: MarginStatus = nextEquity < requiredMargin ? "MARGIN_STRESSED" : "NORMAL";
         const nextAccountState: AccountState = nextStatus === "MARGIN_STRESSED" ? "MARGIN_STRESSED" : "NORMAL";
@@ -471,7 +486,6 @@ export class MtmEngineService {
         const changed =
             Math.abs(walletState.equity - nextEquity) > EPSILON ||
             Math.abs(walletState.unrealizedPnL - unrealizedPnL) > EPSILON ||
-            Math.abs(walletState.realizedPnL - realizedPnL) > EPSILON ||
             Math.abs(walletState.requiredMargin - requiredMargin) > EPSILON ||
             Math.abs(walletState.maintenanceMargin - nextMaintenanceMargin) > EPSILON ||
             walletState.marginStatus !== nextStatus ||
@@ -481,7 +495,7 @@ export class MtmEngineService {
 
         walletState.equity = nextEquity;
         walletState.unrealizedPnL = round2(unrealizedPnL);
-        walletState.realizedPnL = round2(realizedPnL);
+        walletState.realizedPnL = 0;
         walletState.requiredMargin = round2(requiredMargin);
         walletState.maintenanceMargin = nextMaintenanceMargin;
         walletState.marginStatus = nextStatus;
@@ -504,11 +518,20 @@ export class MtmEngineService {
             });
     }
 
+    private scheduleFlush(): void {
+        if (!this.initialized || this.flushScheduled) return;
+        this.flushScheduled = true;
+        setImmediate(() => {
+            this.flushScheduled = false;
+            void this.flushSnapshots();
+        });
+    }
+
     private async flushSnapshots(): Promise<void> {
         if (!this.initialized || this.flushing || this.dirtyUsers.size === 0) return;
         this.flushing = true;
 
-        const users = Array.from(this.dirtyUsers);
+        const users = Array.from(this.dirtyUsers).filter((userId) => !isMtmExcludedUser(userId));
         try {
             await Promise.all(
                 users.map(async (userId) => {
@@ -535,6 +558,25 @@ export class MtmEngineService {
             this.flushing = false;
         }
     }
+
+    private clearUser(userId: string): void {
+        this.positionsByUser.delete(userId);
+        this.walletsByUser.delete(userId);
+        const tokens = this.userTokens.get(userId);
+        if (tokens) {
+            for (const token of tokens) {
+                const users = this.tokenToUsers.get(token);
+                if (!users) continue;
+                users.delete(userId);
+                if (users.size === 0) {
+                    this.tokenToUsers.delete(token);
+                }
+            }
+        }
+        this.userTokens.delete(userId);
+        this.dirtyUsers.delete(userId);
+        this.syncSupervisorSubscriptions();
+    }
 }
 
 declare global {
@@ -543,6 +585,4 @@ declare global {
 
 const globalState = globalThis as unknown as { __mtmEngineServiceInstance?: MtmEngineService };
 export const mtmEngineService = globalState.__mtmEngineServiceInstance || new MtmEngineService();
-
-// Always cache globally to prevent duplicate instances in production
 globalState.__mtmEngineServiceInstance = mtmEngineService;

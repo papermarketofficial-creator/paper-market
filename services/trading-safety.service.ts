@@ -2,6 +2,7 @@ import { and, eq, gte } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { orders, type Instrument } from "@/lib/db/schema";
 import { ApiError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import { UpstoxService } from "@/services/upstox.service";
 import { realTimeMarketService } from "@/services/realtime-market.service";
 import { marketSimulation } from "@/services/market-simulation.service";
@@ -12,6 +13,12 @@ const STALE_TICK_MAX_AGE_SECONDS = 8;
 const OPTION_MIN_OI = 500;
 const DUPLICATE_WINDOW_MS = 2000;
 const OPTION_QUOTE_TIMEOUT_MS = 1200;
+const PAPER_TRADING_MODE =
+    String(process.env.PAPER_TRADING_MODE ?? "true").trim().toLowerCase() !== "false";
+const DISABLE_CONCENTRATION_CHECK =
+    String(process.env.DISABLE_CONCENTRATION_CHECK ?? (PAPER_TRADING_MODE ? "true" : "false"))
+        .trim()
+        .toLowerCase() === "true";
 
 export type TradingSafetyValidationResult = {
     validatedAt: number;
@@ -36,7 +43,20 @@ export class TradingSafetyService {
         }
         this.validateLotSize(order.quantity, instrument.lotSize);
         await this.validateDuplicateOrder(userId, order);
-        await PreTradeRiskService.validateOrder(userId, order, instrument);
+        if (!PAPER_TRADING_MODE && !DISABLE_CONCENTRATION_CHECK) {
+            await PreTradeRiskService.validateOrder(userId, order, instrument);
+        } else {
+            logger.warn(
+                {
+                    event: "SIMULATION_MODE_PRETRADE_RISK_SKIPPED",
+                    userId,
+                    instrumentToken: instrument.instrumentToken,
+                    paperTradingMode: PAPER_TRADING_MODE,
+                    disableConcentrationCheck: DISABLE_CONCENTRATION_CHECK,
+                },
+                "Skipping broker-style pretrade risk checks in simulation mode"
+            );
+        }
 
         const quote = this.resolveMarketQuote(instrument);
         const referencePrice = this.resolveReferencePrice(order, quote);
@@ -71,6 +91,18 @@ export class TradingSafetyService {
 
     private static validateLotSize(quantity: number, lotSize: number): void {
         if (lotSize <= 0 || quantity % lotSize !== 0) {
+            if (PAPER_TRADING_MODE) {
+                logger.warn(
+                    {
+                        event: "HIGH_RISK_SIMULATION_TRADE",
+                        code: "INVALID_LOT_SIZE_SOFT",
+                        quantity,
+                        lotSize,
+                    },
+                    "Lot size mismatch allowed in simulation mode"
+                );
+                return;
+            }
             throw new ApiError(
                 `Quantity ${quantity} is not a valid multiple of lot size ${lotSize}`,
                 400,
@@ -119,6 +151,18 @@ export class TradingSafetyService {
             .limit(1);
 
         if (recentDuplicate) {
+            if (PAPER_TRADING_MODE) {
+                logger.warn(
+                    {
+                        event: "HIGH_RISK_SIMULATION_TRADE",
+                        code: "DUPLICATE_ORDER_SOFT",
+                        userId,
+                        instrumentToken: order.instrumentToken,
+                    },
+                    "Rapid duplicate order allowed in simulation mode"
+                );
+                return;
+            }
             throw new ApiError("Rapid duplicate order blocked", 409, "DUPLICATE_ORDER");
         }
     }
@@ -184,6 +228,17 @@ export class TradingSafetyService {
         if (order.orderType !== "MARKET") return;
 
         if (!Number.isFinite(quote.price) || quote.price <= 0) {
+            if (PAPER_TRADING_MODE) {
+                logger.warn(
+                    {
+                        event: "HIGH_RISK_SIMULATION_TRADE",
+                        code: "STALE_PRICE_SOFT",
+                        instrumentToken: instrument.instrumentToken,
+                    },
+                    "No usable tick for market order, allowed in simulation mode"
+                );
+                return;
+            }
             throw new ApiError(
                 `No usable tick for ${instrument.tradingsymbol}`,
                 503,
@@ -193,6 +248,17 @@ export class TradingSafetyService {
 
         const updatedAt = quote.lastUpdatedMs;
         if (!updatedAt || !Number.isFinite(updatedAt)) {
+            if (PAPER_TRADING_MODE) {
+                logger.warn(
+                    {
+                        event: "HIGH_RISK_SIMULATION_TRADE",
+                        code: "STALE_PRICE_SOFT",
+                        instrumentToken: instrument.instrumentToken,
+                    },
+                    "Missing tick timestamp, allowed in simulation mode"
+                );
+                return;
+            }
             throw new ApiError(
                 `No tick timestamp for ${instrument.tradingsymbol}`,
                 503,
@@ -202,6 +268,18 @@ export class TradingSafetyService {
 
         const ageSeconds = (now.getTime() - updatedAt) / 1000;
         if (ageSeconds > STALE_TICK_MAX_AGE_SECONDS) {
+            if (PAPER_TRADING_MODE) {
+                logger.warn(
+                    {
+                        event: "HIGH_RISK_SIMULATION_TRADE",
+                        code: "STALE_PRICE_SOFT",
+                        instrumentToken: instrument.instrumentToken,
+                        ageSeconds,
+                    },
+                    "Stale market tick allowed in simulation mode"
+                );
+                return;
+            }
             throw new ApiError(
                 `Tick is stale (${Math.round(ageSeconds)}s old)`,
                 503,
@@ -250,6 +328,19 @@ export class TradingSafetyService {
         }
 
         if (oi < OPTION_MIN_OI || volume === 0) {
+            if (PAPER_TRADING_MODE) {
+                logger.warn(
+                    {
+                        event: "HIGH_RISK_SIMULATION_TRADE",
+                        code: "ILLIQUID_CONTRACT_SOFT",
+                        instrumentToken: instrument.instrumentToken,
+                        oi,
+                        volume,
+                    },
+                    "Option liquidity guard softened in simulation mode"
+                );
+                return;
+            }
             throw new ApiError(
                 `Option liquidity check failed (oi=${oi}, volume=${volume})`,
                 400,

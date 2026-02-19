@@ -6,6 +6,8 @@ import { eq } from "drizzle-orm";
 import { LoginSchema } from "@/lib/validation/auth";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
+import { WalletService } from "@/services/wallet.service";
+import { bootstrapUserLedgerState } from "@/services/ledger-bootstrap.service";
 
 const { handlers, auth: nextAuth, signIn, signOut } = NextAuth({
     ...authConfig,
@@ -50,11 +52,19 @@ const { handlers, auth: nextAuth, signIn, signOut } = NextAuth({
                         const nameStr = profile.name ? String(profile.name) : "User";
                         const imageStr = profile.image ? String(profile.image) : null;
                         
-                        await db.insert(users).values({
-                            email: emailStr,
-                            name: nameStr,
-                            image: imageStr,
-                            balance: "1000000.00",
+                        const [created] = await db
+                            .insert(users)
+                            .values({
+                                email: emailStr,
+                                name: nameStr,
+                                image: imageStr,
+                                balance: "1000000.00",
+                            })
+                            .returning({ id: users.id });
+
+                        await db.transaction(async (tx) => {
+                            await WalletService.createWallet(created.id, tx);
+                            await bootstrapUserLedgerState(created.id, tx);
                         });
                     }
                 } catch (error) {
@@ -131,6 +141,11 @@ async function ensureTestUserId(): Promise<string> {
         email: configuredEmail,
         name: configuredName,
         balance: "1000000.00",
+    });
+
+    await db.transaction(async (tx) => {
+        await WalletService.createWallet(configuredId, tx);
+        await bootstrapUserLedgerState(configuredId, tx);
     });
 
     return configuredId;

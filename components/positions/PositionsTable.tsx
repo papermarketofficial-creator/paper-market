@@ -62,13 +62,27 @@ export function PositionsTable({ loading: parentLoading = false }: PositionsTabl
     }).format(value);
   };
 
-  const getLivePrice = (position: Position) => {
-    const key = toInstrumentKey(position.instrumentToken || position.symbol);
-    const quote = quotesByInstrument[key] || selectQuote(key) || selectQuote(position.symbol);
-    return quote?.price ?? 0;
+  const getLivePrice = (position: Position): number => {
+    const tokenKey = toInstrumentKey(position.instrumentToken || "");
+    if (tokenKey) {
+      const tokenQuote = quotesByInstrument[tokenKey] || selectQuote(tokenKey);
+      const tokenLive = Number(tokenQuote?.price);
+      return Number.isFinite(tokenLive) && tokenLive > 0 ? tokenLive : 0;
+    }
+
+    const symbolQuote = selectQuote(position.symbol);
+    const symbolLive = Number(symbolQuote?.price);
+    return Number.isFinite(symbolLive) && symbolLive > 0 ? symbolLive : 0;
   };
 
-  const hasLivePrice = (position: Position) => getLivePrice(position) > 0;
+  const getDisplayPrice = (position: Position): number => {
+    const live = getLivePrice(position);
+    if (live > 0) return live;
+    const cached = Number(position.currentPrice);
+    return Number.isFinite(cached) && cached > 0 ? cached : 0;
+  };
+
+  const hasDisplayPrice = (position: Position) => getDisplayPrice(position) > 0;
 
   const calculatePnL = (position: Position, currentPrice: number) => {
     if (currentPrice === 0) return 0;
@@ -80,7 +94,15 @@ export function PositionsTable({ loading: parentLoading = false }: PositionsTabl
 
   const getPositionPnL = (position: Position) => {
     const livePrice = getLivePrice(position);
-    return calculatePnL(position, livePrice);
+    if (livePrice > 0) return calculatePnL(position, livePrice);
+
+    const cachedPnl = Number(position.currentPnL);
+    if (Number.isFinite(cachedPnl)) return cachedPnl;
+
+    const fallbackPrice = getDisplayPrice(position);
+    if (fallbackPrice > 0) return calculatePnL(position, fallbackPrice);
+
+    return 0;
   };
 
 
@@ -140,8 +162,8 @@ if (!hasFetched) {
               {/* Mobile Card View */}
               <div className="sm:hidden space-y-3">
                 {positions.map((position) => {
-                  const livePrice = getLivePrice(position);
-                  const hasQuote = hasLivePrice(position);
+                  const displayPrice = getDisplayPrice(position);
+                  const hasQuote = hasDisplayPrice(position);
                   const pnl = getPositionPnL(position);
                   const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
 
@@ -177,7 +199,7 @@ if (!hasFetched) {
                         </div>
                         <div>
                           <p className="text-muted-foreground text-xs">Current</p>
-                          <p className="font-medium">{hasQuote ? formatCurrency(livePrice) : '--'}</p>
+                          <p className="font-medium">{hasQuote ? formatCurrency(displayPrice) : '--'}</p>
                         </div>
                         <div className="col-span-2">
                           <p className="text-muted-foreground text-xs">P&L</p>
@@ -230,8 +252,8 @@ if (!hasFetched) {
                   </TableHeader>
                   <TableBody>
                     {positions.map((position) => {
-                      const livePrice = getLivePrice(position);
-                      const hasQuote = hasLivePrice(position);
+                      const displayPrice = getDisplayPrice(position);
+                      const hasQuote = hasDisplayPrice(position);
                       const pnl = getPositionPnL(position);
                       const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
 
@@ -294,7 +316,7 @@ if (!hasFetched) {
                             {formatCurrency(position.entryPrice)}
                           </TableCell>
                           <TableCell className="text-right text-foreground">
-                            {hasQuote ? formatCurrency(livePrice) : '--'}
+                            {hasQuote ? formatCurrency(displayPrice) : '--'}
                           </TableCell>
                           <TableCell className={cn(
                             'text-right font-semibold',
@@ -347,11 +369,11 @@ if (!hasFetched) {
                 <span>Current P&L:</span>
                 <span className={cn(
                   "font-semibold",
-                  closingPosition && hasLivePrice(closingPosition)
+                  closingPosition && hasDisplayPrice(closingPosition)
                     ? (getPositionPnL(closingPosition) >= 0 ? "text-trade-buy" : "text-trade-sell")
                     : "text-muted-foreground"
                 )}>
-                  {closingPosition && hasLivePrice(closingPosition)
+                  {closingPosition && hasDisplayPrice(closingPosition)
                     ? formatCurrency(getPositionPnL(closingPosition))
                     : '--'}
                 </span>

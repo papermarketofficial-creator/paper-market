@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { useTradeExecutionStore } from "@/stores/trading/tradeExecution.store";
 import { useWalletStore } from "@/stores/wallet.store";
 import { useMarketStore } from "@/stores/trading/market.store";
+import { usePositionsStore } from "@/stores/trading/positions.store";
 import {
   LeverageSelector,
   MarginDisplay,
@@ -88,6 +89,8 @@ export function FuturesTradeForm({
   const walletEquity = useWalletStore((state) => state.equity);
   const blockedBalance = useWalletStore((state) => state.blockedBalance);
   const accountState = useWalletStore((state) => state.accountState);
+  const positions = usePositionsStore((state) => state.positions);
+  const fetchPositions = usePositionsStore((state) => state.fetchPositions);
 
   const liveTokenPrice = useMarketStore((state) => {
     const token = selectedStock?.instrumentToken;
@@ -120,6 +123,10 @@ export function FuturesTradeForm({
   useEffect(() => {
     fetchWallet().catch(() => undefined);
   }, [fetchWallet]);
+
+  useEffect(() => {
+    fetchPositions(true).catch(() => undefined);
+  }, [fetchPositions]);
 
   const availableExpiries = useMemo(() => {
     const dates = instruments
@@ -170,7 +177,28 @@ export function FuturesTradeForm({
   const inputValue = parseInt(quantity, 10) || 0;
   const lotSize = selectedStock?.lotSize || 1;
   const totalQuantity = inputValue * lotSize;
-  const requiredMargin = (currentPrice * totalQuantity) / leverageValue;
+
+  const existingPosition = useMemo(() => {
+    const token = selectedStock?.instrumentToken;
+    if (!token) return null;
+    return (
+      positions.find(
+        (position) =>
+          String(position.instrumentToken || "") === token &&
+          Number(position.quantity || 0) > 0
+      ) || null
+    );
+  }, [positions, selectedStock?.instrumentToken]);
+
+  const existingPositionQty = existingPosition ? Math.abs(Number(existingPosition.quantity || 0)) : 0;
+  const existingPositionSide = existingPosition?.side || null;
+  const isOppositeExitFlow =
+    existingPositionQty > 0 &&
+    ((existingPositionSide === "BUY" && side === "SELL") ||
+      (existingPositionSide === "SELL" && side === "BUY"));
+
+  const effectiveQuantity = isOppositeExitFlow ? existingPositionQty : totalQuantity;
+  const requiredMargin = (currentPrice * effectiveQuantity) / leverageValue;
 
   const slValue = parseFloat(stopLoss);
   const targetValue = parseFloat(target);
@@ -182,7 +210,7 @@ export function FuturesTradeForm({
     !hasTarget || (side === "BUY" ? targetValue > currentPrice : targetValue < currentPrice);
 
   const hasToken = Boolean(selectedStock?.instrumentToken);
-  const isQuantityValid = inputValue > 0;
+  const isQuantityValid = isOppositeExitFlow ? existingPositionQty > 0 : inputValue > 0;
   const hasValidPrice = Number.isFinite(currentPrice) && currentPrice > 0;
   const hasSufficientMargin = requiredMargin <= balance;
   const canTrade =
@@ -222,7 +250,7 @@ export function FuturesTradeForm({
           instrumentToken: selectedStock.instrumentToken,
           symbol: selectedStock.symbol,
           side,
-          quantity: totalQuantity,
+          quantity: effectiveQuantity,
           entryPrice: currentPrice,
         },
         lotSize,
@@ -230,7 +258,7 @@ export function FuturesTradeForm({
       );
 
       toast.success("Trade Sent", {
-        description: `${side} ${totalQuantity} (${inputValue} lots) ${selectedStock.symbol}`,
+        description: `${side} ${effectiveQuantity} ${selectedStock.symbol}`,
       });
 
       setShowConfirmDialog(false);
@@ -240,7 +268,10 @@ export function FuturesTradeForm({
         setTarget("");
       }, 300);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Order placement failed";
+      const fallbackMessage = error instanceof Error ? error.message : "Order placement failed";
+      const message = fallbackMessage.includes("PARTIAL_EXIT_NOT_ALLOWED")
+        ? "Partial exit is disabled in paper trading mode."
+        : fallbackMessage;
       toast.error("Order Failed", { description: message });
     }
   };
@@ -341,7 +372,19 @@ export function FuturesTradeForm({
               </div>
 
               <OrderTypeToggle side={side} onSideChange={setSide} />
-              <QuantityInput quantity={quantity} onQuantityChange={setQuantity} lotSize={lotSize} />
+              {isOppositeExitFlow ? (
+                <div className="space-y-2 rounded-sm border border-border bg-muted/20 p-3">
+                  <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Exit Full Position
+                  </Label>
+                  <p className="text-sm font-semibold text-foreground">
+                    Position: {existingPositionQty} units
+                  </p>
+                  <p className="text-xs text-muted-foreground">Exit: {existingPositionQty} units only</p>
+                </div>
+              ) : (
+                <QuantityInput quantity={quantity} onQuantityChange={setQuantity} lotSize={lotSize} />
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">

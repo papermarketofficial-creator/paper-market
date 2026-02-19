@@ -76,7 +76,8 @@ export const positions = pgTable('positions', {
     return {
         // Enforce uniqueness on (UseId, InstrumentToken)
         userTokenUnique: uniqueIndex('positions_userId_instrumentToken_unique').on(t.userId, t.instrumentToken),
-        instrumentTokenIdx: index('positions_instrumentToken_idx').on(t.instrumentToken),
+        userTokenIdx: index('idx_positions_user_token').on(t.userId, t.instrumentToken),
+        instrumentTokenIdx: index('idx_positions_token').on(t.instrumentToken),
         averagePricePositive: check('positions_averagePrice_positive', sql`${t.averagePrice} > 0`),
     };
 });

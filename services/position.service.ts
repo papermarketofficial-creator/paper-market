@@ -4,9 +4,9 @@ import { logger } from "@/lib/logger";
 import { ApiError } from "@/lib/errors";
 import { eq, and } from "drizzle-orm";
 import type { PgTransaction } from "drizzle-orm/pg-core";
-import { InstrumentRepository } from "@/lib/instruments/repository";
 import { requireInstrumentTokenForIdentityLookup } from "@/lib/trading/token-identity-guard";
 import { realTimeMarketService } from "@/services/realtime-market.service";
+import { instrumentStore } from "@/stores/instrument.store";
 
 type DbTransaction = any; // PgTransaction<PostgresJsQueryResultHKT, Record<string, never>, any>;
 
@@ -271,11 +271,9 @@ export class PositionService {
 
             // Get instrument for validation
             // Get from Repository (Fast & Consistent)
-            const repo = InstrumentRepository.getInstance();
-            if (!repo) {
-                throw new Error("InstrumentRepository failed to initialize");
+            if (!instrumentStore.isReady()) {
+                throw new ApiError("Instrument store not ready", 503, "INSTRUMENT_STORE_NOT_READY");
             }
-            await repo.ensureInitialized();
 
             const instrumentToken = requireInstrumentTokenForIdentityLookup({
                 context: "PositionService.closePosition",
@@ -283,7 +281,7 @@ export class PositionService {
                 symbol: position.symbol,
             });
 
-            const instrument = repo.get(instrumentToken);
+            const instrument = instrumentStore.getByToken(instrumentToken);
 
             if (!instrument) {
                 throw new ApiError("Instrument not found", 404, "INSTRUMENT_NOT_FOUND");

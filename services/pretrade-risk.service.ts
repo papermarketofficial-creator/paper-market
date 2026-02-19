@@ -2,10 +2,10 @@ import type { PlaceOrder } from "@/lib/validation/oms";
 import { ApiError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import type { Instrument } from "@/lib/db/schema";
-import { InstrumentRepository } from "@/lib/instruments/repository";
 import { mtmEngineService } from "@/services/mtm-engine.service";
 import { realTimeMarketService } from "@/services/realtime-market.service";
 import { WalletService } from "@/services/wallet.service";
+import { instrumentStore } from "@/stores/instrument.store";
 
 type RiskPosition = {
     instrumentToken: string;
@@ -100,12 +100,13 @@ export class PreTradeRiskService {
         payload: PlaceOrder,
         instrument: Instrument
     ): Promise<{ allowed: true }> {
-        const repo = InstrumentRepository.getInstance();
-        await repo.ensureInitialized();
+        if (!instrumentStore.isReady()) {
+            throw new ApiError("Instrument store not ready", 503, "INSTRUMENT_STORE_NOT_READY");
+        }
 
         const equity = await this.resolveEquity(userId);
         const currentPositions = this.getCurrentPositions(userId);
-        const projected = this.buildProjectedPositions(currentPositions, payload, instrument, repo);
+        const projected = this.buildProjectedPositions(currentPositions, payload, instrument);
 
         const totalNotional = projected.reduce((sum, item) => sum + item.notional, 0);
         const derivativeNotional = projected
@@ -238,8 +239,7 @@ export class PreTradeRiskService {
     private static buildProjectedPositions(
         current: RiskPosition[],
         payload: PlaceOrder,
-        instrument: Instrument,
-        repo: InstrumentRepository
+        instrument: Instrument
     ): ProjectedPosition[] {
         const qtyDelta = payload.side === "BUY" ? payload.quantity : -payload.quantity;
         const nextByToken = new Map<string, RiskPosition>();
@@ -268,7 +268,7 @@ export class PreTradeRiskService {
             if (Math.abs(item.quantity) <= EPSILON) continue;
             const instType =
                 item.instrumentType ||
-                repo.get(item.instrumentToken)?.instrumentType ||
+                instrumentStore.getByToken(item.instrumentToken)?.instrumentType ||
                 "EQUITY";
             const markPrice = Math.max(0.01, toNumber(item.markPrice, 0.01));
             projected.push({

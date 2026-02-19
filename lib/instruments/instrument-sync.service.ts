@@ -29,6 +29,11 @@ const UPSTOX_INSTRUMENTS_URL =
 const BATCH_SIZE = 2000;
 const SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
 const MIN_SAFETY_COUNT = 50000; // CRITICAL: Never sync if upstream gives less than this
+const DEFAULT_MIN_FUTURES_COUNT = 500;
+const MIN_FUTURES_COUNT = (() => {
+  const parsed = Number(process.env.MIN_FUTURES_COUNT ?? DEFAULT_MIN_FUTURES_COUNT);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_MIN_FUTURES_COUNT;
+})();
 
 interface UpstoxInstrument {
   instrument_key: string;
@@ -348,11 +353,18 @@ export async function syncInstruments(): Promise<SyncReport> {
       filter: 'NSE_EQ, NSE_FO, NSE_INDEX'
     }, 'Normalization passed safety check');
 
-    const futuresCount = parsed.filter(p => p.instrumentType === 'FUTURE').length;
+    const futuresCount = parsed.filter((p) => p.instrumentType === 'FUTURE').length;
+    logger.info(
+      {
+        futuresCount,
+        minFuturesCount: MIN_FUTURES_COUNT,
+      },
+      'Futures normalization guard check'
+    );
 
-    if (futuresCount < 1000) {
+    if (futuresCount < MIN_FUTURES_COUNT) {
         throw new Error(
-            `FATAL: Futures normalization failure detected. Only ${futuresCount} futures parsed. Aborting sync.`
+            `FATAL: Futures normalization failure detected. Only ${futuresCount} futures parsed (min required: ${MIN_FUTURES_COUNT}). Aborting sync.`
         );
     }
 

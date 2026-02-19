@@ -7,8 +7,10 @@ type TradingGateOptions = {
 };
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
-let runtimeHaltReason: string | null = null;
+const PAPER_TRADING_MODE =
+    String(process.env.PAPER_TRADING_MODE ?? "true").trim().toLowerCase() !== "false";
 
+let runtimeHaltReason: string | null = null;
 let lastKnownTradingEnabled = computeTradingEnabled();
 
 function parseTradingDisabledFlag(): boolean {
@@ -25,15 +27,9 @@ function emitTransitionIfNeeded(nextEnabled: boolean): void {
 
     lastKnownTradingEnabled = nextEnabled;
     if (nextEnabled) {
-        logger.warn(
-            { event: "SYSTEM_TRADING_RESUMED" },
-            "SYSTEM_TRADING_RESUMED"
-        );
+        logger.warn({ event: "SYSTEM_TRADING_RESUMED" }, "SYSTEM_TRADING_RESUMED");
     } else {
-        logger.error(
-            { event: "SYSTEM_TRADING_HALTED" },
-            "SYSTEM_TRADING_HALTED"
-        );
+        logger.error({ event: "SYSTEM_TRADING_HALTED" }, "SYSTEM_TRADING_HALTED");
     }
 }
 
@@ -47,6 +43,14 @@ export function haltTrading(reason: string): void {
     const normalized = String(reason || "UNKNOWN").trim().toUpperCase();
     if (!normalized) return;
 
+    if (PAPER_TRADING_MODE) {
+        logger.warn(
+            { event: "SYSTEM_TRADING_HALT_SKIPPED", reason: normalized },
+            "Paper trading mode: haltTrading ignored"
+        );
+        return;
+    }
+
     runtimeHaltReason = normalized;
     emitTransitionIfNeeded(computeTradingEnabled());
 }
@@ -54,6 +58,14 @@ export function haltTrading(reason: string): void {
 export function resumeTrading(reason: string): void {
     const normalized = String(reason || "UNKNOWN").trim().toUpperCase();
     if (!normalized) return;
+
+    if (PAPER_TRADING_MODE) {
+        logger.warn(
+            { event: "SYSTEM_TRADING_RESUME_SKIPPED", reason: normalized },
+            "Paper trading mode: resumeTrading no-op"
+        );
+        return;
+    }
 
     runtimeHaltReason = null;
     emitTransitionIfNeeded(computeTradingEnabled());

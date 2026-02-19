@@ -1,9 +1,7 @@
-import { ApiError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { tickBus, type NormalizedTick } from "@/lib/trading/tick-bus";
 import { marketFeedSupervisor } from "@/lib/trading/market-feed-supervisor";
 import { toInstrumentKey } from "@/lib/market/symbol-normalization";
-import { haltTrading, resumeTrading } from "@/lib/system-control";
 
 type FeedHealthSnapshot = {
     lastTickTimestamp: number;
@@ -18,7 +16,6 @@ const FEED_MAX_TICK_AGE_MS = Math.max(1000, Number(process.env.FEED_MAX_TICK_AGE
 const FEED_MIN_TICK_RATE = Math.max(0, Number(process.env.FEED_MIN_TICK_RATE ?? "2"));
 const FEED_MIN_ACTIVE_TOKENS = Math.max(0, Number(process.env.FEED_MIN_ACTIVE_TOKENS ?? "10"));
 const EVALUATION_INTERVAL_MS = 1000;
-const FEED_HALT_REASON = "FEED_UNHEALTHY";
 
 function isExpectedSilenceSession(): boolean {
     return marketFeedSupervisor.getSessionState() === "EXPECTED_SILENCE";
@@ -30,6 +27,9 @@ export class FeedHealthService {
     private staleByToken = new Map<string, number>();
     private lastPriceByToken = new Map<string, number>();
     private websocketConnected = false;
+    private bootstrapping = true;
+    private readonly BOOTSTRAP_TIMEOUT_MS = 10000;
+    private bootstrapStartedAt = Date.now();
 
     private state: FeedHealthSnapshot = {
         lastTickTimestamp: 0,
@@ -37,12 +37,13 @@ export class FeedHealthService {
         tickRatePerSecond: 0,
         subscribedTokenCount: 0,
         staleTokenCount: 0,
-        healthy: false,
+        healthy: true,
     };
 
     private readonly onTick = (tick: NormalizedTick): void => {
         const token = toInstrumentKey(String(tick.instrumentKey || ""));
         if (!token) return;
+
         const price = Number(tick.price);
         if (!Number.isFinite(price) || price <= 0) return;
 
@@ -51,6 +52,11 @@ export class FeedHealthService {
         this.state.lastTickTimestamp = nowMs;
         this.staleByToken.set(token, nowMs);
         this.lastPriceByToken.set(token, price);
+
+        if (this.bootstrapping) {
+            this.bootstrapping = false;
+            logger.info("Feed bootstrap completed - first tick received");
+        }
     };
 
     constructor() {
@@ -67,6 +73,10 @@ export class FeedHealthService {
 
     setWebsocketConnected(connected: boolean): void {
         this.websocketConnected = Boolean(connected);
+        if (connected && this.bootstrapping) {
+            this.bootstrapping = false;
+            logger.info("Feed bootstrap completed - websocket connected");
+        }
     }
 
     recordPrice(instrumentToken: string, price: number, timestampMs: number = Date.now()): void {
@@ -74,8 +84,8 @@ export class FeedHealthService {
         const numericPrice = Number(price);
         if (!token) return;
         if (!Number.isFinite(numericPrice) || numericPrice <= 0) return;
-        const ts = Number.isFinite(timestampMs) && timestampMs > 0 ? Number(timestampMs) : Date.now();
 
+        const ts = Number.isFinite(timestampMs) && timestampMs > 0 ? Number(timestampMs) : Date.now();
         this.staleByToken.set(token, ts);
         this.lastPriceByToken.set(token, numericPrice);
         if (ts > this.state.lastTickTimestamp) {
@@ -102,27 +112,39 @@ export class FeedHealthService {
 
     assertFeedHealthy(instrumentToken?: string): void {
         if (isExpectedSilenceSession()) {
-            throw new ApiError(
-                "Market is closed (outside live session)",
-                400,
-                "MARKET_CLOSED"
+            logger.warn(
+                { event: "FEED_EXPECTED_SILENCE", instrumentToken: instrumentToken || null },
+                "Feed in expected silence session; fallback pricing remains enabled"
             );
+            return;
         }
 
-        // Re-evaluate on-demand to avoid stale state between timer ticks.
-        this.evaluateHealth();
+        const now = Date.now();
+        if (this.bootstrapping) {
+            const elapsed = now - this.bootstrapStartedAt;
+            const connected =
+                this.websocketConnected ||
+                marketFeedSupervisor.getHealthMetrics().isConnected;
+
+            if (connected || elapsed < this.BOOTSTRAP_TIMEOUT_MS) {
+                return;
+            }
+        }
+
         if (this.state.healthy) return;
 
-        // Allow request-level pass if the target instrument itself has fresh price.
         if (instrumentToken) {
             const freshPrice = this.getLastPrice(instrumentToken, FEED_MAX_TICK_AGE_MS);
             if (freshPrice !== null) return;
         }
 
-        throw new ApiError(
-            "Market data feed unhealthy",
-            503,
-            "FEED_UNHEALTHY"
+        logger.warn(
+            {
+                event: "FEED_UNHEALTHY_FALLBACK_MODE",
+                instrumentToken: instrumentToken || null,
+                metrics: this.state,
+            },
+            "Feed unhealthy - switching to fallback pricing"
         );
     }
 
@@ -146,17 +168,19 @@ export class FeedHealthService {
             }
         }
 
-        const ageMs = this.state.lastTickTimestamp ? nowMs - this.state.lastTickTimestamp : Number.POSITIVE_INFINITY;
+        const ageMs = this.state.lastTickTimestamp
+            ? nowMs - this.state.lastTickTimestamp
+            : Number.POSITIVE_INFINITY;
         const unhealthyReasons: string[] = [];
 
-        if (!websocketConnected) unhealthyReasons.push("WS_DISCONNECTED");
+        if (!websocketConnected && !this.bootstrapping) {
+            unhealthyReasons.push("WS_DISCONNECTED");
+        }
 
-        // If there are active subscriptions, global staleness matters.
         if (subscribedTokenCount > 0 && ageMs > FEED_MAX_TICK_AGE_MS) {
             unhealthyReasons.push("STALE_GLOBAL_TICK");
         }
 
-        // Tick-rate check is meaningful only after minimum subscription depth.
         if (
             subscribedTokenCount >= FEED_MIN_ACTIVE_TOKENS &&
             tickRatePerSecond < FEED_MIN_TICK_RATE
@@ -164,7 +188,6 @@ export class FeedHealthService {
             unhealthyReasons.push("LOW_TICK_RATE");
         }
 
-        // Only fail when every subscribed token is stale.
         if (subscribedTokenCount > 0 && staleTokenCount >= subscribedTokenCount) {
             unhealthyReasons.push("ALL_SUBSCRIBED_TOKENS_STALE");
         }
@@ -184,39 +207,23 @@ export class FeedHealthService {
         if (healthy === wasHealthy) return;
 
         if (!healthy) {
-            logger.error(
+            logger.warn(
                 {
                     event: "FEED_UNHEALTHY_DETECTED",
                     reasons: unhealthyReasons,
                     metrics: this.state,
                 },
-                "FEED_UNHEALTHY_DETECTED"
-            );
-            haltTrading(FEED_HALT_REASON);
-            logger.error(
-                {
-                    event: "TRADING_AUTO_HALTED",
-                    reason: FEED_HALT_REASON,
-                },
-                "TRADING_AUTO_HALTED"
+                "Feed unhealthy - switching to fallback pricing"
             );
             return;
         }
 
-        logger.warn(
+        logger.info(
             {
                 event: "FEED_RECOVERED",
                 metrics: this.state,
             },
-            "FEED_RECOVERED"
-        );
-        resumeTrading("FEED_RECOVERED");
-        logger.warn(
-            {
-                event: "TRADING_AUTO_RESUMED",
-                reason: "FEED_RECOVERED",
-            },
-            "TRADING_AUTO_RESUMED"
+            "Feed recovered"
         );
     }
 

@@ -2,18 +2,28 @@ import type { PlaceOrder } from "@/lib/validation/oms";
 import type { Instrument } from "@/lib/db/schema";
 import { ApiError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import { getFeedLastPrice } from "@/services/feed-health.service";
+import { priceOracle } from "@/services/price-oracle.service";
+import { db } from "@/lib/db";
+import { positions } from "@/lib/db/schema";
+import { and, eq } from "drizzle-orm";
 
 type AcceptanceContext = {
     userId?: string;
 };
 
-const DEFAULT_WALLET_BALANCE = Math.max(1, Number(process.env.DEFAULT_WALLET_BALANCE ?? "1000000"));
-const MAX_ORDER_NOTIONAL_RATIO = Math.max(0.0001, Number(process.env.MAX_ORDER_NOTIONAL_RATIO ?? "0.05"));
-const MAX_MARKET_ORDER_NOTIONAL_RATIO = Math.max(0.0001, Number(process.env.MAX_MARKET_ORDER_NOTIONAL_RATIO ?? "0.02"));
-const FAT_FINGER_LIMIT = 0.20;
-const CIRCUIT_BAND_LIMIT = 0.10;
-const DERIVATIVE_QTY_MULTIPLIER = 10;
+const PAPER_TRADING_MODE =
+    String(process.env.PAPER_TRADING_MODE ?? "true").trim().toLowerCase() !== "false";
+const DISABLE_NOTIONAL_CAP =
+    String(process.env.DISABLE_NOTIONAL_CAP ?? (PAPER_TRADING_MODE ? "true" : "false"))
+        .trim()
+        .toLowerCase() === "true";
+
+const DEFAULT_MAX_NOTIONAL_PER_ORDER = 50_000_000;
+const MAX_NOTIONAL_PER_ORDER = Math.max(
+    1,
+    Number(process.env.MAX_NOTIONAL_PER_ORDER ?? DEFAULT_MAX_NOTIONAL_PER_ORDER)
+);
+const FAT_FINGER_SIMULATION_LIMIT = 0.50;
 const EPSILON = 0.000001;
 
 function toNumber(value: unknown, fallback = 0): number {
@@ -21,21 +31,62 @@ function toNumber(value: unknown, fallback = 0): number {
     return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function isDerivative(instrumentType: string): boolean {
-    return instrumentType === "FUTURE" || instrumentType === "OPTION";
-}
-
 function isTickAligned(price: number, tickSize: number): boolean {
     const units = price / tickSize;
     return Math.abs(units - Math.round(units)) < EPSILON;
 }
 
+function isFullExitEnforcedInstrument(instrumentType: string): boolean {
+    const normalized = String(instrumentType || "").toUpperCase();
+    return normalized === "FUTURE" || normalized === "EQUITY";
+}
+
 export class OrderAcceptanceService {
-    static validateOrder(
+    private static async enforcePaperFullExitRule(
+        payload: PlaceOrder,
+        instrument: Instrument,
+        userId?: string
+    ): Promise<void> {
+        if (!PAPER_TRADING_MODE) return;
+        if (!userId) return;
+        if (!isFullExitEnforcedInstrument(instrument.instrumentType)) return;
+
+        const [existingPosition] = await db
+            .select({ quantity: positions.quantity })
+            .from(positions)
+            .where(
+                and(
+                    eq(positions.userId, userId),
+                    eq(positions.instrumentToken, instrument.instrumentToken)
+                )
+            )
+            .limit(1);
+
+        const existingSignedQty = Number(existingPosition?.quantity ?? 0);
+        if (!Number.isFinite(existingSignedQty) || existingSignedQty === 0) return;
+
+        const existingAbsQty = Math.abs(existingSignedQty);
+        const currentSide = existingSignedQty > 0 ? "BUY" : "SELL";
+        const orderQty = toNumber(payload.quantity, NaN);
+
+        if (payload.side === currentSide) {
+            return;
+        }
+
+        if (!Number.isFinite(orderQty) || orderQty !== existingAbsQty) {
+            throw new ApiError(
+                "Full exit required. Partial closing is not allowed in paper mode.",
+                400,
+                "PARTIAL_EXIT_NOT_ALLOWED"
+            );
+        }
+    }
+
+    static async validateOrder(
         payload: PlaceOrder,
         instrument: Instrument,
         context: AcceptanceContext = {}
-    ): { allowed: true } {
+    ): Promise<{ allowed: true }> {
         const quantity = toNumber(payload.quantity, NaN);
         if (!Number.isFinite(quantity) || quantity <= 0) {
             this.reject(
@@ -49,116 +100,98 @@ export class OrderAcceptanceService {
             );
         }
 
-        if (isDerivative(instrument.instrumentType)) {
-            const maxQty = Math.max(1, toNumber(instrument.lotSize, 1) * DERIVATIVE_QTY_MULTIPLIER);
-            if (quantity > maxQty) {
-                this.reject(
-                    "QUANTITY_SANITY",
-                    "Derivative quantity exceeds acceptance limit",
-                    context.userId,
-                    instrument.instrumentToken,
-                    null,
-                    quantity,
-                    0
-                );
-            }
-        }
+        await this.enforcePaperFullExitRule(payload, instrument, context.userId);
 
-        const ltp = getFeedLastPrice(instrument.instrumentToken);
-        if (!Number.isFinite(ltp) || (ltp as number) <= 0) {
-            this.reject(
-                "CIRCUIT_BAND_PROTECTION",
-                "Last known market price unavailable",
-                context.userId,
-                instrument.instrumentToken,
-                null,
-                quantity,
-                0
-            );
-        }
+        const referencePrice = await priceOracle.getBestPrice(instrument.instrumentToken, {
+            symbolHint: instrument.tradingsymbol,
+            nameHint: instrument.name,
+        });
 
-        const referencePrice = Number(ltp);
         let orderPrice = referencePrice;
         if (payload.orderType === "LIMIT") {
-            orderPrice = toNumber(payload.limitPrice, NaN);
-            if (!Number.isFinite(orderPrice) || orderPrice <= 0) {
+            const limitPrice = toNumber(payload.limitPrice, NaN);
+            if (!Number.isFinite(limitPrice) || limitPrice <= 0) {
                 this.reject(
                     "PRICE_TICK_VALIDATION",
                     "Limit price must be positive",
                     context.userId,
                     instrument.instrumentToken,
-                    orderPrice,
+                    limitPrice,
                     quantity,
                     0
                 );
             }
 
             const tickSize = Math.max(0.0001, toNumber(instrument.tickSize, 0.05));
-            if (!isTickAligned(orderPrice, tickSize)) {
+            if (!isTickAligned(limitPrice, tickSize)) {
                 this.reject(
                     "PRICE_TICK_VALIDATION",
                     "Limit price must align with tick size",
                     context.userId,
                     instrument.instrumentToken,
-                    orderPrice,
+                    limitPrice,
                     quantity,
-                    orderPrice * quantity
+                    limitPrice * quantity
                 );
             }
 
-            const deviation = Math.abs(orderPrice - referencePrice) / referencePrice;
-            if (deviation > FAT_FINGER_LIMIT) {
+            const deviation = Math.abs(limitPrice - referencePrice) / Math.max(referencePrice, 0.01);
+            if (deviation > FAT_FINGER_SIMULATION_LIMIT) {
                 this.reject(
                     "FAT_FINGER_PRICE",
-                    "Limit price exceeds fat-finger threshold",
+                    "Limit price is too far from market reference. Reduce deviation.",
                     context.userId,
                     instrument.instrumentToken,
-                    orderPrice,
+                    limitPrice,
                     quantity,
-                    orderPrice * quantity
+                    limitPrice * quantity
                 );
             }
 
-            if (deviation > CIRCUIT_BAND_LIMIT) {
-                this.reject(
-                    "CIRCUIT_BAND_PROTECTION",
-                    "Limit price breaches circuit band",
-                    context.userId,
-                    instrument.instrumentToken,
-                    orderPrice,
-                    quantity,
-                    orderPrice * quantity
-                );
-            }
+            orderPrice = limitPrice;
         }
 
         const notional = orderPrice * quantity;
-        const maxOrderNotional = DEFAULT_WALLET_BALANCE * MAX_ORDER_NOTIONAL_RATIO;
-        if (notional > maxOrderNotional) {
+        if (!Number.isFinite(notional) || notional <= 0) {
             this.reject(
                 "MAX_NOTIONAL_PER_ORDER",
-                "Order notional exceeds acceptance cap",
+                "Order size is too large for the simulation. Reduce quantity.",
                 context.userId,
                 instrument.instrumentToken,
                 orderPrice,
                 quantity,
-                notional
+                notional,
+                MAX_NOTIONAL_PER_ORDER
             );
         }
 
-        if (payload.orderType === "MARKET") {
-            const maxMarketNotional = DEFAULT_WALLET_BALANCE * MAX_MARKET_ORDER_NOTIONAL_RATIO;
-            if (notional > maxMarketNotional) {
-                this.reject(
-                    "MARKET_ORDER_NOTIONAL_GUARD",
-                    "Market order notional exceeds acceptance cap",
-                    context.userId,
-                    instrument.instrumentToken,
-                    orderPrice,
+        if (!DISABLE_NOTIONAL_CAP && notional > MAX_NOTIONAL_PER_ORDER) {
+            this.reject(
+                "MAX_NOTIONAL_PER_ORDER",
+                "Order size is too large for the simulation. Reduce quantity.",
+                context.userId,
+                instrument.instrumentToken,
+                orderPrice,
+                quantity,
+                notional,
+                MAX_NOTIONAL_PER_ORDER
+            );
+        }
+
+        if (notional > MAX_NOTIONAL_PER_ORDER * 0.5) {
+            logger.warn(
+                {
+                    event: "HIGH_RISK_SIMULATION_TRADE",
+                    userId: context.userId || "unknown",
+                    instrumentToken: instrument.instrumentToken,
+                    notional,
                     quantity,
-                    notional
-                );
-            }
+                    price: orderPrice,
+                    maxAllowed: MAX_NOTIONAL_PER_ORDER,
+                    notionalCapDisabled: DISABLE_NOTIONAL_CAP,
+                },
+                "HIGH_RISK_SIMULATION_TRADE"
+            );
         }
 
         return { allowed: true };
@@ -169,15 +202,14 @@ export class OrderAcceptanceService {
             | "FAT_FINGER_PRICE"
             | "MAX_NOTIONAL_PER_ORDER"
             | "QUANTITY_SANITY"
-            | "PRICE_TICK_VALIDATION"
-            | "CIRCUIT_BAND_PROTECTION"
-            | "MARKET_ORDER_NOTIONAL_GUARD",
+            | "PRICE_TICK_VALIDATION",
         message: string,
         userId: string | undefined,
         instrumentToken: string,
         price: number | null,
         quantity: number,
-        notional: number
+        notional: number,
+        maxAllowed?: number
     ): never {
         logger.warn(
             {
@@ -188,6 +220,7 @@ export class OrderAcceptanceService {
                 price,
                 quantity,
                 notional,
+                maxAllowed,
             },
             "ORDER_REJECTED_AT_ACCEPTANCE"
         );

@@ -5,13 +5,14 @@ import { hash } from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { SignupSchema } from "@/lib/validation/auth";
 import { handleError, ApiError } from "@/lib/errors";
+import { WalletService } from "@/services/wallet.service";
+import { bootstrapUserLedgerState } from "@/services/ledger-bootstrap.service";
 
 export async function POST(req: NextRequest) {
     try {
         const body = await req.json();
         const validated = SignupSchema.parse(body);
 
-        // Check if user already exists
         const [existing] = await db
             .select()
             .from(users)
@@ -22,27 +23,35 @@ export async function POST(req: NextRequest) {
             throw new ApiError("Email already registered", 400, "EMAIL_EXISTS");
         }
 
-        // Hash password
         const hashedPassword = await hash(validated.password, 12);
 
-        // Create user
-        const [user] = await db.insert(users).values({
-            name: validated.name,
-            email: validated.email,
-            password: hashedPassword,
-            balance: "1000000.00", // ₹10L starting balance for paper trading
-        }).returning();
+        const [user] = await db
+            .insert(users)
+            .values({
+                name: validated.name,
+                email: validated.email,
+                password: hashedPassword,
+                balance: "1000000.00",
+            })
+            .returning();
 
-        return NextResponse.json({
-            success: true,
-            data: {
-                id: user.id,
-                email: user.email,
-                name: user.name,
+        await db.transaction(async (tx) => {
+            await WalletService.createWallet(user.id, tx);
+            await bootstrapUserLedgerState(user.id, tx);
+        });
+
+        return NextResponse.json(
+            {
+                success: true,
+                data: {
+                    id: user.id,
+                    email: user.email,
+                    name: user.name,
+                },
+                message: "User created successfully",
             },
-            message: "User created successfully"
-        }, { status: 201 });
-
+            { status: 201 }
+        );
     } catch (error) {
         return handleError(error);
     }

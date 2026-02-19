@@ -37,7 +37,10 @@ const SuccessIndicator: React.FC<SuccessIndicatorProps> = ({
         className="h-full w-full overflow-visible"
         initial={false}
         animate={isComplete ? { scale: [1, 1.08, 1] } : { scale: 1 }}
-        transition={{ type: "spring" as const, stiffness: 300, damping: 15 }}
+        transition={{
+          duration: shouldReduceMotion ? 0.1 : 0.35,
+          ease: [0.22, 1, 0.36, 1],
+        }}
       >
         <circle
           cx={center}
