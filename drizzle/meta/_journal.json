@@ -113,6 +113,20 @@
       "when": 1771279200000,
       "tag": "0016_ledger_idempotency_key",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1771483200000,
+      "tag": "0017_option_consistency",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1771494335326,
+      "tag": "0017_abandoned_firebird",
+      "breakpoints": true
     }
   ]
 }

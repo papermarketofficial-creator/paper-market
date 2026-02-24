@@ -165,8 +165,8 @@ export class OrderService {
                  throw new ApiError("Instrument is inactive", 400, "INSTRUMENT_INACTIVE");
             }
 
+            // Paper trading: expiry-day guard disabled — 0DTE trading is a valid practice use-case.
             const now = new Date();
-            await this.enforceExpiryDayOpenGuard(userId, payload, instrument, now);
 
             // --- TRADING UNIVERSE CHECK ---
             const universeCheck = isInstrumentAllowed(instrument);
@@ -268,14 +268,25 @@ export class OrderService {
             
             // ✅ Execute MARKET orders immediately
             if (payload.orderType === "MARKET" && !stageAfterHours) {
+                const requiresImmediateSettlementFill = payload.exitReason === "EXPIRY";
                 try {
                     logger.info({ orderId: order.id }, "Executing MARKET order immediately");
                     const executionStartMs = performance.now();
-                    await ExecutionService.tryExecuteOrder(order, { force: options.force });
+                    const executed = await ExecutionService.tryExecuteOrder(order, { force: options.force });
                     executionMs = performance.now() - executionStartMs;
+                    if (requiresImmediateSettlementFill && !executed) {
+                        throw new ApiError(
+                            "Expiry settlement execution failed",
+                            503,
+                            "EXPIRY_EXECUTION_FAILED"
+                        );
+                    }
                 } catch (error) {
                     logger.error({ err: error, orderId: order.id }, "Failed to execute MARKET order");
-                    // Don't throw - order is placed, execution will be retried
+                    if (requiresImmediateSettlementFill) {
+                        throw error;
+                    }
+                    // Don't throw for regular flow - order is placed, execution will be retried.
                 }
             }
 
@@ -312,56 +323,14 @@ export class OrderService {
     }
 
     private static async enforceExpiryDayOpenGuard(
-        userId: string,
-        payload: PlaceOrder,
-        instrument: Instrument,
-        now: Date
+        _userId: string,
+        _payload: PlaceOrder,
+        _instrument: Instrument,
+        _now: Date
     ): Promise<void> {
-        if (!instrument.expiry) return;
-
-        const daysToExpiry = getDaysToExpiry(new Date(instrument.expiry), now);
-        if (daysToExpiry > 0) return;
-
-        const [existingPosition] = await db
-            .select({
-                quantity: positions.quantity,
-            })
-            .from(positions)
-            .where(
-                and(
-                    eq(positions.userId, userId),
-                    eq(positions.instrumentToken, instrument.instrumentToken)
-                )
-            )
-            .limit(1);
-
-        if (!existingPosition || existingPosition.quantity === 0) {
-            throw new ApiError(
-                "New exposure is blocked on expiry day",
-                400,
-                "EXPIRY_POSITION_BLOCKED"
-            );
-        }
-
-        const currentQty = Number(existingPosition.quantity);
-        const orderQty = Number(payload.quantity);
-        const isLong = currentQty > 0;
-        const oppositeSide = isLong ? "SELL" : "BUY";
-        const maxReducible = Math.abs(currentQty);
-
-        const isReducingOrder =
-            payload.side === oppositeSide &&
-            Number.isFinite(orderQty) &&
-            orderQty > 0 &&
-            orderQty <= maxReducible;
-
-        if (!isReducingOrder) {
-            throw new ApiError(
-                "Only reducing/closing orders are allowed on expiry day",
-                400,
-                "EXPIRY_POSITION_BLOCKED"
-            );
-        }
+        // Paper trading: no expiry-day restrictions.
+        // Opening new positions on expiry day (0DTE) is valid paper trading activity.
+        return;
     }
 
     /**

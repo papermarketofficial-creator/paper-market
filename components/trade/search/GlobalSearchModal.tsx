@@ -166,9 +166,9 @@ export function GlobalSearchModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl p-0 gap-0">
-        <DialogHeader className="px-6 pt-6 pb-4">
-          <DialogTitle className="text-lg font-semibold">
+      <DialogContent className="max-w-3xl gap-0 border border-white/12 bg-[linear-gradient(180deg,rgba(17,24,39,.9),rgba(8,12,22,.95))] p-0 text-slate-100 shadow-[0_24px_70px_rgba(0,0,0,.55)]">
+        <DialogHeader className="border-b border-white/10 px-6 pb-4 pt-6">
+          <DialogTitle className="text-lg font-semibold text-white">
             Symbol Search
           </DialogTitle>
         </DialogHeader>
@@ -176,20 +176,20 @@ export function GlobalSearchModal({
         {/* Search */}
         <div className="px-6 pb-4">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
             <Input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={placeholder}
-              className="pl-10 pr-4 h-10 focus-visible:ring-emerald-600"
+              className="h-10 border-white/10 bg-[#0f1628] pl-10 pr-4 text-slate-100 placeholder:text-slate-500 focus-visible:border-[#2d6cff] focus-visible:ring-[#2d6cff]"
             />
           </div>
         </div>
 
         {/* Categories */}
-        <div className="flex gap-2 px-6 pb-3 border-b border-border/50">
+        <div className="flex gap-2 border-b border-white/10 px-6 pb-3">
           {categories.map((cat) => (
             <Button
               key={cat}
@@ -197,10 +197,10 @@ export function GlobalSearchModal({
               size="sm"
               onClick={() => setActiveCategory(cat)}
               className={cn(
-                "h-8 text-xs font-medium transition-colors",
+                "h-8 rounded-lg border px-3 text-xs font-semibold transition-colors",
                 activeCategory === cat
-                  ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                  : "text-muted-foreground hover:bg-emerald-600/10 hover:text-emerald-700"
+                  ? "border-[#2d6cff] bg-[#2d6cff]/20 text-[#9fc1ff] hover:bg-[#2d6cff]/30"
+                  : "border-white/10 text-slate-300 hover:border-white/20 hover:bg-white/[0.05] hover:text-white"
               )}
             >
               {cat}
@@ -210,11 +210,11 @@ export function GlobalSearchModal({
 
         {/* RESULTS + SINGLE TOOLTIP PROVIDER */}
         <TooltipProvider delayDuration={80} skipDelayDuration={200}>
-          <ScrollArea className="h-[400px]">
+          <ScrollArea className="h-[440px]">
             {query.length <= 1 ? (
               <div className="flex flex-col items-center justify-center h-full text-center p-8">
-                <TrendingUp className="h-12 w-12 text-muted-foreground/30 mb-4" />
-                <p className="text-sm text-muted-foreground">
+                <TrendingUp className="mb-4 h-12 w-12 text-slate-500/40" />
+                <p className="text-sm text-slate-400">
                   Start typing to search instruments
                 </p>
               </div>
@@ -222,19 +222,19 @@ export function GlobalSearchModal({
               <div className="h-[400px] grid place-items-center">
                 <div className="flex flex-col items-center justify-center gap-3">
                   <Spinner size={22} />
-                  <p className="text-sm text-muted-foreground">Searching...</p>
+                  <p className="text-sm text-slate-400">Searching...</p>
                 </div>
               </div>
             ) : searchResults.length === 0 && !isSearching ? (
               <div className="flex items-center justify-center h-full">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-slate-400">
                   No symbols found
                 </p>
               </div>
             ) : (
-              <div className="divide-y divide-border/40">
+              <div className="divide-y divide-white/10">
                 {/* Header */}
-                <div className="grid grid-cols-12 gap-4 px-6 py-2 text-xs font-medium text-emerald-600/60 bg-emerald-50/50 dark:bg-emerald-900/10">
+                <div className="grid grid-cols-12 gap-4 bg-white/[0.03] px-6 py-2 text-xs font-semibold tracking-wide text-slate-400">
                   <div className="col-span-4">SYMBOL</div>
                   <div className="col-span-5">DESCRIPTION</div>
                   <div className="col-span-2 text-right">EXCHANGE</div>
@@ -252,22 +252,22 @@ export function GlobalSearchModal({
                       key={`${stock.symbol}-${idx}`}
                       onClick={() => handleSelect(stock)}
                       className={cn(
-                        "grid grid-cols-12 gap-4 px-6 py-3 cursor-pointer transition-colors border-l-2",
+                        "grid cursor-pointer grid-cols-12 gap-4 border-l-2 px-6 py-3 transition-colors",
                         selectedIndex === idx
-                          ? "bg-emerald-500/5 border-emerald-500"
-                          : "hover:bg-muted/50 border-transparent"
+                          ? "border-[#2d6cff] bg-[#2d6cff]/12"
+                          : "border-transparent hover:bg-white/[0.04]"
                       )}
                     >
-                      <div className="col-span-4 font-medium text-sm">
+                      <div className="col-span-4 text-sm font-semibold text-white">
                         {stock.symbol}
                       </div>
 
-                      <div className="col-span-5 text-sm truncate text-muted-foreground">
+                      <div className="col-span-5 truncate text-sm text-slate-300">
                         {stock.name}
                       </div>
 
                       <div className="col-span-2 text-right">
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-[2px] text-[10px] font-medium border bg-muted/50 text-muted-foreground border-border/50">
+                        <span className="inline-flex items-center rounded border border-white/15 bg-white/[0.04] px-1.5 py-0.5 text-[10px] font-medium text-slate-300">
                           NSE
                         </span>
                       </div>
@@ -287,8 +287,8 @@ export function GlobalSearchModal({
                                 handleToggleWatchlist(stock, e)
                               }
                               className={cn(
-                                "h-7 w-7 opacity-60 hover:opacity-100",
-                                isAdded && "text-emerald-600"
+                                "h-7 w-7 border border-transparent text-slate-400 opacity-70 hover:border-white/15 hover:bg-white/[0.06] hover:text-white hover:opacity-100",
+                                isAdded && "border-[#2d6cff]/40 bg-[#2d6cff]/15 text-[#9fc1ff]"
                               )}
                             >
                               <Bookmark

@@ -10,6 +10,11 @@ export const InstrumentType = {
     INDEX: "INDEX"
 } as const;
 
+export const OptionType = {
+    CE: "CE",
+    PE: "PE",
+} as const;
+
 export const Segment = {
     NSE_EQ: "NSE_EQ",
     NSE_FO: "NSE_FO",
@@ -34,8 +39,10 @@ export const instruments = pgTable('instruments', {
     exchangeToken: text('exchangeToken').notNull(),
     tradingsymbol: text('tradingsymbol').notNull(),
     name: text('name').notNull(),
+    underlying: text('underlying'),
     expiry: timestamp('expiry'),
     strike: numeric('strike', { precision: 10, scale: 2 }),
+    optionType: text('optionType'),
     tickSize: numeric('tickSize', { precision: 8, scale: 4 }).notNull().default('0.05'),
     lotSize: integer('lotSize').notNull().default(1),
     instrumentType: text('instrumentType').notNull(),
@@ -50,9 +57,11 @@ export const instruments = pgTable('instruments', {
         // uniqueExchangeToken: uniqueIndex('uniqueExchangeToken').on(t.exchange, t.exchangeToken), // Removed to allow sync of overlapping exchange tokens
         idxSymbol: index('idxInstrumentsSymbol').on(t.tradingsymbol),
         idxName: index('idxInstrumentsName').on(t.name),
+        idxUnderlying: index('idxInstrumentsUnderlying').on(t.underlying),
         idxExpiry: index('idxInstrumentsExpiry').on(t.expiry),
         idxSegment: index('idxInstrumentsSegment').on(t.segment),
         idxInstrumentType: index('idxInstrumentsType').on(t.instrumentType),
+        idxOptionType: index('idxInstrumentsOptionType').on(t.optionType),
         idxIsActive: index('idxInstrumentsIsActive').on(t.isActive),
         idxLastSyncedAt: index('idxInstrumentsLastSyncedAt').on(t.lastSyncedAt),
     }

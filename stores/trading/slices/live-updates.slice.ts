@@ -5,6 +5,19 @@ import { toCanonicalSymbol, toInstrumentKey, toSymbolKey } from "@/lib/market/sy
 const toFiniteNumber = (value: unknown): number =>
   Number.isFinite(Number(value)) ? Number(value) : 0;
 
+function toDateKey(raw?: string): string {
+  if (!raw) return "";
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toISOString().slice(0, 10);
+}
+
+function buildOptionChainKey(symbol: string, expiry?: string): string {
+  const normalizedSymbol = String(symbol || "").trim().toUpperCase();
+  const expiryKey = toDateKey(expiry);
+  return `${normalizedSymbol}::${expiryKey || "NEAREST"}`;
+}
+
 function buildQuoteFromTick(
   previousQuote: Quote | undefined,
   tick: { instrumentKey: string; symbol?: string; price: number; close?: number; timestamp?: number }
@@ -44,22 +57,44 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
   quotesByInstrument: {},
   quotesByKey: {},
   optionChain: null,
+  optionChainByKey: {},
   isFetchingChain: false,
+  fetchingOptionChainKey: null,
 
   fetchOptionChain: async (symbol: string, expiry?: string) => {
-    set({ isFetchingChain: true });
+    const normalizedSymbol = String(symbol || "").trim().toUpperCase();
+    if (!normalizedSymbol) return;
+
+    const key = buildOptionChainKey(normalizedSymbol, expiry);
+    const { isFetchingChain, fetchingOptionChainKey } = get();
+    if (isFetchingChain && fetchingOptionChainKey === key) {
+      return;
+    }
+
+    set({ isFetchingChain: true, fetchingOptionChainKey: key });
     try {
-      const expiryParam = expiry ? `&expiry=${expiry}` : "";
-      const res = await fetch(`/api/v1/market/option-chain?symbol=${symbol}${expiryParam}`);
+      const params = new URLSearchParams({ symbol: normalizedSymbol });
+      if (expiry) {
+        params.set("expiry", expiry);
+      }
+      const res = await fetch(`/api/v1/market/option-chain?${params.toString()}`);
       const data = await res.json();
 
       if (data.success) {
-        set({ optionChain: data.data });
+        set((state: any) => ({
+          optionChain: data.data,
+          optionChainByKey: {
+            ...state.optionChainByKey,
+            [key]: data.data,
+          },
+        }));
       }
     } catch (error) {
       console.error("Option Chain fetch failed", error);
     } finally {
-      set({ isFetchingChain: false });
+      if (get().fetchingOptionChainKey === key) {
+        set({ isFetchingChain: false, fetchingOptionChainKey: null });
+      }
     }
   },
 

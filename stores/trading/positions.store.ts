@@ -19,18 +19,9 @@ interface PositionsState {
 }
 
 const calculatePnL = (position: Position, currentPrice: number): number => {
-  const { instrument, side, entryPrice, lotSize, quantity } = position;
-  switch (instrument) {
-    case 'futures':
-    case 'options': {
-      const pnl = (currentPrice - entryPrice) * lotSize * quantity;
-      return side === 'BUY' ? pnl : -pnl;
-    }
-    default: {
-      const pnl = (currentPrice - entryPrice) * quantity;
-      return side === 'BUY' ? pnl : -pnl;
-    }
-  }
+  const { side, entryPrice, quantity } = position;
+  const pnl = (currentPrice - entryPrice) * quantity;
+  return side === 'BUY' ? pnl : -pnl;
 };
 
 export const usePositionsStore = create<PositionsState>((set, get) => ({

@@ -40,6 +40,7 @@ interface UpstoxInstrument {
   exchange_token: string;
   trading_symbol: string;
   name: string;
+  option_type?: string;
   expiry?: string;
   strike?: number | string;
   tick_size?: number | string;
@@ -54,8 +55,10 @@ interface ParsedInstrument {
   exchangeToken: string;
   tradingsymbol: string;
   name: string;
+  underlying: string | null;
   expiry: Date | null;
   strike: string | null;
+  optionType: "CE" | "PE" | null;
   tickSize: string;
   lotSize: number;
   instrumentType: string;
@@ -164,6 +167,89 @@ function normalizeType(type: string): string {
     return t;
 }
 
+function normalizeOptionType(raw: UpstoxInstrument): "CE" | "PE" | null {
+    const explicit = String(raw.option_type || "").trim().toUpperCase();
+    if (explicit === "CE" || explicit === "PE") return explicit;
+
+    const instrumentType = String(raw.instrument_type || "").trim().toUpperCase();
+    if (instrumentType === "CE" || instrumentType.endsWith("_CE")) return "CE";
+    if (instrumentType === "PE" || instrumentType.endsWith("_PE")) return "PE";
+
+    return null;
+}
+
+const UNDERLYING_ALIAS: Record<string, string> = {
+    NIFTY50: "NIFTY",
+    "NIFTY 50": "NIFTY",
+    NIFTYBANK: "BANKNIFTY",
+    "NIFTY BANK": "BANKNIFTY",
+    NIFTYFINSERVICE: "FINNIFTY",
+    "NIFTY FIN SERVICE": "FINNIFTY",
+    MIDCPNIFTY: "MIDCAP",
+    MIDCAP: "MIDCAP",
+};
+
+function normalizeUnderlyingSymbol(raw: string): string {
+    const value = String(raw || "").trim().toUpperCase();
+    if (!value) return "";
+    const compact = value.replace(/\s+/g, "");
+    return UNDERLYING_ALIAS[value] || UNDERLYING_ALIAS[compact] || value;
+}
+
+function fallbackUnderlyingFromTradingSymbol(rawTradingSymbol: string): string {
+    const symbol = String(rawTradingSymbol || "").trim().toUpperCase();
+    if (!symbol) return "";
+    const firstToken = symbol.split(/\s+/)[0] || "";
+    if (!firstToken) return "";
+    return normalizeUnderlyingSymbol(firstToken);
+}
+
+function resolveUnderlying(raw: UpstoxInstrument, normalizedType: string): string | null {
+    if (normalizedType !== "OPTION" && normalizedType !== "FUTURE") {
+        return null;
+    }
+
+    if (normalizedType === "OPTION") {
+        const fromSymbol = fallbackUnderlyingFromTradingSymbol(raw.trading_symbol || "");
+        if (fromSymbol) return fromSymbol;
+
+        const fromName = normalizeUnderlyingSymbol(raw.name || "");
+        return fromName || null;
+    }
+
+    const fromName = normalizeUnderlyingSymbol(raw.name || "");
+    if (fromName) return fromName;
+
+    const fromSymbol = fallbackUnderlyingFromTradingSymbol(raw.trading_symbol || "");
+    return fromSymbol || null;
+}
+
+function resolveStrike(raw: UpstoxInstrument, normalizedType: string): string | null {
+    const directStrike = Number(raw.strike);
+    if (Number.isFinite(directStrike) && directStrike > 0) {
+        return String(directStrike);
+    }
+
+    if (normalizedType !== "OPTION") {
+        return null;
+    }
+
+    const symbol = String(raw.trading_symbol || "").trim().toUpperCase();
+    if (!symbol) return null;
+
+    const spacedMatch = symbol.match(/(\d+(?:\.\d+)?)\s+(?:CE|PE)\b/);
+    if (spacedMatch?.[1]) {
+        return spacedMatch[1];
+    }
+
+    const compactMatch = symbol.match(/(\d+(?:\.\d+)?)(?:CE|PE)\b/);
+    if (compactMatch?.[1]) {
+        return compactMatch[1];
+    }
+
+    return null;
+}
+
 /**
  * Normalize Instrument Data
  */
@@ -186,16 +272,22 @@ function normalize(raw: UpstoxInstrument, syncTime: Date): ParsedInstrument | nu
     const lotSize = Number(raw.lot_size);
     const validLotSize = (isNaN(lotSize) || lotSize <= 0) ? 1 : lotSize;
 
+    const normalizedType = normalizeType(raw.instrument_type);
+    const underlying = resolveUnderlying(raw, normalizedType);
+    const strike = resolveStrike(raw, normalizedType);
+
     return {
       instrumentToken: raw.instrument_key,
       exchangeToken: raw.exchange_token ?? '',
       tradingsymbol: raw.trading_symbol,
       name: raw.name ?? raw.trading_symbol,
+      underlying,
       expiry,
-      strike: raw.strike ? String(raw.strike) : null,
+      strike,
+      optionType: normalizedType === "OPTION" ? normalizeOptionType(raw) : null,
       tickSize: String(raw.tick_size ?? '0.05'),
       lotSize: validLotSize,
-      instrumentType: normalizeType(raw.instrument_type),
+      instrumentType: normalizedType,
       segment: raw.segment,
       exchange: raw.exchange,
       isActive: true, // Always active if present in master
@@ -225,8 +317,10 @@ async function bulkUpsert(parsed: ParsedInstrument[]) {
                 exchangeToken: sql`EXCLUDED."exchangeToken"`,
                 tradingsymbol: sql`EXCLUDED.tradingsymbol`,
                 name: sql`EXCLUDED.name`,
+                underlying: sql`EXCLUDED.underlying`,
                 expiry: sql`EXCLUDED.expiry`,
                 strike: sql`EXCLUDED.strike`,
+                optionType: sql`EXCLUDED."optionType"`,
                 tickSize: sql`EXCLUDED."tickSize"`,
                 lotSize: sql`EXCLUDED."lotSize"`,
                 instrumentType: sql`EXCLUDED."instrumentType"`,

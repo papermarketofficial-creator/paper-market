@@ -37,7 +37,8 @@ export const orders = pgTable('orders', {
         createdAtIdx: index('orders_createdAt_idx').on(t.createdAt),
         idempotencyIdx: index('orders_userId_idempotency_idx').on(t.userId, t.idempotencyKey),
         quantityPositive: check('orders_quantity_positive', sql`${t.quantity} > 0`),
-        limitPricePositive: check('orders_limitPrice_positive', sql`${t.limitPrice} IS NULL OR ${t.limitPrice} > 0`),
+        // Expiry settlement can use zero price for worthless option expiry.
+        limitPricePositive: check('orders_limitPrice_positive', sql`${t.limitPrice} IS NULL OR ${t.limitPrice} >= 0`),
     };
 });
 
@@ -58,7 +59,8 @@ export const trades = pgTable('trades', {
         symbolIdx: index('trades_symbol_idx').on(t.symbol),
         executedAtIdx: index('trades_executedAt_idx').on(t.executedAt),
         quantityPositive: check('trades_quantity_positive', sql`${t.quantity} > 0`),
-        pricePositive: check('trades_price_positive', sql`${t.price} > 0`),
+        // Zero-price fills are valid for cash-settled option expiry.
+        pricePositive: check('trades_price_positive', sql`${t.price} >= 0`),
     };
 });
 

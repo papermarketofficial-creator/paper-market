@@ -8,6 +8,8 @@ import { tickBus, type NormalizedTick } from "@/lib/trading/tick-bus";
 import { eventBus } from "@/lib/event-bus";
 import { marginCurveService } from "@/services/margin-curve.service";
 import { liquidationEngineService } from "@/services/liquidation-engine.service";
+import { instrumentStore } from "@/stores/instrument.store";
+import { calculateShortOptionMargin } from "@/lib/trading/option-margin";
 
 type MarginStatus = "NORMAL" | "MARGIN_STRESSED";
 type AccountState = "NORMAL" | "MARGIN_STRESSED" | "LIQUIDATING";
@@ -81,14 +83,24 @@ function normalizeAccountState(value: unknown): AccountState {
     return "NORMAL";
 }
 
-function computeRequiredMargin(position: PositionCache, markPrice: number): number {
+function computeRequiredMargin(
+    position: PositionCache,
+    markPrice: number,
+    resolveUnderlyingPrice: (instrumentToken: string, fallbackPrice: number) => number
+): number {
     const qty = Math.abs(position.quantity);
     const notional = qty * markPrice;
     const instrumentType = position.instrumentType;
 
     if (instrumentType === "FUTURE") return notional * 0.15;
     if (instrumentType === "OPTION") {
-        return position.quantity >= 0 ? notional : notional * 1.2;
+        if (position.quantity >= 0) return notional;
+        const underlyingPrice = resolveUnderlyingPrice(position.instrumentToken, markPrice);
+        return calculateShortOptionMargin({
+            optionPrice: markPrice,
+            underlyingPrice,
+            quantity: qty,
+        });
     }
     return notional;
 }
@@ -112,6 +124,28 @@ export class MtmEngineService {
     private walletsByUser = new Map<string, WalletState>();
     private dirtyUsers = new Set<string>();
     private subscribedTokens = new Set<string>();
+
+    private resolveOptionUnderlyingPrice(instrumentToken: string, fallbackPrice: number): number {
+        const fallback = Math.max(0.01, Number(fallbackPrice) || 0.01);
+        if (!instrumentStore.isReady()) return fallback;
+
+        const instrument = instrumentStore.getByToken(instrumentToken);
+        if (!instrument) return fallback;
+
+        const hint = String(instrument.name || "").trim();
+        if (!hint) return fallback;
+
+        const underlying = instrumentStore.getBySymbol(hint);
+        if (underlying?.instrumentToken) {
+            const tick = this.latestPriceByToken.get(underlying.instrumentToken);
+            if (tick && Number.isFinite(tick.price) && tick.price > 0) return tick.price;
+        }
+
+        const hintTick = this.latestPriceByToken.get(hint);
+        if (hintTick && Number.isFinite(hintTick.price) && hintTick.price > 0) return hintTick.price;
+
+        return fallback;
+    }
 
     private readonly onTick = (tick: NormalizedTick): void => {
         if (!this.initialized) return;
@@ -475,7 +509,12 @@ export class MtmEngineService {
             const qty = position.quantity;
             const avg = position.averagePrice;
             unrealizedPnL += (markPrice - avg) * qty;
-            requiredMargin += computeRequiredMargin(position, markPrice);
+            requiredMargin += computeRequiredMargin(
+                position,
+                markPrice,
+                (instrumentToken, fallbackPrice) =>
+                    this.resolveOptionUnderlyingPrice(instrumentToken, fallbackPrice)
+            );
         }
 
         const nextEquity = round2(walletState.balance + unrealizedPnL);

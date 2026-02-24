@@ -32,6 +32,14 @@ export interface Quote {
   timestamp: number;
 }
 
+export interface OptionChainSnapshot {
+  underlying: string;
+  underlyingPrice?: number;
+  underlyingChangePercent?: number;
+  expiry?: string;
+  strikes: any[];
+}
+
 // ─────────────────────────────────────────────────────────────────
 // 🍕 Slice Interfaces
 // ─────────────────────────────────────────────────────────────────
@@ -85,8 +93,10 @@ export interface LiveUpdatesSlice {
   livePrice: number;
   quotesByInstrument: Record<string, Quote>;
   quotesByKey: Record<string, Quote>; // deprecated alias to avoid transition breakage
-  optionChain: { underlying: string; underlyingPrice?: number; expiry?: string; strikes: any[] } | null;
+  optionChain: OptionChainSnapshot | null;
+  optionChainByKey: Record<string, OptionChainSnapshot>;
   isFetchingChain: boolean;
+  fetchingOptionChainKey: string | null;
 
   // Actions
   applyTick: (tick: {

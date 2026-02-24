@@ -21,7 +21,7 @@ import { ledgerCacheService } from "@/services/ledger-cache.service";
 import { LedgerService } from "@/services/ledger.service";
 import { mtmEngineService } from "@/services/mtm-engine.service";
 
-const RESET_BALANCE = "1000000.00";
+const RESET_BALANCE = "10000000.00";
 
 export async function POST(req: NextRequest) {
     try {

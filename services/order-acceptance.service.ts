@@ -38,7 +38,7 @@ function isTickAligned(price: number, tickSize: number): boolean {
 
 function isFullExitEnforcedInstrument(instrumentType: string): boolean {
     const normalized = String(instrumentType || "").toUpperCase();
-    return normalized === "FUTURE" || normalized === "EQUITY";
+    return normalized === "FUTURE" || normalized === "EQUITY" || normalized === "OPTION";
 }
 
 export class OrderAcceptanceService {
@@ -75,7 +75,7 @@ export class OrderAcceptanceService {
 
         if (!Number.isFinite(orderQty) || orderQty !== existingAbsQty) {
             throw new ApiError(
-                "Full exit required. Partial closing is not allowed in paper mode.",
+                "Full exit required in paper mode.",
                 400,
                 "PARTIAL_EXIT_NOT_ALLOWED"
             );

@@ -17,11 +17,9 @@ function mapToStockShape(inst: any) {
     const strike = Number(inst.strike ?? 0);
     const hasStrike = Number.isFinite(strike) && strike > 0;
     const optionType = inst.instrumentType === "OPTION"
-        ? inst.tradingsymbol.endsWith("CE")
-            ? "CE"
-            : inst.tradingsymbol.endsWith("PE")
-                ? "PE"
-                : undefined
+        ? (String(inst.optionType || "").toUpperCase() === "CE" || String(inst.optionType || "").toUpperCase() === "PE"
+            ? String(inst.optionType).toUpperCase()
+            : undefined)
         : undefined;
 
     return {

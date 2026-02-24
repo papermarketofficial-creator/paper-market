@@ -29,6 +29,11 @@ export const ledgerReferenceTypeEnum = pgEnum("ledger_reference_type", [
     "LIQUIDATION",
     "EXPIRY",
     "ADJUSTMENT",
+    "OPTION_PREMIUM_DEBIT",
+    "OPTION_PREMIUM_CREDIT",
+    "OPTION_MARGIN_BLOCK",
+    "OPTION_MARGIN_RELEASE",
+    "OPTION_REALIZED_PNL",
 ]);
 
 export const ledgerAccounts = pgTable(

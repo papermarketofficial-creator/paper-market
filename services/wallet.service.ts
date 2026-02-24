@@ -24,6 +24,11 @@ const REFERENCE_TYPE_MAP: Record<string, LedgerReferenceType> = {
     LIQUIDATION: "LIQUIDATION",
     EXPIRY: "EXPIRY",
     ADJUSTMENT: "ADJUSTMENT",
+    OPTION_PREMIUM_DEBIT: "OPTION_PREMIUM_DEBIT",
+    OPTION_PREMIUM_CREDIT: "OPTION_PREMIUM_CREDIT",
+    OPTION_MARGIN_BLOCK: "OPTION_MARGIN_BLOCK",
+    OPTION_MARGIN_RELEASE: "OPTION_MARGIN_RELEASE",
+    OPTION_REALIZED_PNL: "OPTION_REALIZED_PNL",
     DEPOSIT: "ADJUSTMENT",
     WITHDRAWAL: "ADJUSTMENT",
     MARGIN_BLOCK: "ORDER",
@@ -111,7 +116,7 @@ function deriveTransactionType(debitType: LedgerAccountType, creditType: LedgerA
 
 function deriveDebitAccountType(referenceType: string): LedgerAccountType {
     const normalized = String(referenceType || "").trim().toUpperCase();
-    if (normalized === "MARGIN_BLOCK") return "MARGIN_BLOCKED";
+    if (normalized === "MARGIN_BLOCK" || normalized === "OPTION_MARGIN_BLOCK") return "MARGIN_BLOCKED";
     if (normalized === "FEE") return "FEES";
     return "REALIZED_PNL";
 }

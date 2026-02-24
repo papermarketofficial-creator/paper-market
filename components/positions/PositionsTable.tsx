@@ -165,7 +165,7 @@ if (!hasFetched) {
                   const displayPrice = getDisplayPrice(position);
                   const hasQuote = hasDisplayPrice(position);
                   const pnl = getPositionPnL(position);
-                  const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
+                  const pnlPercent = ((pnl / (position.entryPrice * position.quantity)) * 100).toFixed(2);
 
                   return (
                     <div key={position.id} className="bg-muted/30 rounded-lg p-3 space-y-3">
@@ -255,7 +255,7 @@ if (!hasFetched) {
                       const displayPrice = getDisplayPrice(position);
                       const hasQuote = hasDisplayPrice(position);
                       const pnl = getPositionPnL(position);
-                      const pnlPercent = ((pnl / (position.entryPrice * position.quantity * position.lotSize)) * 100).toFixed(2);
+                      const pnlPercent = ((pnl / (position.entryPrice * position.quantity)) * 100).toFixed(2);
 
                       return (
                         <TableRow

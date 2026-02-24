@@ -11,6 +11,7 @@
     "migrate:reconcile": "tsx scripts/reconcile-drizzle-migrations.ts",
     "load:users": "node scripts/load/simulate-users.mjs",
     "test:paper:lifecycle": "npx tsx scripts/test-paper-lifecycle.ts",
+    "test:options:lifecycle": "npx tsx scripts/test-options-lifecycle.ts",
     "proto:json": "node -e \"const {execSync}=require('child_process'); const fs=require('fs'); const out=execSync('npx -p protobufjs-cli pbjs -t json public/proto/MarketDataFeedV3.proto',{encoding:'utf8'}); fs.writeFileSync('lib/integrations/upstox/proto.json', out, 'utf8');\""
   },
   "dependencies": {

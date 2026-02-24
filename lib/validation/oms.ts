@@ -32,7 +32,7 @@ const BaseOrderSchema = z.object({
     exitReason: ExitReasonEnum.optional(),
     settlementPrice: z
         .number()
-        .positive("Settlement price must be positive")
+        .nonnegative("Settlement price must be non-negative")
         .optional(),
 });
 

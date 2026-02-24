@@ -6,6 +6,7 @@ import { mtmEngineService } from "@/services/mtm-engine.service";
 import { realTimeMarketService } from "@/services/realtime-market.service";
 import { WalletService } from "@/services/wallet.service";
 import { instrumentStore } from "@/stores/instrument.store";
+import { calculateShortOptionMargin } from "@/lib/trading/option-margin";
 
 type RiskPosition = {
     instrumentToken: string;
@@ -85,10 +86,51 @@ function isIncreasingExposure(currentQty: number, projectedQty: number): boolean
     return Math.abs(projectedQty) > Math.abs(currentQty) + EPSILON;
 }
 
-function computeRequiredMargin(instrumentType: string, quantity: number, markPrice: number): number {
+function resolveOptionUnderlyingPrice(instrumentToken: string, fallbackPrice: number): number {
+    const fallback = Math.max(0.01, fallbackPrice);
+    if (!instrumentStore.isReady()) return fallback;
+
+    const instrument = instrumentStore.getByToken(instrumentToken);
+    if (!instrument) return fallback;
+
+    const hint = String(instrument.name || "").trim();
+    if (!hint) return fallback;
+
+    const underlying = instrumentStore.getBySymbol(hint);
+    if (underlying?.instrumentToken) {
+        const mtmPrice = mtmEngineService.getLatestPrice(underlying.instrumentToken);
+        if (Number.isFinite(mtmPrice) && (mtmPrice as number) > 0) return Number(mtmPrice);
+
+        const liveQuote = realTimeMarketService.getQuote(underlying.instrumentToken);
+        const livePrice = Number(liveQuote?.price);
+        if (Number.isFinite(livePrice) && livePrice > 0) return livePrice;
+    }
+
+    const hintQuote = realTimeMarketService.getQuote(hint);
+    const hintPrice = Number(hintQuote?.price);
+    if (Number.isFinite(hintPrice) && hintPrice > 0) return hintPrice;
+
+    return fallback;
+}
+
+function computeRequiredMargin(
+    instrumentType: string,
+    quantity: number,
+    markPrice: number,
+    instrumentToken: string
+): number {
     const notional = Math.abs(quantity) * markPrice;
     if (instrumentType === "FUTURE") return notional * 0.15;
-    if (instrumentType === "OPTION") return quantity >= 0 ? notional : notional * 1.2;
+    if (instrumentType === "OPTION") {
+        if (quantity >= 0) return notional;
+
+        const underlyingPrice = resolveOptionUnderlyingPrice(instrumentToken, markPrice);
+        return calculateShortOptionMargin({
+            optionPrice: markPrice,
+            underlyingPrice,
+            quantity: Math.abs(quantity),
+        });
+    }
     return notional;
 }
 
@@ -182,7 +224,14 @@ export class PreTradeRiskService {
         }
 
         const projectedRequiredMargin = projected.reduce(
-            (sum, item) => sum + computeRequiredMargin(item.instrumentType, item.quantity, item.markPrice),
+            (sum, item) =>
+                sum +
+                computeRequiredMargin(
+                    item.instrumentType,
+                    item.quantity,
+                    item.markPrice,
+                    item.instrumentToken
+                ),
             0
         );
         const minMarginBuffer = clampPositive(DEFAULT_MARGIN_BUFFER, 1.25);
@@ -288,7 +337,7 @@ export class PreTradeRiskService {
             return Math.max(0.01, Number(payload.limitPrice));
         }
 
-        if (Number.isFinite(Number(payload.settlementPrice)) && Number(payload.settlementPrice) > 0) {
+        if (Number.isFinite(Number(payload.settlementPrice)) && Number(payload.settlementPrice) >= 0) {
             return Number(payload.settlementPrice);
         }
 

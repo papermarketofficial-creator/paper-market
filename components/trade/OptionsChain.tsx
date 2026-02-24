@@ -9,27 +9,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
-import { InstrumentType } from './form/InstrumentSelector';
 import { Badge } from '@/components/ui/badge';
 import { useMarketStore } from '@/stores/trading/market.store';
-import { useEffect } from 'react';
 
 interface OptionsChainProps {
   onStrikeSelect: (symbol: string) => void;
-  instrumentType?: InstrumentType;
+  instrumentType?: string;
 }
 
 export function OptionsChain({ onStrikeSelect, instrumentType = "NIFTY" }: OptionsChainProps) {
-  const { fetchOptionChain, optionChain, isFetchingChain } = useMarketStore();
-
-  useEffect(() => {
-    fetchOptionChain(instrumentType);
-    // Poll every 5 seconds
-    const interval = setInterval(() => {
-      fetchOptionChain(instrumentType);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [instrumentType, fetchOptionChain]);
+  const { optionChain } = useMarketStore();
 
   const data = optionChain?.strikes || [];
   const underlyingPrice = optionChain?.underlyingPrice || 0;

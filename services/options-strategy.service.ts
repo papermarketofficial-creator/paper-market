@@ -14,6 +14,8 @@ import { OrderService } from "@/services/order.service";
 import type { SystemQuoteDetail } from "@/services/upstox.service";
 import { UpstoxService } from "@/services/upstox.service";
 import { realTimeMarketService } from "@/services/realtime-market.service";
+import { marketSimulation } from "@/services/market-simulation.service";
+import { logger } from "@/lib/logger";
 
 type OptionSide = "CE" | "PE";
 
@@ -83,18 +85,28 @@ function round2(value: number): number {
     return Math.round(value * 100) / 100;
 }
 
+function normalizeUnderlyingSymbol(raw: string): string {
+    const value = String(raw || "").trim().toUpperCase();
+    if (!value) return "";
+    const compact = value.replace(/\s+/g, "");
+    const aliases: Record<string, string> = {
+        NIFTY50: "NIFTY",
+        "NIFTY 50": "NIFTY",
+        NIFTYBANK: "BANKNIFTY",
+        "NIFTY BANK": "BANKNIFTY",
+        NIFTYFINSERVICE: "FINNIFTY",
+        "NIFTY FIN SERVICE": "FINNIFTY",
+        MIDCPNIFTY: "MIDCAP",
+        MIDCAP: "MIDCAP",
+    };
+    return aliases[value] || aliases[compact] || value;
+}
+
 function toDateKey(raw: Date | string | null | undefined): string {
     if (!raw) return "";
     const date = raw instanceof Date ? raw : new Date(raw);
     if (Number.isNaN(date.getTime())) return "";
     return date.toISOString().slice(0, 10);
-}
-
-function parseOptionType(symbol: string): OptionSide | null {
-    const normalized = String(symbol || "").trim().toUpperCase();
-    if (normalized.endsWith("CE")) return "CE";
-    if (normalized.endsWith("PE")) return "PE";
-    return null;
 }
 
 function sanitizeKey(input: string): string {
@@ -423,11 +435,12 @@ export class OptionsStrategyService {
         const quoteMap = await UpstoxService.getSystemQuoteDetails(
             options.map((item) => item.instrumentToken)
         );
+        const underlyingPrice = await this.resolveUnderlyingPrice(input.underlying);
 
         const resolved: InternalResolvedLeg[] = [];
         for (const leg of templates) {
             const instrument = options.find((candidate) => {
-                const candidateType = parseOptionType(candidate.tradingsymbol);
+                const candidateType = String(candidate.optionType || "").toUpperCase();
                 const strike = Number(candidate.strike || 0);
                 return (
                     candidateType === leg.optionType &&
@@ -444,7 +457,7 @@ export class OptionsStrategyService {
             }
 
             const quantity = Math.max(1, Number(instrument.lotSize) * input.lots);
-            const ltp = this.resolveLtp(instrument, quoteMap);
+            const ltp = this.resolveLtp(instrument, quoteMap, underlyingPrice);
             const premium = round2(ltp * quantity);
             if (ltp <= 0) {
                 throw new ApiError(
@@ -474,7 +487,8 @@ export class OptionsStrategyService {
 
     private static resolveLtp(
         instrument: Instrument,
-        quotes: Record<string, SystemQuoteDetail>
+        quotes: Record<string, SystemQuoteDetail>,
+        underlyingPrice: number
     ): number {
         const detail =
             quotes[instrument.instrumentToken] ||
@@ -486,6 +500,67 @@ export class OptionsStrategyService {
         const livePrice = Number(live?.price);
         if (Number.isFinite(livePrice) && livePrice > 0) return livePrice;
 
-        return 0;
+        const simulation = marketSimulation.getQuote(instrument.tradingsymbol);
+        const simulationPrice = Number(simulation?.price);
+        if (Number.isFinite(simulationPrice) && simulationPrice > 0) return simulationPrice;
+
+        const strike = Number(instrument.strike || 0);
+        const optionType = String(instrument.optionType || "").toUpperCase();
+        const synthetic = this.computeSyntheticOptionPrice(optionType, underlyingPrice, strike);
+        if (synthetic > 0) {
+            logger.warn(
+                {
+                    instrumentToken: instrument.instrumentToken,
+                    symbol: instrument.tradingsymbol,
+                    optionType,
+                    strike,
+                    underlyingPrice,
+                    syntheticLtp: synthetic,
+                },
+                "Using synthetic premium for strategy preview"
+            );
+        }
+
+        return synthetic;
+    }
+
+    private static computeSyntheticOptionPrice(
+        optionType: string,
+        underlyingPrice: number,
+        strike: number
+    ): number {
+        const safeStrike = Number.isFinite(strike) && strike > 0 ? strike : 100;
+        const safeUnderlying =
+            Number.isFinite(underlyingPrice) && underlyingPrice > 0
+                ? underlyingPrice
+                : safeStrike;
+
+        const intrinsic =
+            optionType === "CE"
+                ? Math.max(0, safeUnderlying - safeStrike)
+                : Math.max(0, safeStrike - safeUnderlying);
+        const timeValue = Math.max(10, safeUnderlying * 0.002);
+        return round2(intrinsic + timeValue);
+    }
+
+    private static async resolveUnderlyingPrice(underlying: string): Promise<number> {
+        const normalized = normalizeUnderlyingSymbol(underlying);
+
+        const simulationPrice = Number(marketSimulation.getQuote(normalized)?.price || 0);
+        let resolved = Number.isFinite(simulationPrice) && simulationPrice > 0 ? simulationPrice : 0;
+
+        try {
+            const instrumentKey = await UpstoxService.resolveInstrumentKey(normalized);
+            const details = await UpstoxService.getSystemQuoteDetails([instrumentKey]);
+            const detail = details[instrumentKey] || details[instrumentKey.replace("|", ":")];
+            const upstreamPrice = Number(detail?.lastPrice || 0);
+            if (Number.isFinite(upstreamPrice) && upstreamPrice > 0) {
+                resolved = upstreamPrice;
+            }
+        } catch {
+            // keep best available fallback
+        }
+
+        return resolved;
     }
 }

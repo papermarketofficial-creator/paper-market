@@ -274,7 +274,8 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
 
   const existingPositionQty = existingPosition ? Math.abs(Number(existingPosition.quantity || 0)) : 0;
   const existingPositionSide = existingPosition?.side || null;
-  const fullExitGuardEnabled = instrumentMode === 'equity' || instrumentMode === 'futures';
+  const fullExitGuardEnabled =
+    instrumentMode === 'equity' || instrumentMode === 'futures' || instrumentMode === 'options';
   const isOppositeExitFlow =
     fullExitGuardEnabled &&
     existingPositionQty > 0 &&
@@ -519,6 +520,13 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                     <Label className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Exit Full Position</Label>
                     <p className="text-sm font-semibold text-foreground">Position: {existingPositionQty} units</p>
                     <p className="text-xs text-muted-foreground">Exit: {existingPositionQty} units only</p>
+                    {instrumentMode === 'options' && (
+                      <div className="pt-1 text-xs text-muted-foreground space-y-1">
+                        <p>Avg Premium: ₹{Number(existingPosition?.entryPrice || 0).toFixed(2)}</p>
+                        <p>Current: ₹{Number(currentPrice || 0).toFixed(2)}</p>
+                        <p>Unrealized PnL: ₹{Number(existingPosition?.currentPnL || 0).toFixed(2)}</p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <QuantityInput quantity={quantity} onQuantityChange={setQuantity} lotSize={lotSize} />
@@ -628,7 +636,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
         onOpenChange={setShowConfirmDialog}
         selectedStock={selectedStock}
         side={side}
-        quantityValue={totalQuantity}
+        quantityValue={effectiveQuantity}
         currentPrice={currentPrice}
         requiredMargin={requiredMargin}
         productType={productType}

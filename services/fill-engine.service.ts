@@ -53,17 +53,17 @@ export class FillEngineService {
     static resolveFill(order: DbOrder, instrument: Instrument): FillDecision {
         if (order.orderType === "MARKET" && order.exitReason === "EXPIRY") {
             const settlementPrice = Number(order.limitPrice);
-            if (Number.isFinite(settlementPrice) && settlementPrice > 0) {
-                const executionPrice = this.roundForLimit(settlementPrice, instrument.tickSize, order.side);
+            if (Number.isFinite(settlementPrice) && settlementPrice >= 0) {
+                const executionPrice = Number(settlementPrice.toFixed(4));
                 return {
-                    shouldFill: executionPrice > 0,
-                    executionPrice: executionPrice > 0 ? executionPrice : null,
-                    fillableQuantity: executionPrice > 0 ? order.quantity : 0,
+                    shouldFill: true,
+                    executionPrice,
+                    fillableQuantity: order.quantity,
                     tickPrice: settlementPrice,
                     tickTimestampMs: Date.now(),
                     slippageBps: 0,
                     source: "SETTLEMENT",
-                    reason: executionPrice > 0 ? "FILLABLE" : "NO_TICK",
+                    reason: "FILLABLE",
                     resolvedBy: "FILL_ENGINE_V1",
                 };
             }

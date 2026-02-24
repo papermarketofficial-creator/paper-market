@@ -28,6 +28,10 @@ const PAPER_TRADING_MODE =
     String(process.env.PAPER_TRADING_MODE ?? "true").trim().toLowerCase() !== "false";
 
 export class ExecutionService {
+    private static round2(value: number): number {
+        return Math.round(value * 100) / 100;
+    }
+
     private static resolveLedgerReferenceType(
         order: typeof orders.$inferSelect
     ): LedgerReferenceType {
@@ -51,6 +55,18 @@ export class ExecutionService {
         const prefix = this.resolveLedgerReferenceType(order);
         const normalizedLeg = String(leg || "").trim().toUpperCase();
         return `${prefix}-${order.id}-${normalizedLeg}`;
+    }
+
+    private static resolveOptionPremiumReferenceType(
+        side: "BUY" | "SELL",
+        closingQuantity: number,
+        openingQuantity: number
+    ): LedgerReferenceType {
+        // Keep lifecycle observability explicit: opening premium legs vs realized close legs.
+        if (closingQuantity > 0 && openingQuantity === 0) {
+            return "OPTION_REALIZED_PNL";
+        }
+        return side === "BUY" ? "OPTION_PREMIUM_DEBIT" : "OPTION_PREMIUM_CREDIT";
     }
 
     /**
@@ -222,6 +238,7 @@ export class ExecutionService {
                 const previousQuantity = Number(existingPositionBefore?.quantity ?? 0);
                 const previousAveragePrice = Number(existingPositionBefore?.averagePrice ?? finalExecutionPrice);
                 const tradeDelta = order.side === "BUY" ? fillQuantity : -fillQuantity;
+                const projectedQuantity = previousQuantity + tradeDelta;
 
                 let openingQuantity = 0;
                 let closingQuantity = 0;
@@ -233,8 +250,8 @@ export class ExecutionService {
                 }
 
                 const marginPerUnit = fillQuantity > 0 ? marginRequired / fillQuantity : 0;
-                const marginToBlock = Math.max(0, Math.round(marginPerUnit * openingQuantity * 100) / 100);
-                const marginToRelease = Math.max(0, Math.round(marginPerUnit * closingQuantity * 100) / 100);
+                const marginToBlock = Math.max(0, this.round2(marginPerUnit * openingQuantity));
+                const marginToRelease = Math.max(0, this.round2(marginPerUnit * closingQuantity));
                 const realizedPnl =
                     closingQuantity > 0
                         ? Math.round(
@@ -244,6 +261,25 @@ export class ExecutionService {
                             100
                         ) / 100
                         : 0;
+
+                let optionMarginToBlock = 0;
+                let optionMarginToRelease = 0;
+                if (instrument.instrumentType === "OPTION") {
+                    const previousShortQty = Math.max(0, -previousQuantity);
+                    const nextShortQty = Math.max(0, -projectedQuantity);
+                    const previousShortMargin = await MarginService.calculateOptionShortMarginForQuantity(
+                        instrument,
+                        previousShortQty,
+                        finalExecutionPrice
+                    );
+                    const nextShortMargin = await MarginService.calculateOptionShortMarginForQuantity(
+                        instrument,
+                        nextShortQty,
+                        finalExecutionPrice
+                    );
+                    optionMarginToBlock = Math.max(0, this.round2(nextShortMargin - previousShortMargin));
+                    optionMarginToRelease = Math.max(0, this.round2(previousShortMargin - nextShortMargin));
+                }
 
                 const plannedLedgerKeys: string[] = [];
 
@@ -261,17 +297,21 @@ export class ExecutionService {
                         plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, "REALIZED_PNL_DEBIT"));
                     }
                     plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, "MARGIN_RELEASE_REMAINDER"));
+                } else if (instrument.instrumentType === "OPTION") {
+                    const premiumLeg = order.side === "BUY"
+                        ? "OPTION_PREMIUM_DEBIT"
+                        : "OPTION_PREMIUM_CREDIT";
+                    plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, premiumLeg));
+                    if (optionMarginToBlock > 0) {
+                        plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, "OPTION_MARGIN_BLOCK"));
+                    }
+                    if (optionMarginToRelease > 0) {
+                        plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, "OPTION_MARGIN_RELEASE"));
+                    }
                 } else if (order.side === "BUY") {
                     plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, "BUY_DEBIT"));
                 } else if (instrument.instrumentType === "EQUITY") {
                     plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, "SELL_PROCEEDS"));
-                } else {
-                    if (instrument.instrumentType === "OPTION") {
-                        plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, "OPTION_PREMIUM"));
-                    }
-                    if (marginRequired > 0) {
-                        plannedLedgerKeys.push(this.buildLedgerIdempotencyKey(order, "MARGIN_BLOCK"));
-                    }
                 }
 
                 const preparedJournal = await WriteAheadJournalService.prepare(
@@ -430,94 +470,134 @@ export class ExecutionService {
                                 );
                             }
                         }
-                    } else {
-                        const promises = [];
+                    } else if (instrument.instrumentType === "EQUITY") {
                         if (order.side === "BUY") {
-                            promises.push(
-                                WalletService.debitBalance(
-                                    order.userId,
-                                    marginRequired,
-                                    "TRADE",
-                                    trade.id,
-                                    tx,
-                                    `Buy ${order.symbol}`,
-                                    {
-                                        ledgerReferenceType,
-                                        skipWaj: true,
-                                        skipWalletSync: true,
-                                        sequenceCollector: ledgerSequences,
-                                        idempotencyKey: this.buildLedgerIdempotencyKey(order, "BUY_DEBIT"),
-                                    }
-                                )
+                            await WalletService.debitBalance(
+                                order.userId,
+                                marginRequired,
+                                "TRADE",
+                                trade.id,
+                                tx,
+                                `Buy ${order.symbol}`,
+                                {
+                                    ledgerReferenceType,
+                                    skipWaj: true,
+                                    skipWalletSync: true,
+                                    sequenceCollector: ledgerSequences,
+                                    idempotencyKey: this.buildLedgerIdempotencyKey(order, "BUY_DEBIT"),
+                                }
                             );
-                        } else if (instrument.instrumentType === "EQUITY") {
+                        } else {
                             const proceeds = LedgerService.multiplyByInteger(
                                 finalExecutionPrice.toString(),
                                 fillQuantity
                             );
-                            promises.push(
-                                WalletService.creditProceeds(
-                                    order.userId,
-                                    proceeds,
-                                    trade.id,
-                                    tx,
-                                    `Sell ${order.symbol}`,
-                                    {
-                                        ledgerReferenceType,
-                                        skipWaj: true,
-                                        skipWalletSync: true,
-                                        sequenceCollector: ledgerSequences,
-                                        idempotencyKey: this.buildLedgerIdempotencyKey(order, "SELL_PROCEEDS"),
-                                    }
-                                )
+                            await WalletService.creditProceeds(
+                                order.userId,
+                                proceeds,
+                                trade.id,
+                                tx,
+                                `Sell ${order.symbol}`,
+                                {
+                                    ledgerReferenceType,
+                                    skipWaj: true,
+                                    skipWalletSync: true,
+                                    sequenceCollector: ledgerSequences,
+                                    idempotencyKey: this.buildLedgerIdempotencyKey(order, "SELL_PROCEEDS"),
+                                }
                             );
-                        } else {
-                            if (instrument.instrumentType === "OPTION") {
-                                const premium = LedgerService.multiplyByInteger(
-                                    finalExecutionPrice.toString(),
-                                    fillQuantity
-                                );
-                                promises.push(
-                                    WalletService.creditProceeds(
-                                        order.userId,
-                                        premium,
-                                        trade.id,
-                                        tx,
-                                        `Option Premium Credit ${order.symbol}`,
-                                        {
-                                            ledgerReferenceType,
-                                            skipWaj: true,
-                                            skipWalletSync: true,
-                                            sequenceCollector: ledgerSequences,
-                                            idempotencyKey: this.buildLedgerIdempotencyKey(order, "OPTION_PREMIUM"),
-                                        }
-                                    )
-                                );
-                            }
-
-                            if (marginRequired > 0) {
-                                promises.push(
-                                    WalletService.debitBalance(
-                                        order.userId,
-                                        marginRequired,
-                                        "MARGIN_BLOCK",
-                                        trade.id,
-                                        tx,
-                                        `Margin Block ${order.symbol}`,
-                                        {
-                                            ledgerReferenceType,
-                                            skipWaj: true,
-                                            skipWalletSync: true,
-                                            sequenceCollector: ledgerSequences,
-                                            idempotencyKey: this.buildLedgerIdempotencyKey(order, "MARGIN_BLOCK"),
-                                        }
-                                    )
-                                );
-                            }
                         }
 
-                        promises.push(PositionService.updatePosition(tx, trade));
-                        await Promise.all(promises);
+                        await PositionService.updatePosition(tx, trade);
+                    } else if (instrument.instrumentType === "OPTION") {
+                        const premiumAmount = LedgerService.multiplyByInteger(
+                            finalExecutionPrice.toString(),
+                            fillQuantity
+                        );
+                        const premiumLeg = order.side === "BUY"
+                            ? "OPTION_PREMIUM_DEBIT"
+                            : "OPTION_PREMIUM_CREDIT";
+                        const premiumReferenceType = this.resolveOptionPremiumReferenceType(
+                            order.side,
+                            closingQuantity,
+                            openingQuantity
+                        );
+
+                        if (order.side === "BUY") {
+                            await WalletService.debitBalance(
+                                order.userId,
+                                premiumAmount,
+                                "OPTION_PREMIUM_DEBIT",
+                                trade.id,
+                                tx,
+                                `Option Premium Debit ${order.symbol}`,
+                                {
+                                    ledgerReferenceType: premiumReferenceType,
+                                    skipWaj: true,
+                                    skipWalletSync: true,
+                                    sequenceCollector: ledgerSequences,
+                                    idempotencyKey: this.buildLedgerIdempotencyKey(order, premiumLeg),
+                                }
+                            );
+                        } else {
+                            await WalletService.creditProceeds(
+                                order.userId,
+                                premiumAmount,
+                                trade.id,
+                                tx,
+                                `Option Premium Credit ${order.symbol}`,
+                                {
+                                    ledgerReferenceType: premiumReferenceType,
+                                    skipWaj: true,
+                                    skipWalletSync: true,
+                                    sequenceCollector: ledgerSequences,
+                                    idempotencyKey: this.buildLedgerIdempotencyKey(order, premiumLeg),
+                                }
+                            );
+                        }
+
+                        await PositionService.updatePosition(tx, trade);
+
+                        if (optionMarginToBlock > 0) {
+                            await WalletService.debitBalance(
+                                order.userId,
+                                optionMarginToBlock,
+                                "OPTION_MARGIN_BLOCK",
+                                trade.id,
+                                tx,
+                                `Option Margin Block ${order.symbol}`,
+                                {
+                                    ledgerReferenceType: "OPTION_MARGIN_BLOCK",
+                                    skipWaj: true,
+                                    skipWalletSync: true,
+                                    sequenceCollector: ledgerSequences,
+                                    idempotencyKey: this.buildLedgerIdempotencyKey(order, "OPTION_MARGIN_BLOCK"),
+                                }
+                            );
+                        }
+
+                        if (optionMarginToRelease > 0) {
+                            await WalletService.releaseMarginBlock(
+                                order.userId,
+                                optionMarginToRelease,
+                                trade.id,
+                                tx,
+                                `Option Margin Release ${order.symbol}`,
+                                {
+                                    ledgerReferenceType: "OPTION_MARGIN_RELEASE",
+                                    skipWaj: true,
+                                    skipWalletSync: true,
+                                    sequenceCollector: ledgerSequences,
+                                    idempotencyKey: this.buildLedgerIdempotencyKey(order, "OPTION_MARGIN_RELEASE"),
+                                }
+                            );
+                        }
+                    } else {
+                        throw new ApiError(
+                            `Unsupported instrumentType for execution: ${instrument.instrumentType}`,
+                            400,
+                            "INVALID_INSTRUMENT_TYPE"
+                        );
                     }
 
                     await WalletService.recalculateFromLedger(order.userId, tx);

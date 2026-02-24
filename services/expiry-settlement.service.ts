@@ -12,8 +12,8 @@ import { realTimeMarketService } from "@/services/realtime-market.service";
 import { UpstoxService } from "@/services/upstox.service";
 import { isTradingEnabled } from "@/lib/system-control";
 
-type OptionType = "CALL" | "PUT";
-type PriceSource = "REALTIME" | "MTM" | "PREV_CLOSE";
+type OptionType = "CE" | "PE";
+type PriceSource = "REALTIME" | "MTM" | "PREV_CLOSE" | "SYNTHETIC";
 type SettlementWindowStatus = "SKIPPED_WINDOW" | "NO_EXPIRIES" | "SETTLED";
 
 type SettlementPositionRow = {
@@ -40,6 +40,7 @@ type PriceResolution = {
 const IST_TIME_ZONE = "Asia/Kolkata";
 const SETTLEMENT_WINDOW_START_MINUTES = 15 * 60 + 30;
 const STALE_TICK_MS = Number(process.env.SETTLEMENT_STALE_TICK_MAX_AGE_SECONDS ?? "10") * 1000;
+const SETTLEMENT_SYNTHETIC_PRICE = Math.max(1, Number(process.env.SETTLEMENT_SYNTHETIC_PRICE ?? "100"));
 const EPSILON = 0.000001;
 
 function toIstParts(date: Date): { year: number; month: number; day: number; hour: number; minute: number } {
@@ -77,13 +78,6 @@ function isTickFresh(lastUpdated: Date | undefined, nowMs: number): boolean {
     const updatedMs = lastUpdated.getTime();
     const ageMs = nowMs - updatedMs;
     return Number.isFinite(ageMs) && ageMs >= -5000 && ageMs <= STALE_TICK_MS;
-}
-
-function parseOptionType(symbol: string): OptionType | null {
-    const normalized = String(symbol || "").trim().toUpperCase();
-    if (normalized.endsWith("CE")) return "CALL";
-    if (normalized.endsWith("PE")) return "PUT";
-    return null;
 }
 
 function round2(value: number): number {
@@ -224,7 +218,10 @@ export class ExpirySettlementService {
             return settledCount;
         }
 
-        const optionType = parseOptionType(instrument.tradingsymbol);
+        const optionTypeRaw = String(instrument.optionType || "").toUpperCase();
+        const optionType = optionTypeRaw === "CE" || optionTypeRaw === "PE"
+            ? (optionTypeRaw as OptionType)
+            : null;
         const strike = Number(instrument.strike);
         if (!optionType || !Number.isFinite(strike)) {
             throw new ApiError("Invalid option contract metadata for expiry settlement", 500, "SETTLEMENT_METADATA_INVALID");
@@ -233,11 +230,12 @@ export class ExpirySettlementService {
         const underlyingToken = await this.resolveUnderlyingToken(instrument);
         const underlying = await this.resolveDeterministicPrice(underlyingToken, now);
         const intrinsicRaw =
-            optionType === "CALL"
+            optionType === "CE"
                 ? Math.max(underlying.price - strike, 0)
                 : Math.max(strike - underlying.price, 0);
         const intrinsic = round2(Math.max(0, intrinsicRaw));
-        const settlementPrice = Math.max(Number(instrument.tickSize || "0.05"), intrinsic);
+        // Cash-settled option expiry: ITM settles to intrinsic, OTM settles to zero.
+        const settlementPrice = intrinsic;
 
         for (const row of openPositions) {
             const settled = await this.settleUserPosition({
@@ -372,16 +370,18 @@ export class ExpirySettlementService {
         instrumentToken: string,
         repo: InstrumentRepository
     ): Promise<Instrument | null> {
-        const cached = repo.get(instrumentToken);
-        if (cached) return cached;
-
         const [row] = await db
             .select()
             .from(instruments)
             .where(eq(instruments.instrumentToken, instrumentToken))
             .limit(1);
 
-        return row || null;
+        if (row) return row;
+
+        const cached = repo.get(instrumentToken);
+        if (cached) return cached;
+
+        return null;
     }
 
     private async resolveDeterministicPrice(instrumentToken: string, now: Date): Promise<PriceResolution> {
@@ -430,7 +430,18 @@ export class ExpirySettlementService {
                 : NaN;
 
         if (!Number.isFinite(resolvedClose) || resolvedClose <= 0) {
-            throw new ApiError(`Settlement price unavailable for ${instrumentToken}`, 503, "SETTLEMENT_PRICE_UNAVAILABLE");
+            logger.error(
+                {
+                    event: "SETTLEMENT_SYNTHETIC_PRICE_USED",
+                    instrumentToken,
+                    fallbackPrice: SETTLEMENT_SYNTHETIC_PRICE,
+                },
+                "Settlement price unavailable, using synthetic fallback"
+            );
+            return {
+                price: SETTLEMENT_SYNTHETIC_PRICE,
+                source: "SYNTHETIC",
+            };
         }
 
         this.closePriceCache.set(instrumentToken, resolvedClose);

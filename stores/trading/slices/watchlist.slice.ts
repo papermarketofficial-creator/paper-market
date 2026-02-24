@@ -119,7 +119,12 @@ export const createWatchlistSlice: MarketSlice<any> = (set, get) => ({
           instrumentToken: item.instrumentToken, // Crucial for adding to watchlist
           expiryDate: item.expiry ? new Date(item.expiry) : undefined,
           strikePrice: item.strike ? parseFloat(item.strike) : undefined,
-          optionType: item.instrumentType === 'OPTION' ? (item.tradingsymbol.endsWith('CE') ? 'CE' : 'PE') : undefined
+          optionType:
+            item.instrumentType === 'OPTION' &&
+            (String(item.optionType || '').toUpperCase() === 'CE' ||
+              String(item.optionType || '').toUpperCase() === 'PE')
+              ? String(item.optionType).toUpperCase()
+              : undefined
         }));
         set({ searchResults: results });
       }
