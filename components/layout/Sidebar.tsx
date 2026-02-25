@@ -31,7 +31,12 @@ const navItems: NavItem[] = [
   {
     to: '/trade',
     icon: TrendingUp,
-    label: 'Trade'
+    label: 'Trade',
+    children: [
+      { to: '/trade/equity', icon: TrendingUp, label: 'Equity' },
+      { to: '/trade/futures', icon: BarChart3, label: 'Futures' },
+      { to: '/trade/options', icon: BookOpen, label: 'Options' },
+    ],
   },
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/positions', icon: Briefcase, label: 'Positions' },
@@ -86,7 +91,8 @@ export function Sidebar({ isAdmin = true, mobileOpen, setMobileOpen }: SidebarPr
               {/* Children Items */}
               <div className="space-y-1">
                 {item.children.map((child) => {
-                  const isChildActive = pathname === child.to;
+                  const isChildActive =
+                    pathname === child.to || pathname?.startsWith(`${child.to}/`);
                   
                   return (
                     <NavLink

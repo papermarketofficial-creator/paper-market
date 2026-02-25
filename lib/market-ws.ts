@@ -13,13 +13,20 @@
 
 type MessageHandler = (data: any) => void;
 
+export type MarketWsErrorContext = {
+    kind: 'transport_error';
+    url: string;
+    readyState: number;
+    reconnectAttempts: number;
+};
+
 interface MarketWsOptions {
     url: string;
     onTick?: MessageHandler;
     onCandle?: MessageHandler;
     onConnected?: () => void;
     onDisconnected?: () => void;
-    onError?: (error: Event) => void;
+    onError?: (error: MarketWsErrorContext) => void;
 }
 
 class MarketWebSocket {
@@ -30,7 +37,7 @@ class MarketWebSocket {
         candle?: MessageHandler;
         connected?: () => void;
         disconnected?: () => void;
-        error?: (error: Event) => void;
+        error?: (error: MarketWsErrorContext) => void;
     } = {};
     private reconnectAttempts = 0;
     private readonly MAX_RECONNECT_ATTEMPTS = 5;
@@ -105,9 +112,20 @@ class MarketWebSocket {
                 }
             };
 
-            this.ws.onerror = (error) => {
-                console.error('❌ WebSocket error:', error);
-                this.handlers.error?.(error);
+            this.ws.onerror = () => {
+                const context: MarketWsErrorContext = {
+                    kind: 'transport_error',
+                    url: this.url,
+                    readyState: this.ws?.readyState ?? WebSocket.CLOSED,
+                    reconnectAttempts: this.reconnectAttempts,
+                };
+
+                // Browser WS error events intentionally hide details and usually stringify to {}.
+                // Log normalized context once and let onclose drive reconnect handling.
+                if (!this.isIntentionalClose) {
+                    console.warn('⚠️ WebSocket transport error (details unavailable in browser)', context);
+                }
+                this.handlers.error?.(context);
             };
 
             this.ws.onclose = () => {

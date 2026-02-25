@@ -287,8 +287,7 @@ export const useMarketStream = () => {
                     setIsConnected(false);
                     subscribedKeysRef.current = new Set();
                 },
-                onError: (error) => {
-                    console.error('Market WebSocket error:', error);
+                onError: () => {
                     setIsConnected(false);
                     subscribedKeysRef.current = new Set();
                 }

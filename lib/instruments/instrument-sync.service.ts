@@ -29,6 +29,15 @@ const UPSTOX_INSTRUMENTS_URL =
 const BATCH_SIZE = 2000;
 const SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
 const MIN_SAFETY_COUNT = 50000; // CRITICAL: Never sync if upstream gives less than this
+const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const PURGE_EXPIRED_INSTRUMENTS =
+  TRUE_VALUES.has(String(process.env.PURGE_EXPIRED_INSTRUMENTS ?? 'false').trim().toLowerCase());
+const DEFAULT_INSTRUMENT_PURGE_RETENTION_DAYS = 30;
+const INSTRUMENT_PURGE_RETENTION_DAYS = (() => {
+  const parsed = Number(process.env.INSTRUMENT_PURGE_RETENTION_DAYS ?? DEFAULT_INSTRUMENT_PURGE_RETENTION_DAYS);
+  if (!Number.isFinite(parsed)) return DEFAULT_INSTRUMENT_PURGE_RETENTION_DAYS;
+  return Math.max(0, Math.floor(parsed));
+})();
 const DEFAULT_MIN_FUTURES_COUNT = 500;
 const MIN_FUTURES_COUNT = (() => {
   const parsed = Number(process.env.MIN_FUTURES_COUNT ?? DEFAULT_MIN_FUTURES_COUNT);
@@ -73,6 +82,7 @@ export interface SyncReport {
   upserted: number;
   updated: number;
   deactivated: number;
+  purged: number;
   errors: number;
   duration: number;
   startTime: Date;
@@ -406,6 +416,44 @@ async function deactivateMissing(syncedTokens: Set<string>): Promise<number> {
 }
 
 /**
+ * Optional hygiene purge:
+ * - only inactive instruments
+ * - expired before retention window
+ * - never referenced by orders/trades/positions/watchlists
+ */
+async function purgeExpiredInactiveUnreferenced(retentionDays: number): Promise<number> {
+    if (!PURGE_EXPIRED_INSTRUMENTS) return 0;
+
+    try {
+        const deleted = await db.execute(sql`
+            DELETE FROM "instruments" i
+            WHERE i."isActive" = false
+              AND i.expiry IS NOT NULL
+              AND i.expiry < NOW() - (${retentionDays} * interval '1 day')
+              AND NOT EXISTS (
+                SELECT 1 FROM "orders" o WHERE o."instrumentToken" = i."instrumentToken"
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM "trades" t WHERE t."instrumentToken" = i."instrumentToken"
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM "positions" p WHERE p."instrumentToken" = i."instrumentToken"
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM "watchlist_items" w WHERE w."instrumentToken" = i."instrumentToken"
+              )
+        `);
+
+        const purged = Number(deleted.rowCount || 0);
+        logger.info({ purged, retentionDays }, 'Expired inactive instrument purge complete');
+        return purged;
+    } catch (err) {
+        logger.error({ err, retentionDays }, 'Expired inactive instrument purge failed');
+        return 0;
+    }
+}
+
+/**
  * MAIN SYNC
  */
 export async function syncInstruments(): Promise<SyncReport> {
@@ -467,6 +515,7 @@ export async function syncInstruments(): Promise<SyncReport> {
 
     // 5. Deactivate Missing (Diff)
     const deactivated = await deactivateMissing(currentTokens);
+    const purged = await purgeExpiredInactiveUnreferenced(INSTRUMENT_PURGE_RETENTION_DAYS);
     
     const endTime = new Date();
     const duration = endTime.getTime() - startTime.getTime();
@@ -478,6 +527,7 @@ export async function syncInstruments(): Promise<SyncReport> {
       upserted: parsed.length,
       updated: 0, 
       deactivated,
+      purged,
       errors: invalid,
       duration,
       startTime,

@@ -13,6 +13,20 @@ function parseMode(raw: string | null): DerivativeMode {
     return "FUTURE";
 }
 
+function toIstDayNumber(date: Date): number {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(date);
+
+    const year = Number(parts.find((part) => part.type === "year")?.value || 0);
+    const month = Number(parts.find((part) => part.type === "month")?.value || 0);
+    const day = Number(parts.find((part) => part.type === "day")?.value || 0);
+    return Date.UTC(year, month - 1, day);
+}
+
 function mapToStockShape(inst: any) {
     const strike = Number(inst.strike ?? 0);
     const hasStrike = Number.isFinite(strike) && strike > 0;
@@ -58,10 +72,17 @@ export async function GET(req: NextRequest) {
             ? instrumentRepository.getOptionsByUnderlying(underlying)
             : instrumentRepository.getFuturesByUnderlying(underlying);
 
-        const instruments = source.map(mapToStockShape);
+        // Hide expired derivatives from UI selectors (date-only in IST).
+        const todayIst = toIstDayNumber(new Date());
+        const visibleSource = source.filter((inst) => {
+            if (!inst.expiry) return true;
+            return toIstDayNumber(inst.expiry) >= todayIst;
+        });
+
+        const instruments = visibleSource.map(mapToStockShape);
         const expiries = Array.from(
             new Set(
-                source
+                visibleSource
                     .filter((inst) => inst.expiry)
                     .map((inst) => inst.expiry!.toISOString())
             )

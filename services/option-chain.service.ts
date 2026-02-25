@@ -30,6 +30,19 @@ function toDateKey(raw: Date | string | null | undefined): string {
     return value.toISOString().slice(0, 10);
 }
 
+function toIstDayNumber(date: Date): number {
+    const parts = new Intl.DateTimeFormat("en-US", {
+        timeZone: "Asia/Kolkata",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+    }).formatToParts(date);
+    const year = Number(parts.find((part) => part.type === "year")?.value || 0);
+    const month = Number(parts.find((part) => part.type === "month")?.value || 0);
+    const day = Number(parts.find((part) => part.type === "day")?.value || 0);
+    return Date.UTC(year, month - 1, day);
+}
+
 function roundToTwo(value: number): number {
     return Math.round(value * 100) / 100;
 }
@@ -82,7 +95,7 @@ export class OptionChainService {
         const normalizedUnderlying = normalizeUnderlyingSymbol(input.symbol);
 
         // 1. Fetch all options for the underlying
-        const options = await db
+        const optionsRaw = await db
             .select()
             .from(instruments)
             .where(
@@ -93,6 +106,12 @@ export class OptionChainService {
                 )
             )
             .orderBy(asc(instruments.expiry), asc(instruments.strike));
+
+        const todayIst = toIstDayNumber(new Date());
+        const options = optionsRaw.filter((item) => {
+            if (!item.expiry) return false;
+            return toIstDayNumber(item.expiry) >= todayIst;
+        });
 
         if (options.length === 0) {
             return { underlying: normalizedUnderlying, strikes: [] };

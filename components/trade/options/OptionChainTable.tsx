@@ -138,10 +138,17 @@ const ChainRow = memo(function ChainRow({
       </button>
 
       {/* ── STRIKE CENTER ── */}
-      <div
+      <button
+        type="button"
+        onClick={() => {
+          const fallbackSymbol = row.ce?.symbol || row.pe?.symbol;
+          if (fallbackSymbol) onSelectSymbol(fallbackSymbol);
+        }}
+        disabled={!row.ce?.symbol && !row.pe?.symbol}
         className={cn(
-          "flex items-center justify-center bg-white/[0.025] px-2 py-2",
-          isAtm && "bg-[#2d6cff]/[0.15]"
+          "flex items-center justify-center bg-white/[0.025] px-2 py-2 transition-colors",
+          isAtm && "bg-[#2d6cff]/[0.15]",
+          (row.ce?.symbol || row.pe?.symbol) && "hover:bg-white/[0.06]"
         )}
       >
         {isAtm && (
@@ -157,7 +164,7 @@ const ChainRow = memo(function ChainRow({
         >
           {row.strike.toLocaleString("en-IN")}
         </span>
-      </div>
+      </button>
 
       {/* ── PUT (PE) SIDE — left-aligned ── */}
       <button

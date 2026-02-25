@@ -42,12 +42,14 @@ async function main() {
         const upserted = (report.upserted ?? 0).toLocaleString();
         const updated = (report.updated ?? 0).toLocaleString();
         const deactivated = (report.deactivated ?? 0).toLocaleString();
+        const purged = (report.purged ?? 0).toLocaleString();
         const errors = (report.errors ?? 0).toLocaleString();
         const durationSec = ((report.duration ?? 0) / 1000).toFixed(2);
 
         console.log(`   Total Processed:  ${total}`);
         console.log(`   Upserted (Valid): ${upserted} (Includes updates)`);
         console.log(`   Deactivated:      ${deactivated}`);
+        console.log(`   Purged (Old):     ${purged}`);
         console.log(`   Skipped/Invalid:  ${errors}`);
         console.log(`   Duration:         ${durationSec}s`);
         console.log('');
