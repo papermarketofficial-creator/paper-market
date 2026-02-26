@@ -47,42 +47,32 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   const { activeWatchlistId, setActiveWatchlistId, setStocks } = useMarketStore();
   const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
   const selectQuote = useMarketStore((state) => state.selectQuote);
-  const watchlistIdSet = useMemo(() => new Set(watchlists.map((w) => w.id)), [watchlists]);
-  const normalizedActiveWatchlistId = useMemo(() => {
-    if (!activeWatchlistId) return null;
-    return watchlistIdSet.has(activeWatchlistId) ? activeWatchlistId : null;
-  }, [activeWatchlistId, watchlistIdSet]);
-  const normalizedPreferredWatchlistId = useMemo(() => {
-    if (!preferredWatchlistId) return null;
-    return watchlistIdSet.has(preferredWatchlistId) ? preferredWatchlistId : null;
-  }, [preferredWatchlistId, watchlistIdSet]);
-  const resolvedWatchlistId = useMemo(() => {
-    if (normalizedActiveWatchlistId) return normalizedActiveWatchlistId;
-    if (normalizedPreferredWatchlistId) return normalizedPreferredWatchlistId;
-    const defaultWatchlist = watchlists.find(w => w.isDefault) || watchlists[0];
-    return defaultWatchlist?.id ?? null;
-  }, [normalizedActiveWatchlistId, normalizedPreferredWatchlistId, watchlists]);
-  
-  // Keep selected watchlist valid and auto-select fallback/default when needed.
+  // 1️⃣ Determine the actual watchlist ID to use
+  let resolvedWatchlistId = activeWatchlistId;
+  const activeIsValid = watchlists.some(w => w.id === resolvedWatchlistId);
+
+  if (!activeIsValid) {
+    // If not valid, try from local storage first
+    let fallback = preferredWatchlistId;
+    if (!fallback || !watchlists.some(w => w.id === fallback)) {
+        // Otherwise use default or first available
+        fallback = watchlists.find(w => w.isDefault)?.id || watchlists[0]?.id || null;
+    }
+    resolvedWatchlistId = fallback;
+  }
+
+  // 2️⃣ Sync back to Zustand & LocalStorage
   useEffect(() => {
     if (isLoadingWatchlists) return;
-
-    if (!resolvedWatchlistId) {
-      if (activeWatchlistId !== null) {
-        setActiveWatchlistId(null);
-      }
-      return;
+    
+    if (resolvedWatchlistId && activeWatchlistId !== resolvedWatchlistId) {
+       setActiveWatchlistId(resolvedWatchlistId);
     }
-
-    if (activeWatchlistId !== resolvedWatchlistId) {
-      setActiveWatchlistId(resolvedWatchlistId);
+    
+    if (resolvedWatchlistId) {
+      localStorage.setItem('lastWatchlistId', resolvedWatchlistId);
     }
   }, [resolvedWatchlistId, activeWatchlistId, isLoadingWatchlists, setActiveWatchlistId]);
-
-  useEffect(() => {
-    if (!resolvedWatchlistId) return;
-    localStorage.setItem('lastWatchlistId', resolvedWatchlistId);
-  }, [resolvedWatchlistId]);
   
   // Fetch instruments for active watchlist
   const { data: queryInstruments = [], isLoading: isLoadingInstruments } = useWatchlistInstruments(resolvedWatchlistId);
