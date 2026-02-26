@@ -80,7 +80,7 @@ export default function TradePage() {
         }}
       />
 
-      <div className="h-[calc(100vh-3.5rem)] overflow-hidden flex flex-col gap-2 p-2">
+      <div className="h-full min-h-0 overflow-hidden flex flex-col">
         <div className="flex-1 min-h-0">
           <TradeLayout
             watchlist={
@@ -98,7 +98,11 @@ export default function TradePage() {
                 {selectedSymbol ? (
                   <Suspense fallback={<Skeleton className="h-full w-full" />}>
                     <div className="h-full w-full">
-                      <CandlestickChartComponent symbol={selectedSymbol} onSearchClick={() => setSearchModalOpen(true)} />
+                      <CandlestickChartComponent
+                        symbol={selectedSymbol}
+                        instrumentKey={selectedStock?.instrumentToken}
+                        onSearchClick={() => setSearchModalOpen(true)}
+                      />
                     </div>
                   </Suspense>
                 ) : (

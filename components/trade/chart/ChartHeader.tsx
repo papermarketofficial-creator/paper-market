@@ -1,6 +1,6 @@
 "use client";
 
-import { useAnalysisStore } from '@/stores/trading/analysis.store';
+import { ChartStyle, useAnalysisStore } from '@/stores/trading/analysis.store';
 import { IndicatorsMenu } from './IndicatorsMenu';
 import { Button } from '@/components/ui/button';
 import { 
@@ -14,10 +14,17 @@ import {
   CandlestickChart
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 interface ChartHeaderProps {
   symbol: string;
   displaySymbol?: string;
+  chartStyle?: ChartStyle;
   isInstantOrderActive: boolean;
   onToggleInstantOrder: () => void;
   onUndo?: () => void;
@@ -25,6 +32,7 @@ interface ChartHeaderProps {
   onScreenshot?: () => void;
   onMaximize?: () => void;
   onSearchClick?: () => void;
+  onChartStyleChange?: (style: ChartStyle) => void;
   isLoading?: boolean;
   isFullscreen?: boolean;
 }
@@ -32,6 +40,7 @@ interface ChartHeaderProps {
 export function ChartHeader({ 
     symbol, 
     displaySymbol,
+    chartStyle = "CANDLE",
     isInstantOrderActive, 
     onToggleInstantOrder,
     onUndo,
@@ -39,6 +48,7 @@ export function ChartHeader({
     onScreenshot,
     onMaximize,
     onSearchClick,
+    onChartStyleChange,
     isLoading = false,
     isFullscreen = false
 }: ChartHeaderProps) {
@@ -46,6 +56,12 @@ export function ChartHeader({
   const headerText = displaySymbol || symbol;
 
   const ranges = ['5Y', '1Y', '6M', '3M', '1M', '5D', '1D'];
+  const styleLabels = {
+    CANDLE: "Candles",
+    LINE: "Line",
+    AREA: "Area",
+    HEIKIN_ASHI: "Heikin Ashi",
+  } as const;
 
   return (
     <div className="flex items-center justify-between p-1.5 border-b border-border bg-card z-30 shrink-0 h-11">
@@ -111,10 +127,26 @@ export function ChartHeader({
 
         <Separator orientation="vertical" className="h-4 bg-border/50 mx-1" />
 
-        {/* Chart Style (Candles) */}
-        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground">
-           <CandlestickChart className="h-4 w-4" />
-        </Button>
+        {/* Chart Style */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground">
+              <CandlestickChart className="h-4 w-4" />
+              <span>{styleLabels[chartStyle]}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-40">
+            {(["CANDLE", "LINE", "AREA", "HEIKIN_ASHI"] as const).map((style) => (
+              <DropdownMenuItem
+                key={style}
+                onClick={() => onChartStyleChange?.(style)}
+                className={chartStyle === style ? "bg-accent font-medium" : ""}
+              >
+                {styleLabels[style]}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Indicators */}
         <IndicatorsMenu symbol={symbol} />

@@ -361,7 +361,7 @@ function OptionsStrategyBuilderContent() {
   );
 
   return (
-    <div className="h-[calc(100vh-3.5rem)] overflow-y-auto bg-[#090d18] px-2 py-2">
+    <div className="h-full min-h-0 overflow-y-auto bg-[#090d18] px-2 py-2">
       <div className="flex min-h-full flex-col gap-2">
         <div className="rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(17,24,39,.76),rgba(10,14,24,.92))] px-4 py-3">
           <div className="flex flex-wrap items-center gap-2">

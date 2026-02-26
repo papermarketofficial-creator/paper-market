@@ -27,16 +27,12 @@ interface DrawingManagerProps {
 export function DrawingManager({ chart, mainSeries, width, height, data, symbol }: DrawingManagerProps) {
     const {
         activeTool,
-        interactionState,
-        startDrawing,
-        updateDraft,
-        commitDrawing,
         addDrawing
     } = useAnalysisStore();
-
-    useEffect(() => {
-        console.log(`[DrawingManager] Mounted. Data Length: ${data?.length}, Width: ${width}, Height: ${height}`);
-    }, [data?.length, width, height]);
+    const selectedDrawingIds = useAnalysisStore((state) => state.selectedDrawingIds);
+    const setSelectedDrawings = useAnalysisStore((state) => state.setSelectedDrawings);
+    const toggleDrawingSelection = useAnalysisStore((state) => state.toggleDrawingSelection);
+    const deleteSelectedDrawings = useAnalysisStore((state) => state.deleteSelectedDrawings);
 
     // Selector for drawings specific to this symbol
     // Fix: Select specific symbol state directly to avoid new reference loops from getDrawings() helper
@@ -202,7 +198,9 @@ export function DrawingManager({ chart, mainSeries, width, height, data, symbol 
             // Delete / Backspace: Remove selected
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 const state = useAnalysisStore.getState();
-                if (state.selectedDrawingId) {
+                if (state.selectedDrawingIds.length > 0) {
+                    deleteSelectedDrawings(symbol);
+                } else if (state.selectedDrawingId) {
                     state.deleteDrawing(symbol, state.selectedDrawingId);
                 }
             }
@@ -221,7 +219,7 @@ export function DrawingManager({ chart, mainSeries, width, height, data, symbol 
             chart.timeScale().unsubscribeVisibleTimeRangeChange(handleTimeChange);
             window.removeEventListener('keydown', handleKeyDown);
         };
-    }, [chart, symbol]); // Removed interactionState.status dependency as we use getState()
+    }, [chart, symbol, deleteSelectedDrawings]); // Removed interactionState.status dependency as we use getState()
 
 
     // --- 3. Interaction Handlers ---
@@ -269,36 +267,60 @@ export function DrawingManager({ chart, mainSeries, width, height, data, symbol 
 
         // --- Dragging Logic (Moved from Store) ---
         if (drawingId && activeTool !== 'trendline' && activeTool !== 'ray' && activeTool !== 'rectangle' && activeTool !== 'horizontal-line' && activeTool !== 'text') {
-            // If clicking a drawing with a non-drawing tool (like Cursor or Select)
             e.preventDefault();
             e.stopPropagation();
 
             const drawing = drawings.find(d => d.id === drawingId);
+            const additiveSelect = e.ctrlKey || e.metaKey;
 
-            // If Select Tool, handle selection logic
-            if (activeTool === 'select') {
-                // If already selected, maybe just drag? 
-                // If not selected, select it.
-                // For simple drag-drop request:
+            if (drawing && activeTool === 'select') {
+                if (additiveSelect) {
+                    toggleDrawingSelection(drawingId, true);
+                } else if (!selectedDrawingIds.includes(drawingId)) {
+                    setSelectedDrawings([drawingId]);
+                }
             }
 
-            // Allow dragging if tool is Cursor or Select
-            if (drawing && (activeTool === 'cursor' || activeTool === 'select' || activeTool === 'crosshair')) {
-                // Start Drag
+            // Allow dragging if tool is Cursor or Select and drawing is not locked
+            if (
+                drawing &&
+                !drawing.locked &&
+                activeTool === 'select'
+            ) {
+                const targetIds =
+                    selectedDrawingIds.includes(drawingId) && selectedDrawingIds.length > 0
+                        ? selectedDrawingIds
+                        : [drawingId];
+
+                const draggableIds = targetIds.filter((id) => {
+                    const item = drawings.find((drawingItem) => drawingItem.id === id);
+                    return item && !item.locked;
+                });
+                if (draggableIds.length === 0) return;
+
+                const originals: Record<string, import('@/stores/trading/analysis.store').Drawing> = {};
+                draggableIds.forEach((id) => {
+                    const item = drawings.find((drawingItem) => drawingItem.id === id);
+                    if (item) originals[id] = item;
+                });
+
                 setLocalInteraction({
                     status: 'dragging',
                     startPoint: point,
                     currentPoint: point,
-                    activeDrawingIds: [drawingId], // Todo: Support Group
-                    originalDrawings: { [drawingId]: drawing }
+                    activeDrawingIds: draggableIds,
+                    originalDrawings: originals
                 });
-                useAnalysisStore.getState().setSelectedDrawing(drawingId); // Keep selection sync
+                setSelectedDrawings(draggableIds);
                 return;
             }
         }
 
         // Background Click
         if (activeTool === 'select' && !drawingId) {
+            if (!(e.ctrlKey || e.metaKey)) {
+                setSelectedDrawings([]);
+            }
             // Start Box Selection
             setLocalInteraction({
                 status: 'box-selecting',
@@ -442,6 +464,9 @@ export function DrawingManager({ chart, mainSeries, width, height, data, symbol 
                 } else if (d.type === 'text') {
                     const pt = (d as any).point;
                     inside = (pt.time as number >= tMin && pt.time as number <= tMax && pt.price >= priceMin && pt.price <= priceMax);
+                } else if (d.type === 'horizontal-line') {
+                    const linePrice = Number((d as any).price);
+                    inside = linePrice >= priceMin && linePrice <= priceMax;
                 }
 
                 if (inside) {
@@ -449,19 +474,7 @@ export function DrawingManager({ chart, mainSeries, width, height, data, symbol 
                 }
             });
 
-            // Update Selection
-            // We need a proper Multi-Select Store Action or just iterate
-            // Assuming we added setSelectedDrawings or just rely on 'selectedDrawingId' for single...
-            // User wants group move.
-            // Let's assume we can set activeDrawingIds in local state for next drag?
-            // But we need VISUAL feedback of selection.
-            // For now, let's just Log and maybe select the first one?
-            // Todo: Implement true multi-select store.
-            if (selectedIds.length > 0) {
-                // For now, hack: Just highlight the first one to show it works, 
-                // but in reality we need the store to hold "selectedDrawingIds[]"
-                // useAnalysisStore.getState().setSelectedDrawings(selectedIds);
-            }
+            setSelectedDrawings(selectedIds);
         }
 
         setLocalInteraction({
@@ -583,16 +596,17 @@ export function DrawingManager({ chart, mainSeries, width, height, data, symbol 
     }
 
     const isDrawingTool = activeTool === 'trendline' || activeTool === 'ray' || activeTool === 'horizontal-line' || activeTool === 'rectangle' || activeTool === 'text';
+    const isInteractiveTool = isDrawingTool || activeTool === 'select';
 
     return (
         <>
             <div
-                className={`absolute inset-0 z-50 ${isDrawingTool ? 'pointer-events-auto' : 'pointer-events-none'}`}
+                className={`absolute inset-0 z-50 ${isInteractiveTool ? 'pointer-events-auto' : 'pointer-events-none'}`}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 style={{
-                    cursor: (activeTool !== 'cursor' && activeTool !== 'crosshair') ? 'crosshair' : 'default'
+                    cursor: isDrawingTool ? 'crosshair' : (activeTool === 'select' ? 'default' : 'auto')
                 }}
             >
                 <svg
@@ -607,7 +621,8 @@ export function DrawingManager({ chart, mainSeries, width, height, data, symbol 
                 >
                     {/* Render Committed Drawings */}
                     {drawings.map(d => {
-                        const isSelected = useAnalysisStore.getState().selectedDrawingId === d.id;
+                        if (d.visible === false) return null;
+                        const isSelected = selectedDrawingIds.includes(d.id);
 
                         if (d.type === 'trendline' || d.type === 'ray') {
                             const twoPoint = d as TwoPointDrawing;

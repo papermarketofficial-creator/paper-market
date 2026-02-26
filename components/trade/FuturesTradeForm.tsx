@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ArrowRight, CandlestickChart, Search, ShieldCheck, Zap } from "lucide-react";
+import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatExpiryLabel } from "@/lib/expiry-utils";
 import { Stock } from "@/types/equity.types";
@@ -278,67 +277,70 @@ export function FuturesTradeForm({
 
   return (
     <TooltipProvider>
-      <Card className="bg-card border-border h-full rounded-sm shadow-none flex flex-col min-h-0">
-        <CardHeader className="p-3 border-b border-border/60">
+      <div className="h-full min-h-0 border border-white/[0.06] bg-[#0d1422] flex flex-col">
+        <div className="shrink-0 p-3 border-b border-white/[0.06]">
           <div className="flex items-center justify-between gap-2">
-            <CardTitle className="text-sm font-semibold text-foreground">Futures Order</CardTitle>
+            <div className="text-xs font-semibold tracking-wide text-slate-300 uppercase">
+              Futures Order
+            </div>
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-8 text-xs"
+              className="h-7 text-[11px] border-white/[0.1] bg-white/[0.02] hover:bg-white/[0.08]"
               onClick={onOpenSearch}
             >
               <Search className="h-3.5 w-3.5 mr-1.5" />
-              Search Contract
+              Search
             </Button>
           </div>
-        </CardHeader>
+        </div>
 
-        <CardContent className="space-y-4 p-3 flex-1 min-h-0 overflow-y-auto">
+        <div className="space-y-3 p-3 flex-1 min-h-0 overflow-y-auto [scrollbar-width:thin]">
           {!selectedStock ? (
-            <div className="h-full min-h-[220px] rounded-sm border border-border bg-gradient-to-b from-muted/35 to-muted/10 p-4 flex flex-col justify-between">
-              <div>
-                <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3 py-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-                  <CandlestickChart className="h-3.5 w-3.5 text-primary" />
-                  Ready To Trade Futures
-                </div>
-
-                <h3 className="mt-3 text-sm font-semibold text-foreground">
-                  Select a contract to unlock order controls
-                </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Search index or stock futures and place orders with live margin preview.
+            <div className="h-full min-h-[220px] border border-white/[0.06] bg-[#0b1120] p-4 flex flex-col">
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-white">Select a futures contract</h3>
+                <p className="text-xs text-slate-400">
+                  Search by symbol and choose an expiry to start placing orders.
                 </p>
-
-                <div className="mt-4 grid grid-cols-1 gap-2">
-                  <div className="flex items-center gap-2 rounded-sm border border-border/60 bg-background/40 px-2.5 py-2 text-xs text-muted-foreground">
-                    <Zap className="h-3.5 w-3.5 text-amber-400" />
-                    Fast contract lookup by symbol
-                  </div>
-                  <div className="flex items-center gap-2 rounded-sm border border-border/60 bg-background/40 px-2.5 py-2 text-xs text-muted-foreground">
-                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" />
-                    Token-routed, safety-validated orders
-                  </div>
-                </div>
+                <p className="text-[11px] text-slate-500">
+                  Supports index and stock futures with live margin preview.
+                </p>
               </div>
 
-              <Button type="button" className="mt-4 h-9 text-xs font-semibold" onClick={onOpenSearch}>
+              <div className="mt-4 space-y-1.5 text-[11px] text-slate-400">
+                <p>• Contract details and expiry controls</p>
+                <p>• Order side, quantity, SL and target</p>
+                <p>• Margin and post-trade risk checks</p>
+              </div>
+
+              <Button
+                type="button"
+                className="mt-auto h-9 text-xs font-semibold bg-[#2d6cff] hover:bg-[#3c76ff] text-white"
+                onClick={onOpenSearch}
+              >
+                <Search className="mr-1.5 h-3.5 w-3.5" />
                 Search Futures Contract
-                <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
               </Button>
             </div>
           ) : (
             <>
-              <div className="space-y-3 rounded-sm bg-muted/30 p-3 border border-border">
+              <div className="space-y-3 bg-[#0b1120] p-3 border border-white/[0.06]">
                 <div className="flex items-center justify-between gap-2">
                   <div>
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <p className="text-[10px] uppercase tracking-wider text-slate-500">
                       Selected Contract
                     </p>
-                    <p className="text-sm font-bold text-foreground mt-1">{selectedStock.symbol}</p>
+                    <p className="text-sm font-bold text-white mt-1">{selectedStock.symbol}</p>
                   </div>
-                  <Button type="button" variant="secondary" size="sm" className="h-8 text-xs" onClick={onOpenSearch}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-[11px] border-white/[0.1] bg-white/[0.02] hover:bg-white/[0.08]"
+                    onClick={onOpenSearch}
+                  >
                     Change
                   </Button>
                 </div>
@@ -349,7 +351,7 @@ export function FuturesTradeForm({
                       Expiry
                     </Label>
                     <Select value={selectedExpiry} onValueChange={setSelectedExpiry}>
-                      <SelectTrigger className="bg-input border-border h-8 rounded-sm text-xs">
+                      <SelectTrigger className="bg-[#0f172a] border-white/[0.1] h-8 rounded-sm text-xs">
                         <SelectValue placeholder="Select Expiry" />
                       </SelectTrigger>
                       <SelectContent>
@@ -364,8 +366,8 @@ export function FuturesTradeForm({
                 )}
               </div>
 
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold text-muted-foreground">{selectedStock.symbol}</span>
+              <div className="flex items-center justify-between border border-white/[0.06] bg-[#0b1120] px-3 py-2">
+                <span className="text-sm font-bold text-slate-300">{selectedStock.symbol}</span>
                 <span className={cn("text-lg font-bold font-mono", selectedStock.change >= 0 ? "text-trade-buy" : "text-trade-sell")}>
                   Rs {currentPrice.toLocaleString()}
                 </span>
@@ -453,8 +455,8 @@ export function FuturesTradeForm({
               </Button>
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <OrderProcessingDialog
         isProcessing={isOrderProcessing}

@@ -26,7 +26,7 @@ export function TradingLayout({
   hasPanelContent,
 }: TradingLayoutProps) {
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col overflow-hidden bg-[#080c16]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#080c16]">
       {/* ── TOP STRIP ── */}
       <div className="shrink-0 border-b border-white/[0.06]">{header}</div>
 

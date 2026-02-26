@@ -88,8 +88,13 @@ export function Sidebar({ isAdmin = true, mobileOpen, setMobileOpen }: SidebarPr
                 <item.icon className="h-5 w-5" />
               </div>
 
-              {/* Children Items */}
-              <div className="space-y-1">
+              {/* Children Items: keep hidden when desktop sidebar is collapsed */}
+              <div className={cn(
+                "space-y-1 transition-all duration-200",
+                "max-md:block max-md:opacity-100 max-md:max-h-none",
+                "md:opacity-0 md:max-h-0 md:overflow-hidden md:pointer-events-none",
+                "md:group-hover:opacity-100 md:group-hover:max-h-96 md:group-hover:pointer-events-auto"
+              )}>
                 {item.children.map((child) => {
                   const isChildActive =
                     pathname === child.to || pathname?.startsWith(`${child.to}/`);

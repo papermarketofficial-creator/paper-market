@@ -18,6 +18,23 @@ function buildOptionChainKey(symbol: string, expiry?: string): string {
   return `${normalizedSymbol}::${expiryKey || "NEAREST"}`;
 }
 
+function quoteLookupKeys(rawKey: string): string[] {
+  const normalized = toInstrumentKey(rawKey);
+  if (!normalized) return [];
+
+  const keys = new Set<string>([normalized]);
+  const colonVariant = normalized.replace("|", ":");
+  const pipeVariant = normalized.replace(":", "|");
+
+  if (colonVariant) keys.add(colonVariant);
+  if (pipeVariant) keys.add(pipeVariant);
+
+  const raw = String(rawKey || "").trim();
+  if (raw) keys.add(raw);
+
+  return Array.from(keys);
+}
+
 function buildQuoteFromTick(
   previousQuote: Quote | undefined,
   tick: { instrumentKey: string; symbol?: string; price: number; close?: number; timestamp?: number }
@@ -104,10 +121,10 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
       if (!seed) return state;
       const nextQuote = buildQuoteFromTick(state.quotesByInstrument[seed.instrumentKey], tick);
       if (!nextQuote) return state;
-      const nextQuotesByInstrument = {
-        ...state.quotesByInstrument,
-        [nextQuote.instrumentKey]: nextQuote,
-      };
+      const nextQuotesByInstrument = { ...state.quotesByInstrument };
+      for (const key of quoteLookupKeys(tick.instrumentKey || nextQuote.instrumentKey)) {
+        nextQuotesByInstrument[key] = nextQuote;
+      }
 
       return {
         quotesByInstrument: nextQuotesByInstrument,
@@ -131,7 +148,9 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
         if (!seed) continue;
         const nextQuote = buildQuoteFromTick(nextByKey[seed.instrumentKey], tick);
         if (!nextQuote) continue;
-        nextByKey[nextQuote.instrumentKey] = nextQuote;
+        for (const key of quoteLookupKeys(tick.instrumentKey || nextQuote.instrumentKey)) {
+          nextByKey[key] = nextQuote;
+        }
         latestPrice = nextQuote.price;
       }
 
@@ -144,6 +163,15 @@ export const createLiveUpdatesSlice: MarketSlice<any> = (set, get) => ({
   },
 
   selectQuote: (instrumentKeyOrSymbol: string) => {
+    const keyCandidates = quoteLookupKeys(instrumentKeyOrSymbol);
+    if (keyCandidates.length > 0) {
+      const quoteBook = get().quotesByInstrument;
+      for (const candidate of keyCandidates) {
+        const byInstrument = quoteBook[candidate];
+        if (byInstrument) return byInstrument;
+      }
+    }
+
     const instrumentKey = toInstrumentKey(instrumentKeyOrSymbol);
     if (instrumentKey) {
       const byInstrument = get().quotesByInstrument[instrumentKey];

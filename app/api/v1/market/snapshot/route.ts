@@ -23,12 +23,15 @@ import {
   toCanonicalSymbol,
   toInstrumentKey,
 } from "@/lib/market/symbol-normalization";
+import { isMarketOpenIST } from "@/lib/market-hours";
 
 export const dynamic = "force-dynamic";
 
 const INDEX_SYMBOLS = ["NIFTY 50", "NIFTY BANK", "NIFTY FIN SERVICE"] as const;
 const ONE_MINUTE_MS = 60_000;
 const SNAPSHOT_STATE_KEY = "__pmSnapshotRouteState";
+const SNAPSHOT_OPEN_MAX_AGE_MS = 2 * ONE_MINUTE_MS;
+const SNAPSHOT_CLOSED_MAX_AGE_MS = 30 * ONE_MINUTE_MS;
 
 type SymbolRow = {
   symbol: string | null;
@@ -101,6 +104,14 @@ const getSnapshotRouteState = (): SnapshotRouteState => {
 const toFinitePositive = (value: unknown): number | null => {
   const num = Number(value);
   return Number.isFinite(num) && num > 0 ? num : null;
+};
+
+const isSnapshotRecordStale = (record: MarketLtpCacheRecord, nowMs: number): boolean => {
+  const maxAgeMs = isMarketOpenIST(new Date(nowMs))
+    ? SNAPSHOT_OPEN_MAX_AGE_MS
+    : SNAPSHOT_CLOSED_MAX_AGE_MS;
+  const ageMs = nowMs - Number(record.timestamp || 0);
+  return ageMs < 0 || ageMs > maxAgeMs;
 };
 
 const resolveInstrumentKey = (value: string): string => {
@@ -336,10 +347,12 @@ export async function GET() {
     if (redis) {
       const redisStart = performance.now();
       try {
+        const nowMs = Date.now();
         const cacheValues = await redis.mget(...requestedInstruments.map((key) => ltpKey(key)));
         cacheValues.forEach((value, idx) => {
           const parsed = parseMarketLtpCacheRecord(value);
           if (!parsed) return;
+          if (isSnapshotRecordStale(parsed, nowMs)) return;
 
           if (!parsed.symbol) {
             parsed.symbol = symbolByInstrument.get(parsed.instrumentKey);

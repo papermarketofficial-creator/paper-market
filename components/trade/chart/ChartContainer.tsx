@@ -2,9 +2,8 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { CandlestickData, HistogramData, IChartApi, Time } from 'lightweight-charts';
-import { useAnalysisStore } from '@/stores/trading/analysis.store';
+import { Drawing, IndicatorConfig, useAnalysisStore } from '@/stores/trading/analysis.store';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { SMA, RSI, MACD, EMA, BollingerBands } from 'technicalindicators';
 import { useMarketStore } from '@/stores/trading/market.store';
 import { IndicatorsMenu } from './IndicatorsMenu';
 import { ChartHeader } from './ChartHeader';
@@ -13,6 +12,9 @@ import { ChartTradingPanel } from './ChartTradingPanel';
 import { ChartLoadingIndicator } from './ChartLoadingIndicator';
 import { debounce } from '@/lib/utils/debounce';
 import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normalization';
+import { computeIndicators, scheduleIndicatorComputation, type ComputedIndicator } from '@/lib/analysis/indicator-engine';
+import { trackAnalysisEvent } from '@/lib/analysis/telemetry';
+import { Eye, EyeOff, Lock, Unlock, Trash2 } from 'lucide-react';
 
 // Dynamic imports to avoid SSR issues with LWC
 const BaseChart = dynamic(() => import('./BaseChart').then(mod => mod.BaseChart), { ssr: false });
@@ -24,6 +26,9 @@ interface ChartContainerProps {
   instrumentKey?: string;
   onSearchClick?: () => void;
 }
+
+const EMPTY_INDICATORS: IndicatorConfig[] = [];
+const EMPTY_DRAWINGS: Drawing[] = [];
 
 // Reuse the generation logic from previous file for now (Phase 1)
 const INITIAL_VISIBLE_BARS_BY_RANGE: Record<string, number> = {
@@ -43,14 +48,22 @@ const INITIAL_VISIBLE_BARS_BY_RANGE: Record<string, number> = {
 
 export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchClick }: ChartContainerProps) {
   const canonicalSymbol = toCanonicalSymbol(symbol);
+  const analysisV2Enabled = process.env.NEXT_PUBLIC_ANALYSIS_V2 === "true";
   const {
     isAnalysisMode,
     setAnalysisMode,
     activeTool,
-    getIndicators,
-    getDrawings,
     timeframe,
-    range // Read Range
+    range,
+    setChartStyleForSymbol,
+    hotkeysEnabled,
+    setActiveTool,
+    selectedDrawingIds,
+    setSelectedDrawingsLocked,
+    deleteSelectedDrawings,
+    setDrawingVisibility,
+    updateIndicator,
+    removeIndicator,
   } = useAnalysisStore();
 
   const {
@@ -74,10 +87,53 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
     }
     return toInstrumentKey(stocksBySymbol?.[canonicalSymbol]?.instrumentToken || canonicalSymbol);
   }, [instrumentKey, stocksBySymbol, canonicalSymbol]);
-  const selectedQuote = useMarketStore((state) => state.quotesByInstrument[resolvedInstrumentKey]);
+  const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
+  const selectQuote = useMarketStore((state) => state.selectQuote);
+  const selectedStockSnapshot = stocksBySymbol?.[canonicalSymbol];
+  const selectedQuote = useMemo(() => {
+    const candidateKeys = [
+      resolvedInstrumentKey,
+      selectedStockSnapshot?.instrumentToken,
+      canonicalSymbol,
+      symbol,
+    ]
+      .map((value) => String(value || "").trim())
+      .filter(Boolean);
 
-  const indicators = getIndicators(symbol);
-  const drawings = getDrawings(symbol);
+    for (const raw of candidateKeys) {
+      const normalized = toInstrumentKey(raw);
+      const lookupKeys = new Set<string>([raw, normalized]);
+      if (normalized) {
+        lookupKeys.add(normalized.replace("|", ":"));
+        lookupKeys.add(normalized.replace(":", "|"));
+      }
+
+      for (const key of lookupKeys) {
+        const hit = quotesByInstrument[key];
+        if (hit) return hit;
+      }
+    }
+
+    return (
+      selectQuote(resolvedInstrumentKey) ||
+      selectQuote(selectedStockSnapshot?.instrumentToken || "") ||
+      selectQuote(canonicalSymbol) ||
+      null
+    );
+  }, [
+    canonicalSymbol,
+    quotesByInstrument,
+    resolvedInstrumentKey,
+    selectQuote,
+    selectedStockSnapshot?.instrumentToken,
+    symbol,
+  ]);
+
+  const indicators = useAnalysisStore((state) => state.symbolState[symbol]?.indicators ?? EMPTY_INDICATORS);
+  const drawings = useAnalysisStore((state) => state.symbolState[symbol]?.drawings ?? EMPTY_DRAWINGS);
+  const chartStyle = useAnalysisStore(
+    (state) => state.chartStyleBySymbol[symbol] || state.symbolState[symbol]?.chartStyle || state.chartStyle
+  );
 
   // Use state from store
   const data = historicalData;
@@ -123,7 +179,14 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
   // Keep selected chart last price aligned with the same quote source used by watchlist/status bar.
   useEffect(() => {
     const quotePrice = Number(selectedQuote?.price);
-    if (!Number.isFinite(quotePrice) || quotePrice <= 0) return;
+    const snapshotPrice = Number(selectedStockSnapshot?.price);
+    const effectivePrice =
+      Number.isFinite(quotePrice) && quotePrice > 0
+        ? quotePrice
+        : Number.isFinite(snapshotPrice) && snapshotPrice > 0
+        ? snapshotPrice
+        : 0;
+    if (!Number.isFinite(effectivePrice) || effectivePrice <= 0) return;
 
     const state = useMarketStore.getState();
     if (state.simulatedInstrumentKey !== resolvedInstrumentKey || state.historicalData.length === 0) return;
@@ -133,161 +196,76 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
     if (!lastCandle) return;
 
     const currentClose = Number(lastCandle.close);
-    if (Number.isFinite(currentClose) && Math.abs(currentClose - quotePrice) < 0.0001) {
-      if (Number(state.livePrice) !== quotePrice) {
-        useMarketStore.setState({ livePrice: quotePrice });
+    if (Number.isFinite(currentClose) && Math.abs(currentClose - effectivePrice) < 0.0001) {
+      if (Number(state.livePrice) !== effectivePrice) {
+        useMarketStore.setState({ livePrice: effectivePrice });
       }
       return;
     }
 
     const patchedCandle = {
       ...lastCandle,
-      close: quotePrice,
-      high: Math.max(Number(lastCandle.high), quotePrice),
-      low: Math.min(Number(lastCandle.low), quotePrice),
+      close: effectivePrice,
+      high: Math.max(Number(lastCandle.high), effectivePrice),
+      low: Math.min(Number(lastCandle.low), effectivePrice),
     };
 
     useMarketStore.setState({
       historicalData: [...state.historicalData.slice(0, -1), patchedCandle],
-      livePrice: quotePrice,
+      livePrice: effectivePrice,
     });
-  }, [resolvedInstrumentKey, selectedQuote?.price]);
-  // ... (Indicators calc remains same) ...
-  // Indictor logic omitted for brevity in replace, only targeting Data Fetching block?
-  // No, I need to keep the file valid. I will target the top part only.
+  }, [resolvedInstrumentKey, selectedQuote?.price, selectedStockSnapshot?.price]);
+  const [computedIndicators, setComputedIndicators] = useState<ComputedIndicator[]>([]);
+  const [hoveredCandle, setHoveredCandle] = useState<{
+    time?: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  } | null>(null);
 
-  // 3. Event Handlers
-  // Removed handleChartClick as DrawingManager handles it now.
+  useEffect(() => {
+    setHoveredCandle(null);
+  }, [symbol, resolvedInstrumentKey, range]);
 
-  // chartProps definition moved to end of component
+  useEffect(() => {
+    if (data.length === 0 || indicators.length === 0) {
+      setComputedIndicators((previous) => (previous.length === 0 ? previous : []));
+      return;
+    }
 
-  // 2. Indicator Calculation (Memoized & Safe)
-  const computedIndicators = useMemo(() => {
-    if (data.length === 0) return [];
+    const startedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
 
-    const closes = data.map(d => d.close as number);
-
-    return indicators.map(ind => {
-      // Safety Guard: Insufficient data
-      const period = ind.period || 14;
-      if (data.length < period) return { config: ind, data: [] };
-
-      let results: any = [];
-
-      try {
-        if (ind.type === 'SMA') {
-          const sma = SMA.calculate({ period, values: closes });
-          results = sma.map((val, i) => {
-            const dataIndex = i + period - 1;
-            if (!data[dataIndex]) return null;
-            return { time: data[dataIndex].time, value: val };
-          }).filter(Boolean);
-          return { config: ind, data: results };
-        }
-        else if (ind.type === 'EMA') {
-          const ema = EMA.calculate({ period, values: closes });
-          results = ema.map((val, i) => {
-            const dataIndex = i + period - 1;
-            if (!data[dataIndex]) return null;
-            return { time: data[dataIndex].time, value: val };
-          }).filter(Boolean);
-          return { config: ind, data: results };
-        }
-        else if (ind.type === 'BB') {
-          const bb = BollingerBands.calculate({ period, stdDev: 2, values: closes });
-          // BB returns { middle, upper, lower }
-          // We need to map this to 3 series or similar. For simplicity, we'll return complex data and handle in BaseChart
-          // Or simpler: just return Main Line (Middle) here? No, user wants Bands.
-          // We'll structure it like MACD (series object)
-
-          results = bb.map((val, i) => {
-            const dataIndex = i + period - 1;
-            if (!data[dataIndex]) return null;
-            return {
-              time: data[dataIndex].time,
-              middle: val.middle,
-              upper: val.upper,
-              lower: val.lower
-            };
-          }).filter(Boolean);
-
-          // Extract into separate arrays for lightweight-charts
-          const middle = results.map((r: any) => ({ time: r.time, value: r.middle }));
-          const upper = results.map((r: any) => ({ time: r.time, value: r.upper }));
-          const lower = results.map((r: any) => ({ time: r.time, value: r.lower }));
-
-          return {
-            config: ind,
-            data: middle, // Default to middle for generic renderers
-            series: {
-              middle,
-              upper,
-              lower
-            }
-          };
-        }
-        else if (ind.type === 'RSI') {
-          const rsi = RSI.calculate({ period, values: closes });
-          results = rsi.map((val, i) => {
-            const dataIndex = i + period;
-            if (!data[dataIndex]) return null;
-            return { time: data[dataIndex].time, value: val };
-          }).filter(Boolean);
-          return { config: ind, data: results };
-        }
-        else if (ind.type === 'MACD') {
-          const fast = ind.fastPeriod || 12;
-          const slow = ind.slowPeriod || 26;
-          const signal = ind.signalPeriod || 9;
-
-          if (data.length < (slow + signal)) return { config: ind, data: [] };
-
-          const macd = MACD.calculate({
-            values: closes,
-            fastPeriod: fast,
-            slowPeriod: slow,
-            signalPeriod: signal,
-            SimpleMAOscillator: false,
-            SimpleMASignal: false
+    const scheduler = scheduleIndicatorComputation(
+      () =>
+        computeIndicators({
+          symbol,
+          instrumentKey: resolvedInstrumentKey,
+          candles: data as any,
+          indicators,
+        }),
+      (result) => {
+        const endedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const elapsedMs = endedAt - startedAt;
+        if (elapsedMs > 40) {
+          trackAnalysisEvent({
+            name: "indicator_compute_slow",
+            level: "warn",
+            payload: {
+              symbol,
+              instrumentKey: resolvedInstrumentKey,
+              indicatorCount: indicators.length,
+              candleCount: data.length,
+              elapsedMs: Math.round(elapsedMs),
+            },
           });
-
-          // Align results
-          const offset = data.length - macd.length;
-
-          const mapSafe = (val: number, i: number) => {
-            const d = data[i + offset];
-            return d ? { time: d.time, value: val } : null;
-          };
-
-          const macdData = macd.map((val, i) => val.MACD !== undefined ? mapSafe(val.MACD, i) : null).filter(Boolean);
-          const signalData = macd.map((val, i) => val.signal !== undefined ? mapSafe(val.signal, i) : null).filter(Boolean);
-          const histogramData = macd.map((val, i) => {
-            const d = data[i + offset];
-            return d ? {
-              time: d.time,
-              value: val.histogram,
-              color: (val.histogram || 0) > 0 ? '#26a69a' : '#ef5350'
-            } : null;
-          }).filter(Boolean);
-
-          return {
-            config: ind,
-            data: macdData,
-            series: {
-              macd: macdData,
-              signal: signalData,
-              histogram: histogramData
-            }
-          };
         }
-      } catch (e) {
-        console.error("Indicator Calc Error", e);
-        return { config: ind, data: [] };
+        setComputedIndicators(result);
       }
+    );
 
-      return { config: ind, data: [] };
-    });
-  }, [data, indicators]);
+    return () => scheduler.cancel();
+  }, [data, indicators, symbol, resolvedInstrumentKey]);
 
   const chartProps = {
     data,
@@ -295,7 +273,32 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
     indicators: computedIndicators,
     drawings,
     activeTool,
+    chartStyle,
+    showVolume: true,
   };
+
+  const latestCandle = useMemo(() => {
+    if (!historicalData.length) return null;
+    const last = historicalData[historicalData.length - 1] as any;
+    return {
+      time: Number(last.time),
+      open: Number(last.open),
+      high: Number(last.high),
+      low: Number(last.low),
+      close: Number(last.close),
+      volume: Number(volumeData?.[volumeData.length - 1]?.value),
+    };
+  }, [historicalData, volumeData]);
+
+  const legendData = hoveredCandle
+    ? {
+        ...hoveredCandle,
+        volume: latestCandle?.volume,
+      }
+    : latestCandle;
+  const activeChartStyle = chartStyle;
+  const legendUpColor = activeChartStyle === "HEIKIN_ASHI" ? "#22C55E" : "#089981";
+  const legendDownColor = activeChartStyle === "HEIKIN_ASHI" ? "#EF4444" : "#F23645";
 
   // State for Instant Order Panel
   const [showTradingPanel, setShowTradingPanel] = useState(false);
@@ -346,7 +349,6 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
       const framed = frameChartToLatest();
       if (framed) {
         initialFrameRequestIdRef.current = currentRequestId;
-        console.log(`Initial framing applied for request ${currentRequestId}`);
       }
     }, 0);
 
@@ -379,9 +381,6 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
       const targetCandles = Math.ceil(visibleBars * ONE_DAY_TARGET_MULTIPLIER);
 
       let pagesLoaded = 0;
-      console.log(
-        `1D warm-up start: request=${currentRequestId}, visibleBars=${visibleBars}, targetCandles=${targetCandles}`
-      );
 
       while (!cancelled) {
         const marketState = useMarketStore.getState();
@@ -389,48 +388,37 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
         const activeSymbol = toCanonicalSymbol(marketState.simulatedSymbol || '');
 
         if (marketState.currentRequestId !== currentRequestId) {
-          console.log(`1D warm-up aborted: request changed (${marketState.currentRequestId} != ${currentRequestId})`);
           break;
         }
         if (analysisRange !== normalizedRange) {
-          console.log(`1D warm-up aborted: range changed (${analysisRange})`);
           break;
         }
         if (activeSymbol && activeSymbol !== canonicalSymbol) {
-          console.log(`1D warm-up aborted: symbol changed (${activeSymbol} != ${canonicalSymbol})`);
           break;
         }
         if (marketState.historicalData.length >= targetCandles) {
-          console.log(`1D warm-up done: target reached (${marketState.historicalData.length}/${targetCandles})`);
           break;
         }
         if (!marketState.hasMoreHistory) {
-          console.log('1D warm-up done: no more history available');
           break;
         }
         if (pagesLoaded >= ONE_DAY_WARMUP_MAX_PAGES) {
-          console.log(`1D warm-up done: max pages reached (${ONE_DAY_WARMUP_MAX_PAGES})`);
           break;
         }
 
         const firstCandle = marketState.historicalData[0];
         const firstCandleTime = Number(firstCandle?.time);
         if (!Number.isFinite(firstCandleTime)) {
-          console.log('1D warm-up aborted: missing first candle time');
           break;
         }
 
         pagesLoaded += 1;
-        console.log(
-          `1D warm-up fetch ${pagesLoaded}/${ONE_DAY_WARMUP_MAX_PAGES}: before ${new Date(firstCandleTime * 1000).toISOString()}`
-        );
 
         await marketState.fetchMoreHistory(symbol, normalizedRange, firstCandleTime, resolvedInstrumentKey);
       }
 
       if (!cancelled) {
         frameChartToLatest();
-        console.log(`1D warm-up complete: request=${currentRequestId}, pagesLoaded=${pagesLoaded}`);
       }
     };
 
@@ -474,25 +462,89 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
     setAnalysisMode(true);
   };
 
+  useEffect(() => {
+    if (!analysisV2Enabled || !hotkeysEnabled) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const isTypingTarget =
+        tag === "input" || tag === "textarea" || tag === "select" || Boolean(target?.isContentEditable);
+      if (isTypingTarget) return;
+
+      const key = event.key.toLowerCase();
+      if ((event.ctrlKey || event.metaKey) && key === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          useAnalysisStore.getState().redoDrawing(symbol);
+        } else {
+          useAnalysisStore.getState().undoDrawing(symbol);
+        }
+        return;
+      }
+
+      if (event.altKey && key === "t") {
+        event.preventDefault();
+        setActiveTool("text");
+        return;
+      }
+
+      if (key === "delete" || key === "backspace") {
+        if (selectedDrawingIds.length > 0) {
+          event.preventDefault();
+          deleteSelectedDrawings(symbol);
+        }
+        return;
+      }
+
+      if (key === "escape") {
+        const state = useAnalysisStore.getState();
+        if (state.interactionState.status === "drawing") {
+          state.cancelDrawing();
+        } else {
+          state.setSelectedDrawings([]);
+          state.setActiveTool("cursor");
+        }
+        return;
+      }
+
+      const toolMap: Record<string, any> = {
+        v: "cursor",
+        c: "crosshair",
+        t: "trendline",
+        r: "rectangle",
+        h: "horizontal-line",
+      };
+      const mappedTool = toolMap[key];
+      if (mappedTool) {
+        event.preventDefault();
+        setActiveTool(mappedTool);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [analysisV2Enabled, hotkeysEnabled, setActiveTool, symbol, selectedDrawingIds.length, deleteSelectedDrawings]);
+
   // Infinite Scroll Handler (Memoized to prevent BaseChart re-creation loop)
   const handleLoadMore = useCallback(async () => {
-    console.log(`🔄 handleLoadMore called: historicalData.length=${historicalData.length}`);
-    
-    // ✅ Removed isFetchingHistory check - store's fetchMoreHistory has internal guard
     if (historicalData.length === 0) {
-        console.log('⏸️ handleLoadMore: No historical data yet, skipping');
         return;
     }
     
     const firstCandle = historicalData[0];
     const currentRange = (range || '1D').toUpperCase();
-    
-    const firstCandleTime = new Date((firstCandle.time as number) * 1000).toISOString();
-    console.log(`🔄 handleLoadMore: Loading more data before ${firstCandleTime}`);
-    console.log(`🔄 handleLoadMore: Parameters - symbol=${symbol}, range=${currentRange}, endTime=${firstCandle.time}`);
-    
+
     await fetchMoreHistory(symbol, currentRange, firstCandle.time as number, resolvedInstrumentKey);
   }, [historicalData, symbol, range, fetchMoreHistory, resolvedInstrumentKey]); // ✅ Stable dependencies only
+
+  const selectedDrawings = useMemo(
+    () => drawings.filter((drawing: any) => selectedDrawingIds.includes(drawing.id)),
+    [drawings, selectedDrawingIds]
+  );
+  const hasSelection = selectedDrawings.length > 0;
+  const allVisible = hasSelection && selectedDrawings.every((drawing: any) => drawing.visible !== false);
+  const allLocked = hasSelection && selectedDrawings.every((drawing: any) => drawing.locked === true);
  
   const leftToolbar = (
     <TooltipProvider delayDuration={0}>
@@ -509,7 +561,7 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
           <Tooltip key={tool.id}>
             <TooltipTrigger asChild>
               <div
-                onClick={() => useAnalysisStore.getState().setActiveTool(tool.id as any)}
+                onClick={() => setActiveTool(tool.id as any)}
                 className={`p-1.5 rounded-sm cursor-pointer transition-colors ${activeTool === tool.id ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -522,11 +574,71 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
             </TooltipContent>
           </Tooltip>
         ))}
+
+        <div className="w-6 h-px bg-border" />
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              disabled={!hasSelection}
+              onClick={() => {
+                selectedDrawings.forEach((drawing: any) => {
+                  setDrawingVisibility(symbol, drawing.id, !allVisible);
+                });
+              }}
+              className={`p-1.5 rounded-sm transition-colors ${
+                hasSelection ? 'text-muted-foreground hover:bg-accent hover:text-foreground' : 'text-muted-foreground/40 cursor-not-allowed'
+              }`}
+            >
+              {allVisible ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={10} className="bg-popover text-popover-foreground text-xs px-2 py-1">
+            <p>{allVisible ? "Hide Selected" : "Show Selected"}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              disabled={!hasSelection}
+              onClick={() => setSelectedDrawingsLocked(symbol, !allLocked)}
+              className={`p-1.5 rounded-sm transition-colors ${
+                hasSelection ? 'text-muted-foreground hover:bg-accent hover:text-foreground' : 'text-muted-foreground/40 cursor-not-allowed'
+              }`}
+            >
+              {allLocked ? <Unlock size={16} /> : <Lock size={16} />}
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={10} className="bg-popover text-popover-foreground text-xs px-2 py-1">
+            <p>{allLocked ? "Unlock Selected" : "Lock Selected"}</p>
+          </TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              disabled={!hasSelection}
+              onClick={() => deleteSelectedDrawings(symbol)}
+              className={`p-1.5 rounded-sm transition-colors ${
+                hasSelection ? 'text-muted-foreground hover:bg-accent hover:text-destructive' : 'text-muted-foreground/40 cursor-not-allowed'
+              }`}
+            >
+              <Trash2 size={16} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="right" sideOffset={10} className="bg-popover text-popover-foreground text-xs px-2 py-1">
+            <p>Delete Selected</p>
+          </TooltipContent>
+        </Tooltip>
       </div>
     </TooltipProvider>
   );
 
-  const renderChartArea = (chartHeight: number) => (
+  const renderChartArea = () => (
     <div className="relative flex-1 h-full min-w-0 bg-transparent flex flex-col">
       {showTradingPanel && <ChartTradingPanel symbol={symbol} />}
 
@@ -544,15 +656,52 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
         )}
 
         {historicalData.length > 0 && (
-          <BaseChart
-            {...chartProps}
-            height={chartHeight}
-            symbol={symbol}
-            instrumentKey={resolvedInstrumentKey}
-            range={range}
-            onChartReady={setChartApi}
-            onLoadMore={handleLoadMore}
-          />
+          <>
+            <BaseChart
+              {...chartProps}
+              symbol={symbol}
+              instrumentKey={resolvedInstrumentKey}
+              range={range}
+              onChartReady={setChartApi}
+              onLoadMore={handleLoadMore}
+              onHoverCandleChange={(candle) => {
+                if (!candle) {
+                  setHoveredCandle(null);
+                  return;
+                }
+                setHoveredCandle({
+                  time: Number(candle.time as number),
+                  open: Number((candle as any).open),
+                  high: Number((candle as any).high),
+                  low: Number((candle as any).low),
+                  close: Number((candle as any).close),
+                });
+              }}
+            />
+            <ChartOverlayLegend
+              symbol={headerSymbol || symbol}
+              data={legendData}
+              upColor={legendUpColor}
+              downColor={legendDownColor}
+              indicators={indicators.map((indicator) => ({
+                id: indicator.id,
+                label: indicator.type,
+                color: indicator.display.color,
+                visible: indicator.display.visible,
+              }))}
+              onToggleIndicatorVisibility={(id) => {
+                const target = indicators.find((indicator) => indicator.id === id);
+                if (!target) return;
+                updateIndicator(symbol, id, {
+                  display: {
+                    ...target.display,
+                    visible: !target.display.visible,
+                  },
+                });
+              }}
+              onRemoveIndicator={(id) => removeIndicator(symbol, id)}
+            />
+          </>
         )}
       </div>
     </div>
@@ -565,6 +714,7 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
           <ChartHeader
             symbol={symbol}
             displaySymbol={headerSymbol}
+            chartStyle={chartStyle}
             isInstantOrderActive={showTradingPanel}
             onToggleInstantOrder={() => setShowTradingPanel(!showTradingPanel)}
             onUndo={handleUndo}
@@ -572,13 +722,14 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
             onScreenshot={handleScreenshot}
             onMaximize={handleMaximize}
             onSearchClick={onSearchClick}
+            onChartStyleChange={(style) => setChartStyleForSymbol(symbol, style)}
             isLoading={isFetchingHistory && isInitialLoad}
             isFullscreen={false}
           />
 
           <div className="flex flex-1 relative min-h-0">
             {leftToolbar}
-            {renderChartArea(500)}
+            {renderChartArea()}
           </div>
         </div>
       )}
@@ -589,6 +740,7 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
             <ChartHeader
               symbol={symbol}
               displaySymbol={headerSymbol}
+              chartStyle={chartStyle}
               isInstantOrderActive={showTradingPanel}
               onToggleInstantOrder={() => setShowTradingPanel(!showTradingPanel)}
               onUndo={handleUndo}
@@ -596,13 +748,14 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
               onScreenshot={handleScreenshot}
               onMaximize={() => setAnalysisMode(false)}
               onSearchClick={onSearchClick}
+              onChartStyleChange={(style) => setChartStyleForSymbol(symbol, style)}
               isLoading={isFetchingHistory && isInitialLoad}
               isFullscreen={true}
             />
 
             <div className="flex flex-1 relative min-h-0">
               {leftToolbar}
-              {renderChartArea(window.innerHeight - 60)}
+              {renderChartArea()}
             </div>
           </div>
         </AnalysisOverlay>

@@ -3,10 +3,13 @@ import { tokenProvider } from "./token-provider.js";
 import { logger } from "../lib/logger.js";
 import protobuf from "protobufjs";
 import { readFileSync } from "fs";
-import { join } from "path";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
-// Load proto.json from the source directory
-const protoPath = join(process.cwd(), 'src', 'upstox', 'proto.json');
+// Resolve proto.json relative to this file — works in both dev (src/) and prod (dist/)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const protoPath = join(__dirname, 'proto.json');
 const protoJson = JSON.parse(readFileSync(protoPath, 'utf-8'));
 
 // ═══════════════════════════════════════════════════════════

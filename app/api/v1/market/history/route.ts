@@ -1,15 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { logger } from "@/lib/logger";
-import { CandleOrchestrator, type CandleResult } from "@/lib/market/candle-orchestrator";
-import { getRedis } from "@/lib/redis";
-import { getHistoryCacheTtlSeconds, historyKey } from "@/lib/market/market-cache";
+import {
+  CandleOrchestrator,
+  type CandleResult,
+} from "@/lib/market/candle-orchestrator";
 import { toInstrumentKey } from "@/lib/market/symbol-normalization";
 
 const ONE_MINUTE_MS = 60_000;
-const MAX_SYMBOLS_PER_REQUEST = Number(process.env.HISTORY_MAX_SYMBOLS_PER_REQUEST ?? 5);
-const MAX_HISTORY_REQUESTS_PER_MINUTE = Number(process.env.HISTORY_MAX_REQUESTS_PER_MINUTE ?? 30);
-const MAX_CONCURRENT_HISTORY_FETCHES = Number(process.env.HISTORY_MAX_CONCURRENT_FETCHES ?? 5);
+const MAX_SYMBOLS_PER_REQUEST = Number(
+  process.env.HISTORY_MAX_SYMBOLS_PER_REQUEST ?? 5,
+);
+const MAX_HISTORY_REQUESTS_PER_MINUTE = Number(
+  process.env.HISTORY_MAX_REQUESTS_PER_MINUTE ?? 30,
+);
+const MAX_CONCURRENT_HISTORY_FETCHES = Number(
+  process.env.HISTORY_MAX_CONCURRENT_FETCHES ?? 5,
+);
 const HISTORY_STATE_KEY = "__pmHistoryRouteState";
 
 type RateLimitBucket = { count: number; resetAt: number };
@@ -35,28 +42,6 @@ const parseListParam = (req: NextRequest, key: string): string[] =>
     .flatMap((value) => value.split(","))
     .map((value) => value.trim())
     .filter(Boolean);
-
-const parseCachedHistory = (value: unknown): CandleResult | null => {
-  const payload =
-    typeof value === "string"
-      ? (() => {
-          try {
-            return JSON.parse(value);
-          } catch {
-            return null;
-          }
-        })()
-      : value;
-
-  if (!payload || typeof payload !== "object") return null;
-
-  const parsed = payload as { candles?: unknown; volume?: unknown };
-  const candles = Array.isArray(parsed.candles) ? parsed.candles : null;
-  const volume = Array.isArray(parsed.volume) ? parsed.volume : null;
-  if (!candles || !volume) return null;
-
-  return { candles: candles as any[], volume: volume as any[] };
-};
 
 const getClientIp = (req: NextRequest): string | null => {
   const forwardedFor = req.headers.get("x-forwarded-for");
@@ -133,7 +118,7 @@ const getHistoryRouteState = (): HistoryRouteState => {
         history_rate_limited: state.metrics.rateLimited,
         history_inflight_requests: state.inflight.size,
       },
-      "History route metrics"
+      "History route metrics",
     );
 
     state.metrics.cacheHits = 0;
@@ -151,7 +136,10 @@ export async function GET(req: NextRequest) {
   try {
     const session = await auth();
     if (!session) {
-      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+      return NextResponse.json(
+        { success: false, error: "Unauthorized" },
+        { status: 401 },
+      );
     }
 
     const state = getHistoryRouteState();
@@ -160,30 +148,42 @@ export async function GET(req: NextRequest) {
       state.metrics.rateLimited += 1;
       return NextResponse.json(
         { success: false, error: "Rate limit exceeded for history requests" },
-        { status: 429 }
+        { status: 429 },
       );
     }
 
     const instrumentKeyInputs = parseListParam(req, "instrumentKey");
     const symbolInputs = parseListParam(req, "symbol");
 
-    if (instrumentKeyInputs.length > MAX_SYMBOLS_PER_REQUEST || symbolInputs.length > MAX_SYMBOLS_PER_REQUEST) {
+    if (
+      instrumentKeyInputs.length > MAX_SYMBOLS_PER_REQUEST ||
+      symbolInputs.length > MAX_SYMBOLS_PER_REQUEST
+    ) {
       return NextResponse.json(
-        { success: false, error: `Max symbols per request is ${MAX_SYMBOLS_PER_REQUEST}` },
-        { status: 400 }
+        {
+          success: false,
+          error: `Max symbols per request is ${MAX_SYMBOLS_PER_REQUEST}`,
+        },
+        { status: 400 },
       );
     }
 
     if (instrumentKeyInputs.length > 1 || symbolInputs.length > 1) {
       return NextResponse.json(
-        { success: false, error: "Batch history requests are not supported on this route" },
-        { status: 400 }
+        {
+          success: false,
+          error: "Batch history requests are not supported on this route",
+        },
+        { status: 400 },
       );
     }
 
     const symbol = symbolInputs[0] || null;
     const instrumentKeyParam = instrumentKeyInputs[0] || null;
-    const timeframe = req.nextUrl.searchParams.get("timeframe") || req.nextUrl.searchParams.get("interval") || undefined;
+    const timeframe =
+      req.nextUrl.searchParams.get("timeframe") ||
+      req.nextUrl.searchParams.get("interval") ||
+      undefined;
     const range = req.nextUrl.searchParams.get("range") || undefined;
     const toDate = req.nextUrl.searchParams.get("toDate") || undefined;
 
@@ -194,28 +194,23 @@ export async function GET(req: NextRequest) {
       const { UpstoxService } = await import("@/services/upstox.service");
       instrumentKey = await UpstoxService.resolveInstrumentKey(symbol);
     } else {
-      return NextResponse.json({ success: false, error: "Missing symbol or instrumentKey" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "Missing symbol or instrumentKey" },
+        { status: 400 },
+      );
     }
 
     if (!instrumentKey) {
-      return NextResponse.json({ success: false, error: "Invalid instrument key" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "Invalid instrument key" },
+        { status: 400 },
+      );
     }
 
-    const cacheKey = historyKey(instrumentKey, timeframe || "1m", range || "default", toDate);
-    const redis = getRedis();
-
-    if (redis) {
-      try {
-        const cached = await redis.get(cacheKey);
-        const parsed = parseCachedHistory(cached);
-        if (parsed) {
-          state.metrics.cacheHits += 1;
-          return NextResponse.json({ success: true, data: parsed });
-        }
-      } catch (error) {
-        logger.warn({ err: error, cacheKey }, "History Redis read failed");
-      }
-    }
+    // Singleflight key: deduplicate concurrent requests for the same candle set
+    // Historical candle caching uses the in-process LRU cache (lib/cache.ts),
+    // NOT Redis — full candle arrays (20–400 KB) are too expensive for Upstash free tier.
+    const cacheKey = `${instrumentKey}:${timeframe || "1m"}:${range || "default"}:${toDate || "latest"}`;
 
     state.metrics.cacheMisses += 1;
 
@@ -230,7 +225,7 @@ export async function GET(req: NextRequest) {
       state.metrics.rateLimited += 1;
       return NextResponse.json(
         { success: false, error: "History concurrency limit exceeded" },
-        { status: 429 }
+        { status: 429 },
       );
     }
 
@@ -249,13 +244,6 @@ export async function GET(req: NextRequest) {
     state.inflight.set(cacheKey, requestPromise);
     const data = await requestPromise;
 
-    if (redis) {
-      const ttlSeconds = getHistoryCacheTtlSeconds();
-      void redis.set(cacheKey, data, { ex: ttlSeconds }).catch((error) => {
-        logger.warn({ err: error, cacheKey }, "History Redis write failed");
-      });
-    }
-
     return NextResponse.json({
       success: true,
       data,
@@ -264,6 +252,9 @@ export async function GET(req: NextRequest) {
     if (process.env.DEBUG_MARKET === "true") {
       logger.error({ err: error }, "Historical API error");
     }
-    return NextResponse.json({ success: false, error: error?.message || "History fetch failed" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: error?.message || "History fetch failed" },
+      { status: 500 },
+    );
   }
 }

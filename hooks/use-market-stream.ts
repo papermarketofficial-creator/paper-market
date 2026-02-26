@@ -10,6 +10,8 @@ const CORE_INDEX_KEYS = [
     toInstrumentKey('NSE_INDEX|NIFTY BANK'),
     toInstrumentKey('NSE_INDEX|NIFTY FIN SERVICE'),
 ].filter(Boolean);
+const QUOTE_REFRESH_INTERVAL_MS = 20_000;
+const QUOTE_REQUEST_BATCH_SIZE = 80;
 
 function pickFirstFinite(...values: unknown[]): number | null {
     for (const value of values) {
@@ -17,6 +19,15 @@ function pickFirstFinite(...values: unknown[]): number | null {
         if (Number.isFinite(parsed)) return parsed;
     }
     return null;
+}
+
+function chunk<T>(arr: T[], size: number): T[][] {
+    if (size <= 0) return [arr];
+    const out: T[][] = [];
+    for (let i = 0; i < arr.length; i += size) {
+        out.push(arr.slice(i, i + size));
+    }
+    return out;
 }
 
 function resolveTradingSymbol(rawSymbol: unknown): string {
@@ -132,6 +143,76 @@ export const useMarketStream = () => {
         subscribedKeysRef.current = desired;
     }, [collectDesiredKeys]);
 
+    const refreshQuotesFromApi = useCallback(
+        async (requestedKeys: string[]) => {
+            const normalizedKeys = Array.from(
+                new Set(
+                    requestedKeys
+                        .map((key) => toInstrumentKey(key))
+                        .filter((key): key is string => Boolean(key))
+                )
+            );
+
+            if (normalizedKeys.length === 0) return;
+
+            const hydrated: Array<{
+                instrumentKey: string;
+                symbol?: string;
+                price: number;
+                close?: number;
+                timestamp?: number;
+            }> = [];
+
+            const batches = chunk(normalizedKeys, QUOTE_REQUEST_BATCH_SIZE);
+
+            for (const instrumentKeys of batches) {
+                try {
+                    const response = await fetch('/api/v1/market/quotes', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ instrumentKeys }),
+                        cache: 'no-store',
+                    });
+
+                    if (!response.ok) {
+                        continue;
+                    }
+
+                    const payload = await response.json();
+                    const quoteMap = payload?.data;
+                    if (!payload?.success || !quoteMap || typeof quoteMap !== 'object') {
+                        continue;
+                    }
+
+                    const now = Date.now();
+                    for (const [rawKey, quote] of Object.entries(quoteMap)) {
+                        const instrumentKey = toInstrumentKey(rawKey);
+                        const price = Number((quote as any)?.last_price);
+                        if (!instrumentKey || !Number.isFinite(price) || price <= 0) continue;
+
+                        const close = Number((quote as any)?.close_price);
+                        hydrated.push({
+                            instrumentKey,
+                            symbol: instrumentKey.split('|')[1] || instrumentKey,
+                            price,
+                            close: Number.isFinite(close) && close > 0 ? close : undefined,
+                            timestamp: now,
+                        });
+                    }
+                } catch {
+                    // Best-effort refresh only.
+                }
+            }
+
+            if (hydrated.length > 0) {
+                hydrateQuotes(hydrated);
+            }
+        },
+        [hydrateQuotes]
+    );
+
     // Re-sync subscriptions when instrument universe OR active chart instrument changes.
     useEffect(() => {
         if (isConnected) {
@@ -148,6 +229,30 @@ export const useMarketStream = () => {
         isConnected,
         syncSubscriptions,
     ]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const pollQuotesFallback = async () => {
+            if (cancelled) return;
+            const ws = wsRef.current;
+            if (ws?.isConnected()) return;
+
+            const desiredKeys = collectDesiredKeys();
+            if (desiredKeys.length === 0) return;
+            await refreshQuotesFromApi(desiredKeys);
+        };
+
+        void pollQuotesFallback();
+        const interval = setInterval(() => {
+            void pollQuotesFallback();
+        }, QUOTE_REFRESH_INTERVAL_MS);
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+        };
+    }, [collectDesiredKeys, refreshQuotesFromApi]);
 
     useEffect(() => {
         let cancelled = false;
@@ -268,6 +373,8 @@ export const useMarketStream = () => {
                 // Best effort hydration only.
             }
 
+            void refreshQuotesFromApi(collectDesiredKeys());
+
             if (cancelled) return;
 
             // ═══════════════════════════════════════════════════════════
@@ -309,7 +416,7 @@ export const useMarketStream = () => {
             // Note: We don't disconnect the WebSocket here as it's a singleton
             // It will be reused across component mounts
         };
-    }, [applyTick, hydrateQuotes, syncSubscriptions, updateLiveCandle]);
+    }, [applyTick, collectDesiredKeys, hydrateQuotes, refreshQuotesFromApi, syncSubscriptions, updateLiveCandle]);
 
     return { isConnected };
 };

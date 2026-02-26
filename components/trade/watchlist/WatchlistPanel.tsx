@@ -47,19 +47,37 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   const { activeWatchlistId, setActiveWatchlistId, setStocks } = useMarketStore();
   const quotesByInstrument = useMarketStore((state) => state.quotesByInstrument);
   const selectQuote = useMarketStore((state) => state.selectQuote);
+  const watchlistIdSet = useMemo(() => new Set(watchlists.map((w) => w.id)), [watchlists]);
+  const normalizedActiveWatchlistId = useMemo(() => {
+    if (!activeWatchlistId) return null;
+    return watchlistIdSet.has(activeWatchlistId) ? activeWatchlistId : null;
+  }, [activeWatchlistId, watchlistIdSet]);
+  const normalizedPreferredWatchlistId = useMemo(() => {
+    if (!preferredWatchlistId) return null;
+    return watchlistIdSet.has(preferredWatchlistId) ? preferredWatchlistId : null;
+  }, [preferredWatchlistId, watchlistIdSet]);
   const resolvedWatchlistId = useMemo(() => {
-    if (activeWatchlistId) return activeWatchlistId;
-    if (preferredWatchlistId) return preferredWatchlistId;
+    if (normalizedActiveWatchlistId) return normalizedActiveWatchlistId;
+    if (normalizedPreferredWatchlistId) return normalizedPreferredWatchlistId;
     const defaultWatchlist = watchlists.find(w => w.isDefault) || watchlists[0];
     return defaultWatchlist?.id ?? null;
-  }, [activeWatchlistId, preferredWatchlistId, watchlists]);
+  }, [normalizedActiveWatchlistId, normalizedPreferredWatchlistId, watchlists]);
   
-  // Set default watchlist on mount
+  // Keep selected watchlist valid and auto-select fallback/default when needed.
   useEffect(() => {
-    if (!activeWatchlistId && resolvedWatchlistId) {
+    if (isLoadingWatchlists) return;
+
+    if (!resolvedWatchlistId) {
+      if (activeWatchlistId !== null) {
+        setActiveWatchlistId(null);
+      }
+      return;
+    }
+
+    if (activeWatchlistId !== resolvedWatchlistId) {
       setActiveWatchlistId(resolvedWatchlistId);
     }
-  }, [resolvedWatchlistId, activeWatchlistId, setActiveWatchlistId]);
+  }, [resolvedWatchlistId, activeWatchlistId, isLoadingWatchlists, setActiveWatchlistId]);
 
   useEffect(() => {
     if (!resolvedWatchlistId) return;
@@ -147,7 +165,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
                 onClick={() => setActiveWatchlistId(watchlist.id)}
                 className={cn(
                   "text-xs cursor-pointer",
-                  watchlist.id === activeWatchlistId && "bg-accent font-medium"
+                  watchlist.id === resolvedWatchlistId && "bg-accent font-medium"
                 )}
               >
                 {watchlist.name}

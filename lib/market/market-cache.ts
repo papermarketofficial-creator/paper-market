@@ -1,13 +1,8 @@
 import { toInstrumentKey } from "@/lib/market/symbol-normalization";
-import { isMarketOpenIST } from "@/lib/market-hours";
 
 export const CACHE_TTL_SECONDS = 3600;
 export const CACHE_TTL_JITTER_MAX_SECONDS = 300;
 export const cachePrefix = `pm:${process.env.NODE_ENV ?? "development"}`;
-export const HISTORY_OPEN_TTL_MIN_SECONDS = 3600;
-export const HISTORY_OPEN_TTL_MAX_SECONDS = 10_800;
-export const HISTORY_CLOSED_TTL_MIN_SECONDS = 86_400;
-export const HISTORY_CLOSED_TTL_MAX_SECONDS = 172_800;
 
 export interface MarketLtpCacheRecord {
   instrumentKey: string;
@@ -53,26 +48,8 @@ export const prevCloseKey = (instrumentKey: string): string =>
 export const metaKey = (instrumentKey: string): string =>
   `${cachePrefix}:v1:meta:${normalizeKey(instrumentKey)}`;
 
-export const historyKey = (
-  instrumentKey: string,
-  interval: string,
-  range: string,
-  toDate?: string
-): string =>
-  `${cachePrefix}:v1:history:${toCacheSegment(normalizeKey(instrumentKey))}:${toCacheSegment(interval)}:${toCacheSegment(
-    range
-  )}:${toCacheSegment(toDate || "latest")}`;
-
 export const getCacheTtlWithJitter = (): number =>
   CACHE_TTL_SECONDS + Math.floor(Math.random() * CACHE_TTL_JITTER_MAX_SECONDS);
-
-const randomInRange = (minSeconds: number, maxSeconds: number): number =>
-  minSeconds + Math.floor(Math.random() * (maxSeconds - minSeconds + 1));
-
-export const getHistoryCacheTtlSeconds = (): number =>
-  isMarketOpenIST()
-    ? randomInRange(HISTORY_OPEN_TTL_MIN_SECONDS, HISTORY_OPEN_TTL_MAX_SECONDS)
-    : randomInRange(HISTORY_CLOSED_TTL_MIN_SECONDS, HISTORY_CLOSED_TTL_MAX_SECONDS);
 
 export function parseMarketLtpCacheRecord(value: unknown): MarketLtpCacheRecord | null {
   const obj = asObject(value);

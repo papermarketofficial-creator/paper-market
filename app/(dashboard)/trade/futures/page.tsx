@@ -2,13 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GlobalSearchModal } from "@/components/trade/search/GlobalSearchModal";
 import { FuturesTradeForm } from "@/components/trade/FuturesTradeForm";
 import { Stock } from "@/types/equity.types";
 import { symbolToIndexInstrumentKey } from "@/lib/market/symbol-normalization";
-import { ArrowRight, CandlestickChart, Search } from "lucide-react";
+import { CandlestickChart, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const CandlestickChartComponent = dynamic(
@@ -151,9 +150,9 @@ export default function FuturesPage() {
         }}
       />
 
-      <div className="h-[calc(100vh-3.5rem)] overflow-hidden flex flex-col gap-2 p-1">
-        <div className="flex-1 min-h-0 grid gap-4 lg:grid-cols-12 items-stretch">
-          <div className="lg:col-span-4 xl:col-span-4 min-h-0 h-full">
+      <div className="h-full min-h-0 overflow-hidden bg-[#080c16]">
+        <div className="h-full min-h-0 grid gap-2 p-2 lg:grid-cols-[360px_minmax(0,1fr)]">
+          <div className="min-h-0 h-full">
             <FuturesTradeForm
               selectedStock={selectedStock}
               onStockSelect={setSelectedStock}
@@ -162,11 +161,27 @@ export default function FuturesPage() {
             />
           </div>
 
-          <div className="lg:col-span-8 xl:col-span-8 min-h-0 h-full">
-            <Card className="h-full border-border flex flex-col shadow-sm">
-              <CardContent className="flex-1 p-0 relative min-h-0 bg-background/50">
+          <div className="min-h-0 h-full">
+            <div className="h-full min-h-0 border border-white/[0.06] bg-[#0d1422] flex flex-col">
+              <div className="shrink-0 flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
+                <div className="text-xs font-semibold tracking-wide text-slate-300 uppercase">
+                  Futures Chart
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[11px] border-white/[0.1] bg-white/[0.02] hover:bg-white/[0.08]"
+                  onClick={() => setSearchModalOpen(true)}
+                >
+                  <Search className="mr-1.5 h-3.5 w-3.5" />
+                  Search
+                </Button>
+              </div>
+
+              <div className="flex-1 p-1 relative min-h-0">
                 {selectedStock ? (
-                  <div className="absolute inset-0 p-1">
+                  <div className="absolute inset-0">
                     <CandlestickChartComponent
                       symbol={chartBinding.symbol}
                       headerSymbol={chartBinding.headerSymbol}
@@ -175,29 +190,31 @@ export default function FuturesPage() {
                     />
                   </div>
                 ) : (
-                  <div className="h-full p-6">
-                    <div className="h-full rounded-sm border border-border/60 bg-gradient-to-b from-muted/25 to-background/40 flex items-center justify-center">
-                      <div className="max-w-md text-center px-6">
-                        <div className="mx-auto mb-4 inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-background/70">
-                          <CandlestickChart className="h-5 w-5 text-primary" />
-                        </div>
-                        <p className="text-base font-semibold text-foreground">Chart Awaits Contract Selection</p>
-                        <p className="text-sm mt-2 text-muted-foreground">
-                          Pick any index or stock futures contract to load live chart, expiries, and order controls.
-                        </p>
-                        <div className="mt-5 flex items-center justify-center gap-2">
-                          <Button type="button" size="sm" className="h-8 text-xs" onClick={() => setSearchModalOpen(true)}>
-                            <Search className="mr-1.5 h-3.5 w-3.5" />
-                            Search Contract
-                          </Button>
-                         
-                        </div>
+                  <div className="h-full flex items-center justify-center">
+                    <div className="w-full max-w-sm text-center px-6">
+                      <div className="mx-auto mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.1] bg-white/[0.02]">
+                        <CandlestickChart className="h-4 w-4 text-slate-300" />
+                      </div>
+                      <p className="text-base font-semibold text-white">Select a contract to load chart</p>
+                      <p className="text-sm mt-1.5 text-slate-400">
+                        Search index or stock futures to begin.
+                      </p>
+                      <div className="mt-4">
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-8 text-xs bg-[#2d6cff] hover:bg-[#3c76ff] text-white"
+                          onClick={() => setSearchModalOpen(true)}
+                        >
+                          <Search className="mr-1.5 h-3.5 w-3.5" />
+                          Search Contract
+                        </Button>
                       </div>
                     </div>
                   </div>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </div>
         </div>
       </div>

@@ -1,11 +1,12 @@
 "use client";
 import { useEffect, useRef, forwardRef, useImperativeHandle, useState, useCallback } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, CandlestickData, HistogramSeries, HistogramData, CrosshairMode, LineSeries } from 'lightweight-charts';
-import { IndicatorConfig } from '@/stores/trading/analysis.store';
+import { createChart, ColorType, IChartApi, ISeriesApi, CandlestickSeries, CandlestickData, HistogramSeries, HistogramData, CrosshairMode, LineSeries, AreaSeries } from 'lightweight-charts';
+import { ChartStyle, IndicatorConfig } from '@/stores/trading/analysis.store';
 import { DrawingManager } from './overlays/DrawingManager';
 import { ChartController } from '@/lib/trading/chart-controller';
 import { chartRegistry } from '@/lib/trading/chart-registry';
 import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normalization';
+import { trackAnalysisEvent } from '@/lib/analysis/telemetry';
 
 interface BaseChartProps {
   data: CandlestickData[];
@@ -28,9 +29,13 @@ interface BaseChartProps {
   autoResize?: boolean;
   symbol: string;
   instrumentKey?: string;
-  range?: string; // ✅ Add range prop for dynamic formatting
+  range?: string;
+  chartStyle?: ChartStyle;
+  showVolume?: boolean;
+  onHotkeyAction?: (action: string) => void;
+  onHoverCandleChange?: (candle: CandlestickData | null) => void;
   onChartReady?: (api: IChartApi) => void;
-  onLoadMore?: () => Promise<void> | void; // ✅ Async-capable for robust lock release
+  onLoadMore?: () => Promise<void> | void;
 }
 
 export interface BaseChartRef {
@@ -42,11 +47,14 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   data,
   volumeData,
   indicators = [],
-  height = 400,
+  height,
   autoResize = true,
   symbol,
   instrumentKey,
-  range, // ✅ Extract range prop
+  range,
+  chartStyle = "CANDLE",
+  showVolume = true,
+  onHoverCandleChange,
   onChartReady,
   onLoadMore 
 }, ref) => {
@@ -55,6 +63,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
+  const lineSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const areaSeriesRef = useRef<ISeriesApi<'Area'> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<'Histogram'> | null>(null);
   const indicatorSeriesRefs = useRef<Map<string, ISeriesApi<any>[]>>(new Map()); // Map ID to Array of Series
   const isFetchingRef = useRef(false); // Throttle
@@ -81,6 +91,10 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     onLoadMoreRef.current = onLoadMore;
   }, [onLoadMore]);
+  const onHoverCandleChangeRef = useRef(onHoverCandleChange);
+  useEffect(() => {
+    onHoverCandleChangeRef.current = onHoverCandleChange;
+  }, [onHoverCandleChange]);
 
   // 🔥 ULTRA-PRO OPTIMIZATION: Cached Intl formatters (created once, reused forever)
   // Prevents expensive formatter creation in hot path (tickMarkFormatter runs many times per frame)
@@ -91,7 +105,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
   // State to force re-render when chart is ready
   const [chartInstance, setChartInstance] = useState<IChartApi | null>(null);
-  const [dimensions, setDimensions] = useState({ width: 0, height: 400 });
+  const [dimensions, setDimensions] = useState({ width: 0, height: height ?? 400 });
 
   useImperativeHandle(ref, () => ({
     chart: chartRef.current,
@@ -100,6 +114,48 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
   // Helper: Detect if pane needed
   const hasMacd = indicators.some(i => i.config.type === 'MACD');
+
+  const toLineData = useCallback(
+    (rows: CandlestickData[]) =>
+      rows.map((row: any) => ({
+        time: row.time,
+        value: Number(row.close),
+      })),
+    []
+  );
+
+  const toHeikinAshiData = useCallback((rows: CandlestickData[]): CandlestickData[] => {
+    if (!rows.length) return rows;
+
+    const output: CandlestickData[] = [];
+    let prevOpen = 0;
+    let prevClose = 0;
+
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index] as any;
+      const open = Number(row.open);
+      const high = Number(row.high);
+      const low = Number(row.low);
+      const close = Number(row.close);
+      const haClose = (open + high + low + close) / 4;
+      const haOpen = index === 0 ? (open + close) / 2 : (prevOpen + prevClose) / 2;
+      const haHigh = Math.max(high, haOpen, haClose);
+      const haLow = Math.min(low, haOpen, haClose);
+
+      output.push({
+        ...row,
+        open: haOpen,
+        high: haHigh,
+        low: haLow,
+        close: haClose,
+      });
+
+      prevOpen = haOpen;
+      prevClose = haClose;
+    }
+
+    return output;
+  }, []);
 
   const detectIntervalHintSec = useCallback((rows: CandlestickData[]): number => {
     if (rows.length < 2) return 60;
@@ -165,7 +221,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
     // Initial Layout
     const width = chartContainerRef.current.clientWidth;
-    const initialHeight = chartContainerRef.current.clientHeight || height;
+    const initialHeight = chartContainerRef.current.clientHeight || height || 400;
     setDimensions({ width, height: initialHeight });
 
     const chart = createChart(chartContainerRef.current, {
@@ -267,6 +323,26 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       wickDownColor: '#F23645',
     });
 
+    const lineSeriesInstance = chart.addSeries(LineSeries, {
+      color: "#60A5FA",
+      lineWidth: 2,
+      visible: false,
+      priceScaleId: "right",
+      lastValueVisible: true,
+      priceLineVisible: false,
+    });
+
+    const areaSeriesInstance = chart.addSeries(AreaSeries, {
+      lineColor: "#38BDF8",
+      topColor: "rgba(56, 189, 248, 0.35)",
+      bottomColor: "rgba(56, 189, 248, 0.02)",
+      lineWidth: 2,
+      visible: false,
+      priceScaleId: "right",
+      lastValueVisible: true,
+      priceLineVisible: false,
+    });
+
     // Configure candlestick scale margins (top 70% of chart)
     chart.priceScale('right').applyOptions({
       scaleMargins: {
@@ -294,8 +370,26 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       },
     });
 
+    const handleCrosshairMove = (param: any) => {
+      const callback = onHoverCandleChangeRef.current;
+      if (!callback) return;
+      const row = param?.seriesData?.get?.(candlestickSeriesInstance) as any;
+      if (!row) {
+        callback(null);
+        return;
+      }
+      const renderTime = Number(row.time);
+      callback({
+        time: resolveDisplayTime(renderTime) as any,
+        open: Number(row.open),
+        high: Number(row.high),
+        low: Number(row.low),
+        close: Number(row.close),
+      });
+    };
+    chart.subscribeCrosshairMove(handleCrosshairMove);
+
     // Infinite Scroll Monitor
-    console.log('📊 Setting up infinite scroll listener');
     chart.timeScale().subscribeVisibleLogicalRangeChange(range => {
         if (!range) return;
 
@@ -334,6 +428,14 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
                 Promise.resolve(loadMore())
                     .catch((error) => {
                         console.error('Infinite scroll load-more failed:', error);
+                        trackAnalysisEvent({
+                          name: "chart_load_more_failed",
+                          level: "warn",
+                          payload: {
+                            symbol,
+                            instrumentKey,
+                          },
+                        });
                     })
                     .finally(() => {
                         clearTimeout(lockTimeout);
@@ -343,6 +445,14 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
                 clearTimeout(lockTimeout);
                 releaseLock();
                 console.error('Infinite scroll load-more threw synchronously:', error);
+                trackAnalysisEvent({
+                  name: "chart_load_more_failed_sync",
+                  level: "warn",
+                  payload: {
+                    symbol,
+                    instrumentKey,
+                  },
+                });
             }
         } else {
             console.warn('Infinite scroll triggered but no onLoadMore callback');
@@ -351,6 +461,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 
     chartRef.current = chart;
     candleSeriesRef.current = candlestickSeriesInstance;
+    lineSeriesRef.current = lineSeriesInstance;
+    areaSeriesRef.current = areaSeriesInstance;
     volumeSeriesRef.current = volumeSeriesInstance; // ✅ Store ref
     setChartInstance(chart); // Trigger re-render to mount DrawingManager
     
@@ -359,10 +471,11 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     }
 
     return () => {
+      chart.unsubscribeCrosshairMove(handleCrosshairMove);
       chart.remove();
       chartRef.current = null;
     };
-  }, []); // 🔥 CRITICAL FIX: Empty deps - chart only mounts once!
+  }, [resolveDisplayTime]); // 🔥 CRITICAL FIX: Empty deps - chart only mounts once!
   // onLoadMore changes are handled via ref, not by remounting the entire chart
 
   // ═══════════════════════════════════════════════════════════
@@ -377,8 +490,6 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     intervalHintSecRef.current = 60;
     lastAppliedDataRef.current = null;
 
-    console.log(`🎨 Initializing ChartController for ${registryInstrumentKey}`);
-    
     // Create instance-based controller for this chart
     const controller = new ChartController(`chart-${registryInstrumentKey}`);
     controller.setSeries(candleSeriesRef.current);
@@ -390,18 +501,11 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     // This enables CandleEngine → ChartRegistry → ChartController
     // Direct updates bypass React/Zustand entirely
     chartRegistry.register(registryInstrumentKey, controller);
-    console.log(`✅ ChartController registered in registry for ${registryInstrumentKey}`);
-
-
-    console.log(`✅ ChartController initialized and registered for ${registryInstrumentKey}`);
-
     // Cleanup
     return () => {
-      console.log(`🗑️ ChartController cleanup starting for ${registryInstrumentKey}`);
       chartRegistry.unregister(registryInstrumentKey);
       controller.destroy();
       chartControllerRef.current = null;
-      console.log(`🗑️ ChartController destroyed for ${registryInstrumentKey}`);
     };
   }, [symbol, instrumentKey]); // 🔥 CRITICAL FIX: Only depend on symbol identity, NOT data!
   // Controller mounts once per symbol, never rebuilds
@@ -412,12 +516,9 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     const controller = chartControllerRef.current;
     
-    console.log(`Data update effect triggered: data.length=${data?.length || 0}, symbol=${symbol}`);
-    
     // RACE CONDITION FIX: Ensure controller exists and has valid series
     // When switching stocks, old controller might be destroyed while new data arrives
     if (!controller || !data || data.length === 0) {
-        console.log(`Skipping data update: controller=${!!controller}, data.length=${data?.length || 0}`);
         return;
     }
     
@@ -468,7 +569,9 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       lastLow === prev.lastLow &&
       lastClose === prev.lastClose;
 
-    if ((appendedNewestOnly || patchedNewestOnly) && lastCandle) {
+    const allowIncrementalCandleWrite = chartStyle !== "HEIKIN_ASHI";
+
+    if (allowIncrementalCandleWrite && (appendedNewestOnly || patchedNewestOnly) && lastCandle) {
       let renderTime = rawToRenderTimeRef.current.get(lastTime);
       if (!Number.isFinite(renderTime as number) && appendedNewestOnly && prev) {
         renderTime = prev.lastRenderTime + intervalHintSecRef.current;
@@ -484,6 +587,18 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         time: Number(renderTime) as any,
       };
       controller.updateCandle(renderCandle);
+      if (lineSeriesRef.current) {
+        lineSeriesRef.current.update({
+          time: renderCandle.time as any,
+          value: Number(renderCandle.close),
+        } as any);
+      }
+      if (areaSeriesRef.current) {
+        areaSeriesRef.current.update({
+          time: renderCandle.time as any,
+          value: Number(renderCandle.close),
+        } as any);
+      }
       lastAppliedDataRef.current = {
         symbolKey,
         rangeKey,
@@ -511,15 +626,31 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
             prev: data[i - 1],
             current: data[i],
           });
+          trackAnalysisEvent({
+            name: "chart_non_monotonic_candles",
+            level: "warn",
+            payload: {
+              symbol,
+              instrumentKey,
+              index: i,
+            },
+          });
           break;
         }
       }
     }
     
     // Full reset path: symbol/range changes and non-tail structural history changes.
-    console.log(`Updating ChartController with ${data.length} candles for ${symbol}`);
     const renderedData = rebuildRenderTimeline(data as CandlestickData[]);
-    controller.setData(renderedData);
+    const baseForPrimary = chartStyle === "HEIKIN_ASHI" ? toHeikinAshiData(renderedData) : renderedData;
+    controller.setData(baseForPrimary);
+    const lineData = toLineData(renderedData);
+    if (lineSeriesRef.current) {
+      lineSeriesRef.current.setData(lineData as any);
+    }
+    if (areaSeriesRef.current) {
+      areaSeriesRef.current.setData(lineData as any);
+    }
     const renderedLastTime = Number(renderedData[renderedData.length - 1]?.time ?? lastTime);
     lastAppliedDataRef.current = {
       symbolKey,
@@ -533,8 +664,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
       lastLow,
       lastClose,
     };
-    console.log(`Chart data updated successfully: ${data.length} candles for ${symbol}`);
-  }, [data, symbol, instrumentKey, range]); // Listen to data changes, update via controller
+  }, [data, symbol, instrumentKey, range, chartStyle, toHeikinAshiData, toLineData]); // Listen to data changes, update via controller
 
   // Handle Volume Updates
   useEffect(() => {
@@ -557,6 +687,14 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
             volumeSeries.setData(mappedVolume as any);
         } catch (error) {
             console.warn(`⚠️ Failed to update volume data:`, error);
+            trackAnalysisEvent({
+              name: "chart_volume_update_failed",
+              level: "warn",
+              payload: {
+                symbol,
+                instrumentKey,
+              },
+            });
         }
     }
   }, [volumeData]);
@@ -581,7 +719,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   // 2. Handle Height Updates Efficiently
   useEffect(() => {
     // If height prop is provided explicitly, override
-    if (height && chartRef.current) {
+    if (typeof height === "number" && height > 0 && chartRef.current) {
        chartRef.current.applyOptions({ height });
        setDimensions(d => ({ ...d, height }));
     }
@@ -597,18 +735,52 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;
 
+    const bottomWithVolume = showVolume ? 0.30 : 0.05;
     if (hasMacd) {
       // Shrink Main Candle Series
       candleSeriesRef.current.priceScale().applyOptions({
-        scaleMargins: { top: 0.05, bottom: 0.30 }
+        scaleMargins: { top: 0.05, bottom: bottomWithVolume }
       });
     } else {
       // Full height
       candleSeriesRef.current.priceScale().applyOptions({
-        scaleMargins: { top: 0.05, bottom: 0.05 }
+        scaleMargins: { top: 0.05, bottom: showVolume ? 0.30 : 0.05 }
       });
     }
-  }, [hasMacd]);
+  }, [hasMacd, showVolume]);
+
+  useEffect(() => {
+    const candleSeries = candleSeriesRef.current;
+    const lineSeries = lineSeriesRef.current;
+    const areaSeries = areaSeriesRef.current;
+    const volumeSeries = volumeSeriesRef.current;
+    if (!candleSeries || !lineSeries || !areaSeries) return;
+
+    const isCandleMode = chartStyle === "CANDLE" || chartStyle === "HEIKIN_ASHI";
+    candleSeries.applyOptions({
+      visible: isCandleMode,
+      upColor: chartStyle === "HEIKIN_ASHI" ? "#22C55E" : "#089981",
+      downColor: chartStyle === "HEIKIN_ASHI" ? "#EF4444" : "#F23645",
+      borderUpColor: chartStyle === "HEIKIN_ASHI" ? "#22C55E" : "#089981",
+      borderDownColor: chartStyle === "HEIKIN_ASHI" ? "#EF4444" : "#F23645",
+      wickUpColor: chartStyle === "HEIKIN_ASHI" ? "#22C55E" : "#089981",
+      wickDownColor: chartStyle === "HEIKIN_ASHI" ? "#EF4444" : "#F23645",
+    });
+
+    lineSeries.applyOptions({
+      visible: chartStyle === "LINE",
+    });
+
+    areaSeries.applyOptions({
+      visible: chartStyle === "AREA",
+    });
+
+    if (volumeSeries) {
+      volumeSeries.applyOptions({
+        visible: showVolume,
+      });
+    }
+  }, [chartStyle, showVolume]);
 
 
   // 4. Update Indicators
@@ -638,13 +810,13 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
           // 1. Histogram
           const hist = chartRef.current!.addSeries(HistogramSeries, {
             priceScaleId: paneId,
-            color: '#26a69a'
+            color: config.seriesColors?.histogram || '#26a69a'
           });
 
           // 2. MACD
           const macdLine = chartRef.current!.addSeries(LineSeries, {
             priceScaleId: paneId,
-            color: '#2962FF',
+            color: config.seriesColors?.macd || '#2962FF',
             lineWidth: 1,
             title: 'MACD'
           });
@@ -652,7 +824,7 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
           // 3. Signal
           const sigLine = chartRef.current!.addSeries(LineSeries, {
             priceScaleId: paneId,
-            color: '#FF6D00',
+            color: config.seriesColors?.signal || '#FF6D00',
             lineWidth: 1,
             title: 'Signal'
           });
@@ -682,12 +854,12 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
           // Create 3 lines
           // Common PriceScaleId = right (overlay on main chart)
           const upper = chartRef.current!.addSeries(LineSeries, {
-            color: '#2962FF',
+            color: config.display.color || '#2962FF',
             lineWidth: 1,
             title: 'BB Upper'
           });
           const lower = chartRef.current!.addSeries(LineSeries, {
-            color: '#2962FF',
+            color: config.display.color || '#2962FF',
             lineWidth: 1,
             title: 'BB Lower'
           });
@@ -714,10 +886,10 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
         if (!existing) {
           // ... same as before
           const s = chartRef.current!.addSeries(LineSeries, {
-            color: config.color,
-            lineWidth: 2,
+            color: config.display.color,
+            lineWidth: Math.max(1, Math.min(4, Number(config.display.lineWidth || 2))) as any,
             priceScaleId: config.type === 'RSI' ? 'RSI' : 'right',
-            title: `${config.type} ${config.period || 14}`
+            title: `${config.type} ${config.params?.period || ""}`.trim()
           });
 
           if (config.type === 'RSI') {
@@ -755,3 +927,5 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
 });
 
 BaseChart.displayName = 'BaseChart';
+
+

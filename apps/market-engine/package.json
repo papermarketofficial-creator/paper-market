@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "node --import tsx --watch src/index.ts",
     "start": "node dist/index.js",
-    "build": "tsc",
+    "build": "tsc && node -e \"require('fs').cpSync('src/upstox/proto.json','dist/upstox/proto.json')\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

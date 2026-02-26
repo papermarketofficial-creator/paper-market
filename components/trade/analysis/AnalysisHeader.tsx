@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { LineChart } from 'lucide-react';
-import { useAnalysisStore } from '@/stores/trading/analysis.store';
+import { makeDefaultIndicator, useAnalysisStore } from '@/stores/trading/analysis.store';
 import { useMarketStore } from '@/stores/trading/market.store';
 
 interface AnalysisHeaderProps {
@@ -28,13 +28,11 @@ export function AnalysisHeader({ symbol }: AnalysisHeaderProps) {
   const indicators = getIndicators(symbol);
 
   const handleAdd = (type: 'SMA' | 'RSI' | 'MACD' | 'EMA' | 'BB') => {
-    addIndicator(symbol, {
-      type,
-      period: type === 'BB' ? 20 : 14,
-      source: 'close',
-      color: type === 'SMA' ? '#F59E0B' : type === 'EMA' ? '#3B82F6' : '#8B5CF6',
-      // BB Defaults logic handled in store or chart? Store is better or config here.
-    });
+    const base = makeDefaultIndicator(type);
+    if (type !== 'MACD') {
+      base.params.period = type === 'BB' ? 20 : 14;
+    }
+    addIndicator(symbol, base);
   };
 
   return (
@@ -79,7 +77,7 @@ export function AnalysisHeader({ symbol }: AnalysisHeaderProps) {
       <div className="flex items-center gap-1">
         {indicators.map(ind => (
           <div key={ind.id} className="flex items-center gap-1 bg-muted px-2 py-1 rounded text-xs">
-            <span>{ind.type} {ind.period || ''}</span>
+            <span>{ind.type} {ind.params?.period || ''}</span>
             <button
               onClick={() => removeIndicator(symbol, ind.id)}
               className="hover:text-destructive"
