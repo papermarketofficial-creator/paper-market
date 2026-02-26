@@ -44,6 +44,7 @@ class MarketWebSocket {
     private readonly RECONNECT_DELAYS = [1000, 2000, 5000, 10000, 30000];
     private reconnectTimer: NodeJS.Timeout | null = null;
     private isIntentionalClose = false;
+    private loggedPersistentReconnect = false;
 
     constructor(options: MarketWsOptions) {
         this.url = options.url;
@@ -128,8 +129,8 @@ class MarketWebSocket {
                 this.handlers.error?.(context);
             };
 
-            this.ws.onclose = () => {
-                console.log('🔴 WebSocket disconnected');
+            this.ws.onclose = (event) => {
+                console.log(`🔴 WebSocket disconnected (code=${event.code}, reason=${event.reason || 'n/a'})`);
                 this.handlers.disconnected?.();
 
                 if (!this.isIntentionalClose) {
@@ -143,9 +144,9 @@ class MarketWebSocket {
     }
 
     private attemptReconnect() {
-        if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
-            console.error('❌ Max reconnect attempts reached');
-            return;
+        if (this.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS && !this.loggedPersistentReconnect) {
+            this.loggedPersistentReconnect = true;
+            console.error('❌ Max reconnect attempts reached, continuing retries every 30000ms');
         }
 
         const delay = this.RECONNECT_DELAYS[Math.min(this.reconnectAttempts, this.RECONNECT_DELAYS.length - 1)];
@@ -182,6 +183,7 @@ class MarketWebSocket {
 
     disconnect() {
         this.isIntentionalClose = true;
+        this.loggedPersistentReconnect = false;
 
         if (this.reconnectTimer) {
             clearTimeout(this.reconnectTimer);

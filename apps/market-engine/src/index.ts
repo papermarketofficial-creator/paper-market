@@ -38,6 +38,14 @@ async function main() {
     // Attach websocket server to the same HTTP server/port.
     const wss = createWebSocketServer(fastify.server);
 
+    fastify.get('/', async () => {
+        return {
+            status: 'ok',
+            service: 'market-engine',
+            timestamp: new Date().toISOString()
+        };
+    });
+
     fastify.get('/health', async () => {
         return {
             status: 'ok',
