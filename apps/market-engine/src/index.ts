@@ -9,10 +9,12 @@ import { logger } from './lib/logger.js';
 // 🚀 MARKET ENGINE: Entry Point
 // ═══════════════════════════════════════════════════════════
 
-const PORT = parseInt(process.env.PORT || '4200', 10);
+const rawPort = process.env.PORT;
+const PORT = parseInt(rawPort || '4200', 10);
 
 async function main() {
     logger.info('Starting Market Engine...');
+    logger.info({ rawPort, resolvedPort: PORT }, 'Runtime port configuration');
 
     // ═══════════════════════════════════════════════════════════
     // 🔌 STEP 1: Check database connection
@@ -46,11 +48,13 @@ async function main() {
         };
     });
 
+    // Keep health checks lightweight and deterministic.
+    // Railway may probe frequently; avoid heavy payloads here.
     fastify.get('/health', async () => {
         return {
             status: 'ok',
-            timestamp: new Date().toISOString(),
-            stats: getEngineStats()
+            service: 'market-engine',
+            timestamp: new Date().toISOString()
         };
     });
 
@@ -59,7 +63,7 @@ async function main() {
     });
 
     await fastify.listen({ port: PORT, host: '0.0.0.0' });
-    logger.info({ port: PORT }, 'HTTP + WebSocket server started');
+    logger.info({ host: '0.0.0.0', port: PORT }, 'HTTP + WebSocket server started');
 
     logger.info('✅ Market Engine is running');
 
