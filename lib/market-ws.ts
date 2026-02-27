@@ -96,17 +96,21 @@ class MarketWebSocket {
                             console.log('📡 Market engine acknowledged connection');
                             break;
                         case 'tick':
-                            console.log('Tick instrumentKey:', message?.data?.instrumentKey);
                             this.handlers.tick?.(message.data);
                             break;
                         case 'candle':
                             this.handlers.candle?.(message.data);
                             break;
+                        case 'subscribed':
+                        case 'unsubscribed':
+                        case 'subscription_error':
+                            // Subscription acks/errors are handled by caller state; avoid noisy console warnings.
+                            break;
                         case 'heartbeat':
                             // Silent heartbeat
                             break;
                         default:
-                            console.warn('Unknown message type:', message.type);
+                            console.debug('Unhandled WebSocket message type:', message.type);
                     }
                 } catch (error) {
                     console.error('Failed to parse WebSocket message:', error);
