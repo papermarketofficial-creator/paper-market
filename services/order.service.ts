@@ -132,6 +132,9 @@ export class OrderService {
             logger.info({ lookupSymbol: payload.symbol, lookupToken: payload.instrumentToken }, "Looking up instrument");
 
             if (!instrumentStore.isReady()) {
+                await instrumentStore.initialize();
+            }
+            if (!instrumentStore.isReady()) {
                 throw new ApiError("Instrument store not ready", 503, "INSTRUMENT_STORE_NOT_READY");
             }
 

@@ -13,12 +13,11 @@ type OptionChainTableProps = {
   chainKey?: string;
   optionTokenBySymbol: Record<string, string>;
   selectedSymbol?: string | null;
-  onSelectSymbol: (symbol: string) => void;
+  onSelectSymbol: (symbol: string, side?: "BUY" | "SELL") => void;
   isLoading?: boolean;
 };
 
 type FlashDir = "up" | "down";
-type StrikeRange = "10" | "20" | "full";
 
 function fmtLtp(v: number): string {
   if (!Number.isFinite(v) || v <= 0) return "--";
@@ -45,27 +44,32 @@ function getRowOpacity(strike: number, atm: number | null, spotPrice: number): n
   return 0.22;
 }
 
-function SkeletonRow({ i }: { i: number }) {
+function SkeletonRow({ i, total }: { i: number; total: number }) {
+  // Center is ATM (max opacity), edges fade out
+  const center = Math.floor(total / 2);
+  const dist = Math.abs(i - center);
+  const opacity = Math.max(0.4, 1 - dist * 0.1);
+
   return (
     <div
-      className="grid grid-cols-[1fr_100px_1fr] border-b border-white/[0.04]"
-      style={{ opacity: 1 - i * 0.12 }}
+      className="grid grid-cols-[1fr_100px_1fr] border-b border-border/60 dark:border-white/[0.08]"
+      style={{ opacity }}
     >
       {/* CE side */}
-      <div className="flex items-center justify-end gap-6 px-4 py-2.5">
-        <div className="h-2.5 w-14 animate-pulse rounded bg-white/[0.08]" />
-        <div className="h-2.5 w-10 animate-pulse rounded bg-white/[0.05]" />
-        <div className="h-2.5 w-10 animate-pulse rounded bg-white/[0.04]" />
+      <div className="grid grid-cols-3 items-center px-4 py-2.5 text-right">
+        <div className="h-3 w-10 ml-auto animate-pulse rounded bg-slate-300/80 dark:bg-slate-600/70 col-start-1" />
+        <div className="h-3 w-8 ml-auto animate-pulse rounded bg-slate-300/70 dark:bg-slate-600/60 col-start-2" />
+        <div className="h-3 w-8 ml-auto animate-pulse rounded bg-slate-300/60 dark:bg-slate-700/55 col-start-3" />
       </div>
       {/* Strike */}
-      <div className="flex items-center justify-center bg-white/[0.02] px-2 py-2.5">
-        <div className="h-2.5 w-14 animate-pulse rounded bg-white/[0.07]" />
+      <div className="flex items-center justify-center bg-slate-200/40 dark:bg-white/[0.05] px-2 py-2.5">
+        <div className="h-3.5 w-12 animate-pulse rounded bg-slate-300/85 dark:bg-slate-500/70" />
       </div>
       {/* PE side */}
-      <div className="flex items-center gap-6 px-4 py-2.5">
-        <div className="h-2.5 w-14 animate-pulse rounded bg-white/[0.08]" />
-        <div className="h-2.5 w-10 animate-pulse rounded bg-white/[0.05]" />
-        <div className="h-2.5 w-10 animate-pulse rounded bg-white/[0.04]" />
+      <div className="grid grid-cols-3 items-center px-4 py-2.5 text-left">
+        <div className="h-3 w-10 animate-pulse rounded bg-slate-300/80 dark:bg-slate-600/70 col-start-1" />
+        <div className="h-3 w-8 animate-pulse rounded bg-slate-300/70 dark:bg-slate-600/60 col-start-2" />
+        <div className="h-3 w-8 animate-pulse rounded bg-slate-300/60 dark:bg-slate-700/55 col-start-3" />
       </div>
     </div>
   );
@@ -79,7 +83,7 @@ type RowProps = {
   spotPrice: number;
   atm: number | null;
   selectedSymbol?: string | null;
-  onSelectSymbol: (sym: string) => void;
+  onSelectSymbol: (sym: string, side?: "BUY" | "SELL") => void;
   ceFlash?: FlashDir;
   peFlash?: FlashDir;
   rowRef: (el: HTMLDivElement | null) => void;
@@ -105,16 +109,14 @@ const ChainRow = memo(function ChainRow({
       style={{ opacity: isAtm ? 1 : opacity }}
     >
       {/* ── CALL (CE) SIDE — right-aligned ── */}
-      <button
-        type="button"
-        onClick={() => row.ce?.symbol && onSelectSymbol(row.ce.symbol)}
-        disabled={!row.ce?.symbol}
+      <div
         className={cn(
-          "grid grid-cols-3 items-center px-4 py-2 text-right transition-colors",
+          "relative grid grid-cols-3 items-center px-4 py-2 text-right transition-colors cursor-pointer",
           ceSelected && "bg-emerald-500/[0.12] ring-1 ring-inset ring-emerald-500/40",
           !ceSelected && row.ce?.symbol && "hover:bg-emerald-500/[0.07]",
           ceItm && !ceSelected && "bg-emerald-500/[0.05]"
         )}
+        onClick={() => row.ce?.symbol && onSelectSymbol(row.ce.symbol)}
       >
         {/* LTP */}
         <span
@@ -132,24 +134,36 @@ const ChainRow = memo(function ChainRow({
           {fmtOI(Number(row.ce?.oi ?? 0))}
         </span>
         {/* VOL */}
-        <span className="col-start-3 text-[11px] tabular-nums text-slate-600">
+        <span className="col-start-3 text-[11px] tabular-nums text-slate-600 group-hover:invisible">
           {fmtOI(Number(row.ce?.volume ?? 0))}
         </span>
-      </button>
+        {row.ce?.symbol && (
+          <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button 
+              type="button"
+              className="flex h-6 w-6 items-center justify-center rounded bg-emerald-500/20 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/30 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onSelectSymbol(row.ce!.symbol, "BUY"); }}
+            >B</button>
+            <button 
+              type="button"
+              className="flex h-6 w-6 items-center justify-center rounded bg-rose-500/20 text-[10px] font-bold text-rose-400 hover:bg-rose-500/30 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onSelectSymbol(row.ce!.symbol, "SELL"); }}
+            >S</button>
+          </div>
+        )}
+      </div>
 
       {/* ── STRIKE CENTER ── */}
-      <button
-        type="button"
+      <div
+        className={cn(
+          "flex items-center justify-center bg-white/[0.025] px-2 py-2 transition-colors cursor-pointer",
+          isAtm && "bg-[#2d6cff]/[0.15]",
+          (row.ce?.symbol || row.pe?.symbol) && "hover:bg-white/[0.06]"
+        )}
         onClick={() => {
           const fallbackSymbol = row.ce?.symbol || row.pe?.symbol;
           if (fallbackSymbol) onSelectSymbol(fallbackSymbol);
         }}
-        disabled={!row.ce?.symbol && !row.pe?.symbol}
-        className={cn(
-          "flex items-center justify-center bg-white/[0.025] px-2 py-2 transition-colors",
-          isAtm && "bg-[#2d6cff]/[0.15]",
-          (row.ce?.symbol || row.pe?.symbol) && "hover:bg-white/[0.06]"
-        )}
       >
         {isAtm && (
           <span className="mr-1 rounded bg-[#2d6cff] px-1 py-0.5 text-[9px] font-bold tracking-widest text-white">
@@ -164,24 +178,22 @@ const ChainRow = memo(function ChainRow({
         >
           {row.strike.toLocaleString("en-IN")}
         </span>
-      </button>
+      </div>
 
       {/* ── PUT (PE) SIDE — left-aligned ── */}
-      <button
-        type="button"
-        onClick={() => row.pe?.symbol && onSelectSymbol(row.pe.symbol)}
-        disabled={!row.pe?.symbol}
+      <div
         className={cn(
-          "grid grid-cols-3 items-center px-4 py-2 text-left transition-colors",
+          "relative grid grid-cols-3 items-center px-4 py-2 text-left transition-colors cursor-pointer",
           peSelected && "bg-rose-500/[0.12] ring-1 ring-inset ring-rose-500/40",
           !peSelected && row.pe?.symbol && "hover:bg-rose-500/[0.07]",
           peItm && !peSelected && "bg-rose-500/[0.05]"
         )}
+        onClick={() => row.pe?.symbol && onSelectSymbol(row.pe.symbol)}
       >
         {/* LTP */}
         <span
           className={cn(
-            "col-start-1 text-[13px] font-semibold tabular-nums",
+            "col-start-1 text-[13px] font-semibold tabular-nums group-hover:invisible",
             peFlash === "up" && "text-emerald-400",
             peFlash === "down" && "text-rose-400",
             !peFlash && "text-slate-100"
@@ -189,6 +201,20 @@ const ChainRow = memo(function ChainRow({
         >
           {fmtLtp(peLtp)}
         </span>
+        {row.pe?.symbol && (
+          <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button 
+              type="button"
+              className="flex h-6 w-6 items-center justify-center rounded bg-emerald-500/20 text-[10px] font-bold text-emerald-400 hover:bg-emerald-500/30 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onSelectSymbol(row.pe!.symbol, "BUY"); }}
+            >B</button>
+            <button 
+              type="button"
+              className="flex h-6 w-6 items-center justify-center rounded bg-rose-500/20 text-[10px] font-bold text-rose-400 hover:bg-rose-500/30 transition-colors"
+              onClick={(e) => { e.stopPropagation(); onSelectSymbol(row.pe!.symbol, "SELL"); }}
+            >S</button>
+          </div>
+        )}
         {/* OI */}
         <span className="col-start-2 text-[11px] tabular-nums text-slate-500">
           {fmtOI(Number(row.pe?.oi ?? 0))}
@@ -197,7 +223,7 @@ const ChainRow = memo(function ChainRow({
         <span className="col-start-3 text-[11px] tabular-nums text-slate-600">
           {fmtOI(Number(row.pe?.volume ?? 0))}
         </span>
-      </button>
+      </div>
     </div>
   );
 }, (prev, next) => (
@@ -218,7 +244,7 @@ export function OptionChainTable({
   const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
   const prevLtp = useRef<Record<string, number>>({});
   const [flashMap, setFlashMap] = useState<Record<string, FlashDir>>({});
-  const [strikeRange, setStrikeRange] = useState<StrikeRange>("20");
+  const [visibleRadius, setVisibleRadius] = useState(10);
   const lastAtm = useRef<number | null>(null);
   const lastExpiry = useRef<string>("");
 
@@ -235,14 +261,25 @@ export function OptionChainTable({
     return best;
   }, [atmStrike, rows, underlyingPrice]);
 
-  // Strike filter
+  // Strike filter (5 above / 5 below relative to ATM)
   const filteredRows = useMemo(() => {
-    if (strikeRange === "full" || !derivedAtm) return rows;
-    const n = strikeRange === "10" ? 10 : 20;
+    if (!derivedAtm) return rows;
     const idx = rows.findIndex((r) => r.strike === derivedAtm);
     if (idx < 0) return rows;
-    return rows.slice(Math.max(0, idx - n), Math.min(rows.length, idx + n + 1));
-  }, [rows, derivedAtm, strikeRange]);
+    return rows.slice(Math.max(0, idx - visibleRadius), Math.min(rows.length, idx + visibleRadius + 1));
+  }, [rows, derivedAtm, visibleRadius]);
+
+  const canLoadMoreTop = useMemo(() => {
+    if (!derivedAtm) return false;
+    const idx = rows.findIndex((r) => r.strike === derivedAtm);
+    return idx > visibleRadius;
+  }, [rows, derivedAtm, visibleRadius]);
+
+  const canLoadMoreBottom = useMemo(() => {
+    if (!derivedAtm) return false;
+    const idx = rows.findIndex((r) => r.strike === derivedAtm);
+    return idx + visibleRadius < rows.length - 1;
+  }, [rows, derivedAtm, visibleRadius]);
 
   // Auto-scroll to ATM
   useEffect(() => {
@@ -264,6 +301,7 @@ export function OptionChainTable({
     setFlashMap({});
     lastAtm.current = null;
     lastExpiry.current = "";
+    setVisibleRadius(10); // Reset radius on expiry change
   }, [expiryKey]);
 
   const rowsWithDisplay = useMemo(() =>
@@ -314,29 +352,13 @@ export function OptionChainTable({
       {/* Sticky column headers */}
       <div className="shrink-0 border-b border-white/[0.06] bg-[#0d1422]">
         {/* Sub-header: range selector */}
-        <div className="flex items-center justify-between px-4 py-1.5">
+        <div className="flex items-center justify-between px-4 py-1.5 min-h-[28px]">
           <div className="flex items-center gap-1 text-[11px] text-slate-600">
             <span className="text-emerald-400/70 font-semibold">CALLS</span>
             <span className="mx-2 text-white/10">|</span>
             <span className="text-rose-400/70 font-semibold">PUTS</span>
           </div>
-          <div className="flex items-center gap-1">
-            {(["10", "20", "full"] as StrikeRange[]).map((r) => (
-              <button
-                key={r}
-                type="button"
-                onClick={() => setStrikeRange(r)}
-                className={cn(
-                  "rounded px-2 py-0.5 text-[11px] font-semibold transition-colors",
-                  strikeRange === r
-                    ? "bg-[#2d6cff]/20 text-[#8fb3ff]"
-                    : "text-slate-600 hover:text-slate-400"
-                )}
-              >
-                {r === "full" ? "All" : `±${r}`}
-              </button>
-            ))}
-          </div>
+          {/* No buttons on the right, removed 10/20/full selector */}
         </div>
 
         {/* Column labels */}
@@ -361,8 +383,8 @@ export function OptionChainTable({
       <div className="flex-1 overflow-y-auto [scrollbar-color:rgba(148,163,184,.25)_transparent] [scrollbar-width:thin]">
         {isLoading ? (
           <div>
-            {Array.from({ length: 12 }, (_, i) => (
-              <SkeletonRow key={i} i={i} />
+            {Array.from({ length: 21 }, (_, i) => (
+              <SkeletonRow key={i} i={i} total={21} />
             ))}
           </div>
         ) : filteredRows.length === 0 ? (
@@ -371,6 +393,15 @@ export function OptionChainTable({
           </div>
         ) : (
           <div>
+            {canLoadMoreTop && (
+              <div 
+                className="py-3 text-center text-xs text-[#2d6cff] font-semibold hover:text-[#8fb3ff] hover:bg-[#2d6cff]/5 cursor-pointer transition-colors border-b border-white/[0.04]" 
+                onClick={() => setVisibleRadius(r => r + 5)}
+              >
+                Load more +
+              </div>
+            )}
+            
             {rowsWithDisplay.map(({ row, ceLtp, peLtp }) => {
               const isAtm = derivedAtm !== null && row.strike === derivedAtm;
               return (
@@ -390,6 +421,15 @@ export function OptionChainTable({
                 />
               );
             })}
+
+            {canLoadMoreBottom && (
+              <div 
+                className="py-3 text-center text-xs text-[#2d6cff] font-semibold hover:text-[#8fb3ff] hover:bg-[#2d6cff]/5 cursor-pointer transition-colors border-t border-white/[0.04]" 
+                onClick={() => setVisibleRadius(r => r + 5)}
+              >
+                Load more +
+              </div>
+            )}
           </div>
         )}
       </div>

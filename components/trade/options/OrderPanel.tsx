@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Stock } from "@/types/equity.types";
@@ -16,6 +16,7 @@ type OrderPanelProps = {
   contract: Stock;
   underlyingPrice: number;
   daysToExpiry?: number | null;
+  initialSide?: "BUY" | "SELL";
   onClose: () => void;
 };
 
@@ -43,11 +44,16 @@ function fmtPrice(v: number): string {
  * Clean, professional order panel — Zerodha/Upstox style.
  * No modals. No confirmations. Instant paper execution.
  */
-export function OrderPanel({ contract, underlyingPrice, daysToExpiry, onClose }: OrderPanelProps) {
-  const [side, setSide] = useState<"BUY" | "SELL">("BUY");
+export function OrderPanel({ contract, underlyingPrice, daysToExpiry, initialSide, onClose }: OrderPanelProps) {
+  const [side, setSide] = useState<"BUY" | "SELL">(initialSide || "BUY");
   const [lots, setLots] = useState("1");
   const [orderType, setOrderType] = useState<OrderType>("MARKET");
   const [limitPrice, setLimitPrice] = useState("");
+
+  // Update side if initialSide changes
+  useEffect(() => {
+    if (initialSide) setSide(initialSide);
+  }, [contract.instrumentToken, initialSide]);
 
   const executeTrade = useTradeExecutionStore((s) => s.executeTrade);
   const isProcessing = useTradeExecutionStore((s) => s.isOrderProcessing);
@@ -123,7 +129,8 @@ export function OrderPanel({ contract, underlyingPrice, daysToExpiry, onClose }:
           entryPrice: premium,
         },
         lotSize,
-        "options"
+        "options",
+        orderType
       );
       toast.success(`${side} ${totalQty} × ${contract.symbol}`, {
         description: `Filled at ₹${premium.toFixed(2)}`,

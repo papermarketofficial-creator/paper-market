@@ -190,8 +190,8 @@ export function OptionTradePanel({ contract, underlyingPrice, daysToExpiry, onCl
   const doExecute = async () => {
     if (!contract.instrumentToken) { toast.error("Instrument token missing"); return; }
     try {
-      // Apply slippage for paper trading realism
-      const fillPrice = applySlippage(premium, side);
+      // Apply slippage only for MARKET orders to keep LIMIT fills deterministic.
+      const fillPrice = orderType === "MARKET" ? applySlippage(premium, side) : premium;
 
       await executeTrade(
         {
@@ -202,7 +202,8 @@ export function OptionTradePanel({ contract, underlyingPrice, daysToExpiry, onCl
           entryPrice: fillPrice,
         },
         lotSize,
-        "options"
+        "options",
+        orderType
       );
 
       // Post-trade learning feedback

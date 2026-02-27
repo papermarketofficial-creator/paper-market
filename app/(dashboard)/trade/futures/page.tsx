@@ -7,8 +7,6 @@ import { GlobalSearchModal } from "@/components/trade/search/GlobalSearchModal";
 import { FuturesTradeForm } from "@/components/trade/FuturesTradeForm";
 import { Stock } from "@/types/equity.types";
 import { symbolToIndexInstrumentKey } from "@/lib/market/symbol-normalization";
-import { CandlestickChart, Search } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 const CandlestickChartComponent = dynamic(
   () =>
@@ -16,13 +14,16 @@ const CandlestickChartComponent = dynamic(
       default: mod.CandlestickChart,
     })),
   {
-    loading: () => <Skeleton className="h-[400px] w-full rounded-lg" />,
+    loading: () => <Skeleton className="h-full w-full rounded-none" />,
     ssr: false,
-  }
+  },
 );
 
 function normalizeKey(value: string): string {
-  return String(value || "").trim().toUpperCase().replace(/\s+/g, "");
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "");
 }
 
 function resolveUnderlyingName(stock: Stock): string {
@@ -37,11 +38,6 @@ function resolveUnderlyingName(stock: Stock): string {
   if (key.includes("SENSEX")) return "SENSEX";
 
   return raw.toUpperCase();
-}
-
-function resolveChartSymbol(stock: Stock | null): string {
-  if (!stock) return "NIFTY";
-  return resolveUnderlyingName(stock) || stock.symbol;
 }
 
 function isIndexUnderlying(value: string): boolean {
@@ -76,9 +72,12 @@ export default function FuturesPage() {
         instrumentType: "FUTURE",
       });
 
-      const res = await fetch(`/api/v1/instruments/derivatives?${params.toString()}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/v1/instruments/derivatives?${params.toString()}`,
+        {
+          cache: "no-store",
+        },
+      );
       const payload = await res.json();
       const contracts: Stock[] = payload?.data?.instruments || [];
 
@@ -88,7 +87,7 @@ export default function FuturesPage() {
       if (!selectedStock.instrumentToken) return;
 
       const exact = contracts.find(
-        (item) => item.instrumentToken === selectedStock.instrumentToken
+        (item) => item.instrumentToken === selectedStock.instrumentToken,
       );
       if (exact && exact.symbol !== selectedStock.symbol) {
         setSelectedStock(exact);
@@ -104,7 +103,11 @@ export default function FuturesPage() {
     return () => {
       cancelled = true;
     };
-  }, [selectedStock?.instrumentToken, selectedStock?.name, selectedStock?.symbol]);
+  }, [
+    selectedStock?.instrumentToken,
+    selectedStock?.name,
+    selectedStock?.symbol,
+  ]);
 
   const chartBinding = useMemo(() => {
     const headerSymbol = selectedStock?.symbol || "FUTURES";
@@ -118,7 +121,6 @@ export default function FuturesPage() {
 
     const underlying = resolveUnderlyingName(selectedStock);
     if (isIndexUnderlying(underlying)) {
-      // Keep index futures chart stable by pinning to index underlying.
       return {
         symbol: underlying,
         instrumentKey: symbolToIndexInstrumentKey(underlying) || undefined,
@@ -126,7 +128,6 @@ export default function FuturesPage() {
       };
     }
 
-    // Stock futures must chart by selected contract token.
     return {
       symbol: selectedStock.symbol || underlying,
       instrumentKey: selectedStock.instrumentToken || undefined,
@@ -142,17 +143,17 @@ export default function FuturesPage() {
         searchMode="FUTURE"
         placeholder="Search futures contracts..."
         onSelectStock={(stock) => {
-          // Drop stale sibling contracts immediately so form effects
-          // cannot snap selection back to the previous underlying.
           setCurrentInstruments([]);
           setSelectedStock(stock);
           setSearchModalOpen(false);
         }}
       />
 
-      <div className="h-full min-h-0 overflow-hidden bg-[#080c16]">
-        <div className="h-full min-h-0 grid gap-2 p-2 lg:grid-cols-[360px_minmax(0,1fr)]">
-          <div className="min-h-0 h-full">
+      {/* Single full-height grid — no duplicated search */}
+      <div className="h-[calc(100vh-32px)] min-h-0 overflow-hidden bg-[#080c16]">
+        <div className="h-full min-h-0 grid gap-0 lg:grid-cols-[320px_minmax(0,1fr)]">
+          {/* LEFT: Order form panel */}
+          <div className="min-h-0 h-full border-r border-white/[0.06]">
             <FuturesTradeForm
               selectedStock={selectedStock}
               onStockSelect={setSelectedStock}
@@ -161,60 +162,79 @@ export default function FuturesPage() {
             />
           </div>
 
-          <div className="min-h-0 h-full">
-            <div className="h-full min-h-0 border border-white/[0.06] bg-[#0d1422] flex flex-col">
-              <div className="shrink-0 flex items-center justify-between border-b border-white/[0.06] px-3 py-2">
-                <div className="text-xs font-semibold tracking-wide text-slate-300 uppercase">
-                  Futures Chart
+          {/* RIGHT: Chart — fills remaining height exactly */}
+          <div className="min-h-0 h-full flex flex-col bg-[#0d1422]">
+            {selectedStock ? (
+              <div className="flex-1 min-h-0 relative">
+                <div className="absolute inset-0">
+                  <CandlestickChartComponent
+                    symbol={chartBinding.symbol}
+                    headerSymbol={chartBinding.headerSymbol}
+                    instrumentKey={chartBinding.instrumentKey}
+                    onSearchClick={() => setSearchModalOpen(true)}
+                  />
                 </div>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 text-[11px] border-white/[0.1] bg-white/[0.02] hover:bg-white/[0.08]"
-                  onClick={() => setSearchModalOpen(true)}
-                >
-                  <Search className="mr-1.5 h-3.5 w-3.5" />
-                  Search
-                </Button>
               </div>
-
-              <div className="flex-1 p-1 relative min-h-0">
-                {selectedStock ? (
-                  <div className="absolute inset-0">
-                    <CandlestickChartComponent
-                      symbol={chartBinding.symbol}
-                      headerSymbol={chartBinding.headerSymbol}
-                      instrumentKey={chartBinding.instrumentKey}
-                      onSearchClick={() => setSearchModalOpen(true)}
-                    />
+            ) : (
+              /* Empty state — single search entry point */
+              <div className="flex-1 flex items-center justify-center">
+                <div className="text-center px-8 max-w-xs">
+                  <div className="mb-5 mx-auto w-16 h-16 rounded-2xl bg-[#2d6cff]/10 border border-[#2d6cff]/20 flex items-center justify-center">
+                    <svg
+                      className="w-7 h-7 text-[#2d6cff]"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941"
+                      />
+                    </svg>
                   </div>
-                ) : (
-                  <div className="h-full flex items-center justify-center">
-                    <div className="w-full max-w-sm text-center px-6">
-                      <div className="mx-auto mb-3 inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/[0.1] bg-white/[0.02]">
-                        <CandlestickChart className="h-4 w-4 text-slate-300" />
-                      </div>
-                      <p className="text-base font-semibold text-white">Select a contract to load chart</p>
-                      <p className="text-sm mt-1.5 text-slate-400">
-                        Search index or stock futures to begin.
-                      </p>
-                      <div className="mt-4">
-                        <Button
+                  <h2 className="text-base font-bold text-white mb-1.5">
+                    Futures Terminal
+                  </h2>
+                  <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+                    Search any index or stock futures contract to view live
+                    chart and place orders.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setSearchModalOpen(true)}
+                    className="w-full h-10 rounded-lg bg-[#2d6cff] hover:bg-[#3c76ff] text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                  >
+                    <svg
+                      className="w-4 h-4"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    >
+                      <circle cx="11" cy="11" r="8" />
+                      <path d="M21 21l-4.35-4.35" />
+                    </svg>
+                    Search Futures Contract
+                  </button>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    {["NIFTY FUT", "BANKNIFTY FUT", "FINNIFTY FUT"].map(
+                      (label) => (
+                        <button
+                          key={label}
                           type="button"
-                          size="sm"
-                          className="h-8 text-xs bg-[#2d6cff] hover:bg-[#3c76ff] text-white"
                           onClick={() => setSearchModalOpen(true)}
+                          className="rounded-md bg-white/[0.04] border border-white/[0.06] px-2 py-1.5 text-[10px] font-semibold text-slate-500 hover:text-slate-300 hover:bg-white/[0.08] transition-colors"
                         >
-                          <Search className="mr-1.5 h-3.5 w-3.5" />
-                          Search Contract
-                        </Button>
-                      </div>
-                    </div>
+                          {label}
+                        </button>
+                      ),
+                    )}
                   </div>
-                )}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </div>

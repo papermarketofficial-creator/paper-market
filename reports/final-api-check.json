@@ -1,0 +1,6 @@
+﻿{
+  "wallet": {"success":true,"data":{"balance":9976916.95,"equity":9976916.95,"blockedBalance":0,"availableBalance":9976916.95,"marginStatus":"NORMAL","accountState":"NORMAL","currency":"INR","lastReconciled":"2026-02-27T06:02:50.872Z","updatedAt":"2026-02-27T06:02:51.355Z"}},
+  "positions": {"success":true,"data":[]},
+  "openOrders": {"success":true,"data":[]},
+  "allOrders": {"success":false,"error":{"code":"VALIDATION_ERROR","message":"Invalid request data","details":[{"code":"too_big","maximum":50,"type":"number","inclusive":true,"exact":false,"message":"Limit cannot exceed 50","path":["limit"]}]}}
+}

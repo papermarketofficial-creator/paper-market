@@ -59,6 +59,7 @@ export default function OptionsPage() {
   const [selectedExpiry, setSelectedExpiry] = useState("");
   const [contracts, setContracts] = useState<Stock[]>([]);
   const [selectedContract, setSelectedContract] = useState<Stock | null>(null);
+  const [initialSide, setInitialSide] = useState<"BUY" | "SELL">("BUY");
   const [mode, setMode] = useState<TradeMode>("single");
 
   /* stores */
@@ -201,7 +202,7 @@ export default function OptionsPage() {
     setMode("single");
   };
 
-  const handleSelectChainSymbol = (symbol: string) => {
+  const handleSelectChainSymbol = (symbol: string, side: "BUY" | "SELL" = "BUY") => {
     const found =
       filteredContracts.find((c) => c.symbol === symbol) ||
       contracts.find((c) => c.symbol === symbol);
@@ -218,6 +219,7 @@ export default function OptionsPage() {
     // Inject price so OrderPanel has a valid premium from the start
     const contractWithPrice = chainLtp > 0 ? { ...found, price: chainLtp } : found;
     setSelectedContract(contractWithPrice);
+    setInitialSide(side);
     setMode("single");
   };
 
@@ -243,6 +245,7 @@ export default function OptionsPage() {
           contract={selectedContract}
           underlyingPrice={underlyingPrice}
           daysToExpiry={daysToExpiry}
+          initialSide={initialSide}
           onClose={() => setSelectedContract(null)}
         />
       );

@@ -66,17 +66,21 @@ export class PositionService {
                     tradePrice
                 );
 
-                // Update the Order with P&L info if this trade realized any P&L (closing/reducing)
-                if (tradeRealizedPnL !== 0) {
-                     // We need 'orders' table reference here. It should be imported.
-                     // Assuming 'orders' is imported from "@/lib/db/schema"
-                     
-                     // Optimization: Run this update in parallel with position update/delete? 
-                     // No, keep sequential for safety within tx.
-                     await tx.update(orders)
-                        .set({ 
+                // Always annotate closing/reducing fills on the originating order.
+                // This ensures Orders History can render Exit + P&L even when realizedPnL is exactly 0.
+                const isIncreasing =
+                    (currentQuantity >= 0 && trade.side === "BUY") ||
+                    (currentQuantity < 0 && trade.side === "SELL");
+                const closedQuantity = isIncreasing
+                    ? 0
+                    : Math.min(Math.abs(currentQuantity), tradeQuantity);
+
+                if (closedQuantity > 0) {
+                    await tx
+                        .update(orders)
+                        .set({
                             realizedPnL: tradeRealizedPnL.toFixed(2),
-                            averagePrice: currentAvgPrice.toFixed(2) // Store the avg entry price of the position
+                            averagePrice: currentAvgPrice.toFixed(2),
                         })
                         .where(eq(orders.id, trade.orderId));
                 }
@@ -271,6 +275,9 @@ export class PositionService {
 
             // Get instrument for validation
             // Get from Repository (Fast & Consistent)
+            if (!instrumentStore.isReady()) {
+                await instrumentStore.initialize();
+            }
             if (!instrumentStore.isReady()) {
                 throw new ApiError("Instrument store not ready", 503, "INSTRUMENT_STORE_NOT_READY");
             }

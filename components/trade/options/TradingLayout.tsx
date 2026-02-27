@@ -26,7 +26,7 @@ export function TradingLayout({
   hasPanelContent,
 }: TradingLayoutProps) {
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#080c16]">
+    <div className="flex h-[calc(100vh-32px)] min-h-0 flex-col overflow-hidden bg-[#080c16]">
       {/* ── TOP STRIP ── */}
       <div className="shrink-0 border-b border-white/[0.06]">{header}</div>
 
@@ -44,7 +44,7 @@ export function TradingLayout({
         {/* Right: Context Panel */}
         <div
           className={cn(
-            "hidden shrink-0 border-l border-white/[0.06] xl:flex xl:flex-col",
+            "hidden shrink-0 border-l border-white/[0.06] xl:flex xl:flex-col min-h-0",
             hasPanelContent ? "xl:w-[340px]" : "xl:w-[300px]",
             "transition-all duration-300",
           )}
@@ -59,7 +59,7 @@ export function TradingLayout({
       {/* Mobile: slide-up panel when contract selected */}
       {hasPanelContent && (
         <div className="fixed inset-x-0 bottom-0 z-50 xl:hidden">
-          <div className="max-h-[70vh] overflow-y-auto rounded-t-2xl border-t border-white/[0.1] bg-[#0d1422] shadow-2xl">
+          <div className="max-h-[70vh] min-h-0 overflow-y-auto rounded-t-2xl border-t border-white/[0.1] bg-[#0d1422] shadow-2xl">
             {panel}
           </div>
         </div>

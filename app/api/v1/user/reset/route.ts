@@ -128,22 +128,40 @@ export async function POST(req: NextRequest) {
                 );
 
             if (foundInstruments.length > 0) {
-                const [newWatchlist] = await tx
-                    .insert(watchlists)
-                    .values({
-                        userId,
-                        name: "Nifty 10",
-                        isDefault: true,
-                    })
-                    .returning();
+                let defaultWatchlist = await tx.query.watchlists.findFirst({
+                    where: and(eq(watchlists.userId, userId), eq(watchlists.isDefault, true)),
+                });
 
-                if (newWatchlist) {
-                    await tx.insert(watchlistItems).values(
-                        foundInstruments.map((inst) => ({
-                            watchlistId: newWatchlist.id,
-                            instrumentToken: inst.instrumentToken,
-                        }))
-                    );
+                if (!defaultWatchlist) {
+                    try {
+                        const [newWatchlist] = await tx
+                            .insert(watchlists)
+                            .values({
+                                userId,
+                                name: "Nifty 10",
+                                isDefault: true,
+                            })
+                            .returning();
+                        defaultWatchlist = newWatchlist ?? null;
+                    } catch {
+                        // Concurrent requests can recreate a default watchlist between delete and insert.
+                        // Re-read and continue instead of failing reset.
+                        defaultWatchlist = await tx.query.watchlists.findFirst({
+                            where: and(eq(watchlists.userId, userId), eq(watchlists.isDefault, true)),
+                        });
+                    }
+                }
+
+                if (defaultWatchlist) {
+                    await tx
+                        .insert(watchlistItems)
+                        .values(
+                            foundInstruments.map((inst) => ({
+                                watchlistId: defaultWatchlist!.id,
+                                instrumentToken: inst.instrumentToken,
+                            }))
+                        )
+                        .onConflictDoNothing();
                 }
             }
         });

@@ -42,27 +42,27 @@ export const useOrdersStore = create<OrdersState>((set, get) => ({
       if (data.success) {
         // Map backend orders to Trade type
         const mappedTrades: Trade[] = data.data.map((o: any) => {
-          // Determine entry price based on order type and status
-          // Determine entry/exit/pnl based on whether this order closed a position
+          // Determine entry/exit/pnl based on whether this order reduced/closed a position.
           let entryPrice = 0;
           let exitPrice = 0;
           let pnl = 0;
           let status = o.status; // Default to backend status
 
-          if (o.realizedPnL && parseFloat(o.realizedPnL) !== 0) {
-            // This is a Closing Order (has P&L)
-            pnl = parseFloat(o.realizedPnL);
-            entryPrice = o.averagePrice ? parseFloat(o.averagePrice) : 0; // Original Entry Price
-            exitPrice = o.executionPrice ? parseFloat(o.executionPrice) : 0; // Execution Price (Exit)
-            // Override status to CLOSED so UI renders P&L/Exit columns
+          const hasClosingMetadata = o.averagePrice != null || o.realizedPnL != null;
+
+          if (hasClosingMetadata) {
+            // Closing/reducing order metadata is explicitly persisted by backend.
+            pnl = o.realizedPnL != null ? parseFloat(o.realizedPnL) : 0;
+            entryPrice = o.averagePrice != null ? parseFloat(o.averagePrice) : 0;
+            exitPrice = o.executionPrice ? parseFloat(o.executionPrice) : 0;
             status = 'CLOSED';
           } else {
-             // This is an Opening Order (or PnL is 0)
-             if (o.status === 'FILLED' && o.executionPrice) {
-                entryPrice = parseFloat(o.executionPrice);
-             } else if (o.orderType === 'LIMIT' && o.limitPrice) {
-                entryPrice = parseFloat(o.limitPrice);
-             }
+            // Opening order (or unfilled order)
+            if (o.status === 'FILLED' && o.executionPrice) {
+              entryPrice = parseFloat(o.executionPrice);
+            } else if (o.orderType === 'LIMIT' && o.limitPrice) {
+              entryPrice = parseFloat(o.limitPrice);
+            }
           }
 
           return {

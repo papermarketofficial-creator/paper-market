@@ -129,6 +129,9 @@ export class ExecutionService {
         });
 
         if (!instrumentStore.isReady()) {
+            await instrumentStore.initialize();
+        }
+        if (!instrumentStore.isReady()) {
             throw new ApiError("Instrument store not ready", 503, "INSTRUMENT_STORE_NOT_READY");
         }
         const instrument = instrumentStore.getByToken(instrumentToken);

@@ -278,51 +278,31 @@ export function FuturesTradeForm({
   return (
     <TooltipProvider>
       <div className="h-full min-h-0 border border-white/[0.06] bg-[#0d1422] flex flex-col">
-        <div className="shrink-0 p-3 border-b border-white/[0.06]">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-xs font-semibold tracking-wide text-slate-300 uppercase">
-              Futures Order
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-7 text-[11px] border-white/[0.1] bg-white/[0.02] hover:bg-white/[0.08]"
-              onClick={onOpenSearch}
-            >
-              <Search className="h-3.5 w-3.5 mr-1.5" />
-              Search
-            </Button>
+        <div className="shrink-0 px-3 py-2.5 border-b border-white/[0.06] flex items-center justify-between">
+          <div className="text-[11px] font-semibold tracking-wider text-slate-400 uppercase">
+            Futures Order
           </div>
+          {selectedStock && (
+            <button
+              type="button"
+              onClick={onOpenSearch}
+              className="text-[10px] font-semibold text-[#2d6cff] hover:text-[#8fb3ff] transition-colors"
+            >
+              Change Contract
+            </button>
+          )}
         </div>
 
         <div className="space-y-3 p-3 flex-1 min-h-0 overflow-y-auto [scrollbar-width:thin]">
           {!selectedStock ? (
-            <div className="h-full min-h-[220px] border border-white/[0.06] bg-[#0b1120] p-4 flex flex-col">
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-white">Select a futures contract</h3>
-                <p className="text-xs text-slate-400">
-                  Search by symbol and choose an expiry to start placing orders.
-                </p>
-                <p className="text-[11px] text-slate-500">
-                  Supports index and stock futures with live margin preview.
-                </p>
+            <div className="h-full min-h-[220px] border border-white/[0.06] bg-[#0b1120] p-4 flex flex-col items-center justify-center text-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#2d6cff]/10 border border-[#2d6cff]/20 flex items-center justify-center">
+                <Search className="h-4 w-4 text-[#2d6cff]" />
               </div>
-
-              <div className="mt-4 space-y-1.5 text-[11px] text-slate-400">
-                <p>• Contract details and expiry controls</p>
-                <p>• Order side, quantity, SL and target</p>
-                <p>• Margin and post-trade risk checks</p>
+              <div>
+                <p className="text-sm font-semibold text-white">No contract selected</p>
+                <p className="text-xs text-slate-500 mt-1">Use the search above to find a futures contract.</p>
               </div>
-
-              <Button
-                type="button"
-                className="mt-auto h-9 text-xs font-semibold bg-[#2d6cff] hover:bg-[#3c76ff] text-white"
-                onClick={onOpenSearch}
-              >
-                <Search className="mr-1.5 h-3.5 w-3.5" />
-                Search Futures Contract
-              </Button>
             </div>
           ) : (
             <>

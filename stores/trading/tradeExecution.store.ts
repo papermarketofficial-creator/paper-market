@@ -37,7 +37,8 @@ interface TradeExecutionState {
   executeTrade: (
     trade: OrderPlacementParams,
     lotSize: number,
-    instrumentMode: InstrumentMode
+    instrumentMode: InstrumentMode,
+    orderType?: "MARKET" | "LIMIT" | "STOP"
   ) => Promise<void>;
 
   closePosition: (positionId: string, exitPrice: number, reason?: string) => void;
@@ -176,8 +177,8 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
     // Backend handles execution
   },
 
-  executeTrade: async (trade, lotSize, mode) => {
-    return get().placeOrder(trade, lotSize, mode, "MARKET");
+  executeTrade: async (trade, lotSize, mode, orderType = "MARKET") => {
+    return get().placeOrder(trade, lotSize, mode, orderType);
   },
 
   closePosition: async (positionId: string, exitPrice: number, reason = "MANUAL") => {
