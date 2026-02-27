@@ -3,7 +3,10 @@
  *
  * STRATEGY: TOKEN-DIFF (Industry Standard)
  * 1. Download & Parse
- * 2. SAFETY BREAK: Abort if count < 50,000 (Prevents bad syncs)
+ * 2. SAFETY BREAK:
+ *    - Abort if parsed count drops below configured floor
+ *    - Abort if parsed/raw ratio collapses
+ *    - Abort if per-segment minimums fail
  * 3. Upsert Batch
  * 4. Diff & Deactivate:
  *    - Fetch all ACTIVE tokens from DB
@@ -28,7 +31,31 @@ const UPSTOX_INSTRUMENTS_URL =
 
 const BATCH_SIZE = 2000;
 const SYNC_LOCK_TTL_MS = 30 * 60 * 1000;
-const MIN_SAFETY_COUNT = 50000; // CRITICAL: Never sync if upstream gives less than this
+const DEFAULT_MIN_SAFETY_COUNT = 40000;
+const MIN_SAFETY_COUNT = (() => {
+  const parsed = Number(process.env.MIN_INSTRUMENT_SAFETY_COUNT ?? DEFAULT_MIN_SAFETY_COUNT);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_MIN_SAFETY_COUNT;
+})();
+const DEFAULT_MIN_PARSE_RATIO = 0.35;
+const MIN_PARSE_RATIO = (() => {
+  const parsed = Number(process.env.MIN_INSTRUMENT_PARSE_RATIO ?? DEFAULT_MIN_PARSE_RATIO);
+  return Number.isFinite(parsed) && parsed > 0 && parsed < 1 ? parsed : DEFAULT_MIN_PARSE_RATIO;
+})();
+const DEFAULT_MIN_EQ_COUNT = 5000;
+const MIN_EQ_COUNT = (() => {
+  const parsed = Number(process.env.MIN_EQ_COUNT ?? DEFAULT_MIN_EQ_COUNT);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_MIN_EQ_COUNT;
+})();
+const DEFAULT_MIN_FO_COUNT = 30000;
+const MIN_FO_COUNT = (() => {
+  const parsed = Number(process.env.MIN_FO_COUNT ?? DEFAULT_MIN_FO_COUNT);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_MIN_FO_COUNT;
+})();
+const DEFAULT_MIN_INDEX_COUNT = 50;
+const MIN_INDEX_COUNT = (() => {
+  const parsed = Number(process.env.MIN_INDEX_COUNT ?? DEFAULT_MIN_INDEX_COUNT);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_MIN_INDEX_COUNT;
+})();
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const PURGE_EXPIRED_INSTRUMENTS =
   TRUE_VALUES.has(String(process.env.PURGE_EXPIRED_INSTRUMENTS ?? 'false').trim().toLowerCase());
@@ -484,14 +511,39 @@ export async function syncInstruments(): Promise<SyncReport> {
       }
     }
 
+    const parsedRatio = raw.length > 0 ? parsed.length / raw.length : 0;
+    const segmentCounts = parsed.reduce<Record<string, number>>((acc, item) => {
+      acc[item.segment] = (acc[item.segment] || 0) + 1;
+      return acc;
+    }, {});
+    const eqCount = segmentCounts.NSE_EQ ?? 0;
+    const foCount = segmentCounts.NSE_FO ?? 0;
+    const indexCount = segmentCounts.NSE_INDEX ?? 0;
+
     // 3. CRITICAL SAFETY BREAK
     if (parsed.length < MIN_SAFETY_COUNT) {
         throw new Error(`SAFETY ABORT: Parsed count ${parsed.length} is below safety threshold ${MIN_SAFETY_COUNT}. Upstream data may be corrupted.`);
+    }
+    if (parsedRatio < MIN_PARSE_RATIO) {
+        throw new Error(
+            `SAFETY ABORT: Parsed ratio ${(parsedRatio * 100).toFixed(2)}% is below threshold ${(MIN_PARSE_RATIO * 100).toFixed(2)}%.`
+        );
+    }
+    if (eqCount < MIN_EQ_COUNT) {
+        throw new Error(`SAFETY ABORT: NSE_EQ count ${eqCount} below minimum ${MIN_EQ_COUNT}.`);
+    }
+    if (foCount < MIN_FO_COUNT) {
+        throw new Error(`SAFETY ABORT: NSE_FO count ${foCount} below minimum ${MIN_FO_COUNT}.`);
+    }
+    if (indexCount < MIN_INDEX_COUNT) {
+        throw new Error(`SAFETY ABORT: NSE_INDEX count ${indexCount} below minimum ${MIN_INDEX_COUNT}.`);
     }
 
     logger.info({
       valid: parsed.length,
       invalid,
+      ratio: Number((parsedRatio * 100).toFixed(2)),
+      segmentCounts,
       filter: 'NSE_EQ, NSE_FO, NSE_INDEX'
     }, 'Normalization passed safety check');
 
