@@ -4,7 +4,6 @@ import { logger } from "@/lib/logger";
 import { EventEmitter } from "events";
 import { tickBus } from "@/lib/trading/tick-bus";
 import { UpstoxAdapter } from "@/lib/integrations/upstox/upstox-adapter";
-import "@/lib/trading/init-realtime"; // Auto-wire TickBus subscriptions
 import { marketFeedSupervisor } from "@/lib/trading/market-feed-supervisor";
 import { toInstrumentKey } from "@/lib/market/symbol-normalization";
 import { feedHealthService, recordFeedPrice } from "@/services/feed-health.service";

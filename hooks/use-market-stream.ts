@@ -13,6 +13,13 @@ const CORE_INDEX_KEYS = [
 const QUOTE_REFRESH_INTERVAL_MS = 20_000;
 const QUOTE_REQUEST_BATCH_SIZE = 80;
 
+function resolveMarketWsUrl(): string {
+    const configured = String(process.env.NEXT_PUBLIC_MARKET_ENGINE_WS_URL || "").trim();
+    if (configured) return configured;
+    if (process.env.NODE_ENV !== "production") return "ws://localhost:4200";
+    return "";
+}
+
 function pickFirstFinite(...values: unknown[]): number | null {
     for (const value of values) {
         const parsed = Number(value);
@@ -380,7 +387,12 @@ export const useMarketStream = () => {
             // ═══════════════════════════════════════════════════════════
             // 🔌 STEP 2: Connect to market-engine WebSocket
             // ═══════════════════════════════════════════════════════════
-            const wsUrl = process.env.NEXT_PUBLIC_MARKET_ENGINE_WS_URL || 'ws://localhost:4200';
+            const wsUrl = resolveMarketWsUrl();
+            if (!wsUrl) {
+                console.warn('Market engine WS URL is not configured; using API quote polling fallback.');
+                setIsConnected(false);
+                return;
+            }
 
             const ws = getMarketWebSocket({
                 url: wsUrl,
