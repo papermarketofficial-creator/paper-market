@@ -18,6 +18,7 @@ import { useTradeExecutionStore } from "@/stores/trading/tradeExecution.store";
 import { useWalletStore } from "@/stores/wallet.store";
 import { useMarketStore } from "@/stores/trading/market.store";
 import { usePositionsStore } from "@/stores/trading/positions.store";
+import { OrderProcessingDialog, TradeConfirmationDialog } from "@/components/trade/form";
 
 interface FuturesTradeFormProps {
   selectedStock: Stock | null;
@@ -83,6 +84,7 @@ export function FuturesTradeForm({
   const [leverage, setLeverage] = useState("1");
   const [stopLoss, setStopLoss] = useState("");
   const [target, setTarget] = useState("");
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const executeTrade = useTradeExecutionStore((state) => state.executeTrade);
   const isOrderProcessing = useTradeExecutionStore((state) => state.isOrderProcessing);
@@ -245,7 +247,23 @@ export function FuturesTradeForm({
     isSlValid &&
     isTargetValid;
 
-  const handleExecute = async () => {
+  const handleSubmit = () => {
+    if (isOrderProcessing || !selectedStock || !canTrade) return;
+    if (!selectedStock.instrumentToken) {
+      toast.error("Instrument routing key missing");
+      return;
+    }
+
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+
+    setTimeout(() => {
+      setShowConfirmDialog(true);
+    }, 50);
+  };
+
+  const confirmTrade = async () => {
     if (isOrderProcessing || !selectedStock || !canTrade) return;
     if (!selectedStock.instrumentToken) {
       toast.error("Instrument routing key missing");
@@ -270,6 +288,7 @@ export function FuturesTradeForm({
         description: `${side} ${effectiveQuantity} ${selectedStock.symbol}`,
       });
 
+      setShowConfirmDialog(false);
       clearOrderProcessingError();
       setQuantity("1");
       setStopLoss("");
@@ -280,6 +299,7 @@ export function FuturesTradeForm({
         ? "Partial exit is disabled in paper trading mode."
         : fallbackMessage;
       toast.error("Order Failed", { description: message });
+      setShowConfirmDialog(false);
     }
   };
 
@@ -543,7 +563,7 @@ export function FuturesTradeForm({
         <div className={cn("shrink-0 border-t border-white/[0.06] p-4", sheetMode && "sticky bottom-0 bg-[#0d1422]")}>
           <button
             type="button"
-            onClick={handleExecute}
+            onClick={handleSubmit}
             disabled={!canTrade}
             className={cn(
               "w-full min-h-11 rounded-xl py-3 text-sm font-bold tracking-wide transition-all",
@@ -563,6 +583,26 @@ export function FuturesTradeForm({
           <p className="mt-2 text-center text-[10px] text-slate-600">Paper trading | instant fill</p>
         </div>
       )}
+
+      <OrderProcessingDialog
+        isProcessing={isOrderProcessing}
+        errorMessage={orderProcessingError}
+        onDismissError={clearOrderProcessingError}
+      />
+
+      <TradeConfirmationDialog
+        open={showConfirmDialog}
+        onOpenChange={setShowConfirmDialog}
+        selectedStock={selectedStock}
+        side={side}
+        quantityValue={effectiveQuantity}
+        currentPrice={currentPrice}
+        requiredMargin={requiredMargin}
+        productType={productType}
+        leverageValue={leverageValue}
+        isProcessing={isOrderProcessing}
+        onConfirm={confirmTrade}
+      />
     </div>
   );
 }
