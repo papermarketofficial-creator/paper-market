@@ -1,4 +1,3 @@
-import 'dotenv/config';
 import Fastify from 'fastify';
 import { createWebSocketServer } from './server/ws-server.js';
 import { initializeEngine, getEngineStats } from './engine.js';

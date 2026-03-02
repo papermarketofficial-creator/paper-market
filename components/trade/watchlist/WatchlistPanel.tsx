@@ -138,7 +138,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
   }
 
   return (
-    <div className="flex flex-col h-full bg-card border-r border-border w-full max-w-full">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden bg-card border-r border-border w-full max-w-full">
       {/* Header with Selector */}
       <div className="flex items-center justify-between px-3 h-9 border-b border-border bg-accent/30">
         <DropdownMenu>
@@ -218,7 +218,7 @@ export function WatchlistPanel({ instruments, onSelect, selectedSymbol, onOpenSe
       )}
 
       {/* List Content */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0 overscroll-contain">
         <div className="flex flex-col">
           {localMatches.map((stock, i) => {
             const quoteKey = stock.instrumentToken

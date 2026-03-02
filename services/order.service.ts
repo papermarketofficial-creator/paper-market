@@ -275,7 +275,10 @@ export class OrderService {
                 try {
                     logger.info({ orderId: order.id }, "Executing MARKET order immediately");
                     const executionStartMs = performance.now();
-                    const executed = await ExecutionService.tryExecuteOrder(order, { force: options.force });
+                    const executed = await ExecutionService.tryExecuteOrder(order, {
+                        force: options.force,
+                        leverage: payload.leverage,
+                    });
                     executionMs = performance.now() - executionStartMs;
                     if (requiresImmediateSettlementFill && !executed) {
                         throw new ApiError(

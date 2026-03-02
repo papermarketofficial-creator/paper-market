@@ -28,6 +28,12 @@ type OrderResponse = {
     };
 };
 
+type OrderRow = {
+    id?: string;
+    status?: string;
+    executionPrice?: string | number | null;
+};
+
 type Position = {
     instrumentToken?: string;
     quantity?: number;
@@ -40,6 +46,7 @@ const DEFAULT_FUTURES_SYMBOL = "ITC FUT 24 FEB 26";
 const DEFAULT_EQUITY_QUERY = "RELIANCE";
 const DEFAULT_EQUITY_QTY = 10;
 const STRESS_LOOPS = 5;
+const FUTURES_TEST_LEVERAGE = 5;
 
 function parseArgs() {
     const args = process.argv.slice(2);
@@ -58,6 +65,33 @@ function parseArgs() {
 function toNumber(value: unknown): number {
     const n = Number(value);
     return Number.isFinite(n) ? n : 0;
+}
+
+function normalizeKey(value: unknown): string {
+    return String(value || "")
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]/g, "");
+}
+
+function isIndexUnderlying(value: unknown): boolean {
+    const key = normalizeKey(value);
+    return (
+        key.includes("NIFTY") ||
+        key.includes("BANKNIFTY") ||
+        key.includes("FINNIFTY") ||
+        key.includes("MIDCPNIFTY") ||
+        key.includes("SENSEX") ||
+        key.includes("BANKEX")
+    );
+}
+
+function resolveFuturesMarginPercent(contract: any): number {
+    const fromUnderlying = contract?.underlying;
+    if (isIndexUnderlying(fromUnderlying)) return 0.12;
+
+    const fromName = contract?.name || contract?.symbol || contract?.tradingsymbol;
+    return isIndexUnderlying(fromName) ? 0.12 : 0.18;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -132,6 +166,7 @@ async function run(): Promise<void> {
         side: "BUY" | "SELL";
         quantity: number;
         orderType: "MARKET";
+        leverage?: number;
     }) {
         return api<OrderResponse>("/api/v1/orders", {
             method: "POST",
@@ -149,6 +184,12 @@ async function run(): Promise<void> {
             await sleep(750);
         }
         return false;
+    }
+
+    async function getOrderById(orderId: string): Promise<OrderRow | null> {
+        const ordersRes = await api<{ data?: OrderRow[] }>("/api/v1/orders");
+        const orders = Array.isArray(ordersRes.body?.data) ? ordersRes.body.data : [];
+        return orders.find((item) => item.id === orderId) || null;
     }
 
     async function waitUntilFlat(instrumentToken: string, timeoutMs = 15000): Promise<boolean> {
@@ -269,15 +310,35 @@ async function run(): Promise<void> {
 
     // FUTURES FLOW
     {
+        const marginPercent = resolveFuturesMarginPercent(futuresContract);
+        const walletBeforeLong = await getWallet();
+
         const futuresBuy = await placeOrder({
             symbol: futuresSymbol,
             instrumentToken: futuresToken,
             side: "BUY",
             quantity: futuresQty,
             orderType: "MARKET",
+            leverage: FUTURES_TEST_LEVERAGE,
         });
         ensure(futuresBuy.ok && futuresBuy.body?.success, "Futures BUY failed");
-        ensure(await waitForFilled(resolveOrderId(futuresBuy)), "Futures BUY not filled in time");
+        const futuresBuyOrderId = resolveOrderId(futuresBuy);
+        ensure(await waitForFilled(futuresBuyOrderId), "Futures BUY not filled in time");
+
+        const walletAfterLongOpen = await getWallet();
+        const futuresBuyOrder = await getOrderById(futuresBuyOrderId);
+        const longFillPrice = toNumber(futuresBuyOrder?.executionPrice);
+        ensure(longFillPrice > 0, "Futures BUY execution price missing");
+        const longContractValue = longFillPrice * futuresQty;
+        const longBlockedDelta = walletAfterLongOpen.blockedBalance - walletBeforeLong.blockedBalance;
+        ensure(longBlockedDelta > 0, "Futures BUY did not block margin");
+        ensure(longBlockedDelta < longContractValue, "Futures BUY blocked full contract value");
+        const expectedLongMargin = (longContractValue * marginPercent) / FUTURES_TEST_LEVERAGE;
+        const longTolerance = Math.max(100, expectedLongMargin * 0.35);
+        ensure(
+            Math.abs(longBlockedDelta - expectedLongMargin) <= longTolerance,
+            `Futures BUY margin mismatch. blocked=${longBlockedDelta.toFixed(2)} expected=${expectedLongMargin.toFixed(2)}`
+        );
 
         const partialSellQty = Math.max(1, Math.floor(futuresQty / 2));
         const futuresPartial = await placeOrder({
@@ -296,14 +357,53 @@ async function run(): Promise<void> {
             side: "SELL",
             quantity: futuresQty,
             orderType: "MARKET",
+            leverage: FUTURES_TEST_LEVERAGE,
         });
         ensure(futuresSell.ok && futuresSell.body?.success, "Futures full exit order failed");
         ensure(await waitForFilled(resolveOrderId(futuresSell)), "Futures full exit not filled in time");
         ensure(await waitUntilFlat(futuresToken), "Futures position not closed");
 
-        const wallet = await getWallet();
-        ensure(wallet.blockedBalance === 0, "Futures blocked balance not zero after close");
-        ensure(Math.abs(wallet.equity - wallet.balance) < 0.01, "Futures wallet not flat after close");
+        const walletAfterLongClose = await getWallet();
+        ensure(walletAfterLongClose.blockedBalance === 0, "Futures blocked balance not zero after long close");
+        ensure(Math.abs(walletAfterLongClose.equity - walletAfterLongClose.balance) < 0.01, "Futures wallet not flat after long close");
+
+        const walletBeforeShort = await getWallet();
+        const futuresSellOpen = await placeOrder({
+            symbol: futuresSymbol,
+            instrumentToken: futuresToken,
+            side: "SELL",
+            quantity: futuresQty,
+            orderType: "MARKET",
+            leverage: FUTURES_TEST_LEVERAGE,
+        });
+        ensure(futuresSellOpen.ok && futuresSellOpen.body?.success, "Futures SELL open failed");
+        const futuresSellOpenOrderId = resolveOrderId(futuresSellOpen);
+        ensure(await waitForFilled(futuresSellOpenOrderId), "Futures SELL open not filled in time");
+
+        const walletAfterShortOpen = await getWallet();
+        const futuresSellOpenOrder = await getOrderById(futuresSellOpenOrderId);
+        const shortFillPrice = toNumber(futuresSellOpenOrder?.executionPrice);
+        ensure(shortFillPrice > 0, "Futures SELL execution price missing");
+        const shortContractValue = shortFillPrice * futuresQty;
+        const shortBlockedDelta = walletAfterShortOpen.blockedBalance - walletBeforeShort.blockedBalance;
+        ensure(shortBlockedDelta > 0, "Futures SELL did not block margin");
+        ensure(shortBlockedDelta < shortContractValue, "Futures SELL blocked full contract value");
+
+        const futuresBuyClose = await placeOrder({
+            symbol: futuresSymbol,
+            instrumentToken: futuresToken,
+            side: "BUY",
+            quantity: futuresQty,
+            orderType: "MARKET",
+            leverage: FUTURES_TEST_LEVERAGE,
+        });
+        ensure(futuresBuyClose.ok && futuresBuyClose.body?.success, "Futures BUY close order failed");
+        ensure(await waitForFilled(resolveOrderId(futuresBuyClose)), "Futures BUY close not filled in time");
+        ensure(await waitUntilFlat(futuresToken), "Futures short position not closed");
+
+        const walletAfterShortClose = await getWallet();
+        ensure(walletAfterShortClose.blockedBalance === 0, "Futures blocked balance not zero after short close");
+        ensure(Math.abs(walletAfterShortClose.equity - walletAfterShortClose.balance) < 0.01, "Futures wallet not flat after short close");
         result.futuresLifecycle = "PASS";
     }
 
@@ -338,6 +438,7 @@ async function run(): Promise<void> {
             side: "BUY",
             quantity: futuresQty,
             orderType: "MARKET",
+            leverage: FUTURES_TEST_LEVERAGE,
         });
         ensure(fuBuy.ok && fuBuy.body?.success, `Stress futures BUY failed on loop ${i + 1}`);
         ensure(await waitForFilled(resolveOrderId(fuBuy)), `Stress futures BUY not filled on loop ${i + 1}`);
@@ -348,6 +449,7 @@ async function run(): Promise<void> {
             side: "SELL",
             quantity: futuresQty,
             orderType: "MARKET",
+            leverage: FUTURES_TEST_LEVERAGE,
         });
         ensure(fuSell.ok && fuSell.body?.success, `Stress futures SELL failed on loop ${i + 1}`);
         ensure(await waitForFilled(resolveOrderId(fuSell)), `Stress futures SELL not filled on loop ${i + 1}`);

@@ -23,6 +23,12 @@ const BaseOrderSchema = z.object({
         .number()
         .int("Quantity must be an integer")
         .positive("Quantity must be positive"),
+    leverage: z
+        .number()
+        .int("Leverage must be an integer")
+        .min(1, "Leverage must be at least 1")
+        .max(10, "Leverage cannot exceed 10")
+        .optional(),
     idempotencyKey: z
         .string()
         .trim()

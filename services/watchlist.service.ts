@@ -9,7 +9,58 @@ import { eq, and, sql, inArray } from 'drizzle-orm';
 import { logger } from '@/lib/logger';
 import { cache } from '@/lib/cache';
 
+const DEFAULT_WATCHLIST_SYMBOLS = [
+  'RELIANCE',
+  'TCS',
+  'HDFCBANK',
+  'INFY',
+  'ICICIBANK',
+  'BHARTIARTL',
+  'SBIN',
+  'ITC',
+  'HINDUNILVR',
+  'LT',
+  'TATAMOTORS',
+  'AXISBANK',
+];
+
 export class WatchlistService {
+  private static async resolveDefaultWatchlistInstruments() {
+    const equityInstruments = await db
+      .select({ instrumentToken: instruments.instrumentToken })
+      .from(instruments)
+      .where(
+        and(
+          inArray(instruments.tradingsymbol, DEFAULT_WATCHLIST_SYMBOLS),
+          eq(instruments.segment, 'NSE_EQ'),
+          eq(instruments.isActive, true)
+        )
+      );
+
+    if (equityInstruments.length > 0) {
+      return {
+        instruments: equityInstruments,
+        seededFrom: 'top-stocks',
+      } as const;
+    }
+
+    const fallbackInstruments = await db
+      .select({ instrumentToken: instruments.instrumentToken })
+      .from(instruments)
+      .where(
+        and(
+          eq(instruments.segment, 'NSE_EQ'),
+          eq(instruments.isActive, true)
+        )
+      )
+      .limit(10);
+
+    return {
+      instruments: fallbackInstruments,
+      seededFrom: 'fallback-first-10',
+    } as const;
+  }
+
   /**
    * Get all watchlists for a user
    */
@@ -122,35 +173,19 @@ export class WatchlistService {
         })
         .returning();
 
-      // Add top instruments to default watchlist
-      const topStocks = [
-          'RELIANCE', 'TCS', 'HDFCBANK', 'INFY', 'ICICIBANK', 
-          'BHARTIARTL', 'SBIN', 'ITC', 'HINDUNILVR', 'LT',
-          'TATAMOTORS', 'AXISBANK' // Added a few more to make it robust
-      ];
-
-      const equityInstruments = await db
-        .select({ instrumentToken: instruments.instrumentToken })
-        .from(instruments)
-        .where(inArray(instruments.tradingsymbol, topStocks));
-
-      const fallbackInstruments = equityInstruments.length === 0
-        ? await db
-            .select({ instrumentToken: instruments.instrumentToken })
-            .from(instruments)
-            .limit(10)
-        : [];
-
-      const selectedInstruments =
-        equityInstruments.length > 0 ? equityInstruments : fallbackInstruments;
+      const { instruments: selectedInstruments, seededFrom } =
+        await this.resolveDefaultWatchlistInstruments();
 
       if (selectedInstruments.length > 0) {
-        await db.insert(watchlistItems).values(
-          selectedInstruments.map(inst => ({
+        await db
+          .insert(watchlistItems)
+          .values(
+            selectedInstruments.map(inst => ({
             watchlistId: watchlist.id,
             instrumentToken: inst.instrumentToken,
-          }))
-        );
+            }))
+          )
+          .onConflictDoNothing();
       }
 
       logger.info(
@@ -158,13 +193,73 @@ export class WatchlistService {
           watchlistId: watchlist.id,
           userId,
           count: selectedInstruments.length,
-          seededFrom: equityInstruments.length > 0 ? 'top-stocks' : 'fallback-first-10',
+          seededFrom,
         },
         'Created default watchlist'
       );
       return watchlist;
     } catch (error) {
       logger.error({ err: error, userId }, 'Failed to create default watchlist');
+      throw error;
+    }
+  }
+
+  /**
+   * Backfill instruments when a default watchlist exists but is empty.
+   */
+  static async seedWatchlistIfEmpty(watchlistId: string, userId: string) {
+    try {
+      const watchlist = await db.query.watchlists.findFirst({
+        where: and(eq(watchlists.id, watchlistId), eq(watchlists.userId, userId)),
+      });
+
+      if (!watchlist) {
+        throw new Error('Watchlist not found or access denied');
+      }
+
+      const [existingCount] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(watchlistItems)
+        .where(eq(watchlistItems.watchlistId, watchlistId));
+
+      if (existingCount.count > 0) {
+        return { seeded: 0, skipped: true as const };
+      }
+
+      const { instruments: selectedInstruments, seededFrom } =
+        await this.resolveDefaultWatchlistInstruments();
+
+      if (selectedInstruments.length > 0) {
+        await db
+          .insert(watchlistItems)
+          .values(
+            selectedInstruments.map((inst) => ({
+              watchlistId,
+              instrumentToken: inst.instrumentToken,
+            }))
+          )
+          .onConflictDoNothing();
+      }
+
+      const [afterCount] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(watchlistItems)
+        .where(eq(watchlistItems.watchlistId, watchlistId));
+
+      logger.info(
+        {
+          watchlistId,
+          userId,
+          before: existingCount.count,
+          after: afterCount.count,
+          seededFrom,
+        },
+        'Seeded empty watchlist'
+      );
+
+      return { seeded: afterCount.count, skipped: false as const };
+    } catch (error) {
+      logger.error({ err: error, watchlistId, userId }, 'Failed to seed empty watchlist');
       throw error;
     }
   }

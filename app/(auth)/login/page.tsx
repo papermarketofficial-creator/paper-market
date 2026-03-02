@@ -117,7 +117,7 @@ function LoginForm() {
                             disabled={loading}
                         />
                     </div>
-                    <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" disabled={loading}>
+                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold" disabled={loading}>
                         {loading ? "Signing In..." : "Sign In"}
                     </Button>
                 </form>

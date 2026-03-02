@@ -7,6 +7,7 @@ import { marginCurveService } from "@/services/margin-curve.service";
 import { marketSimulation } from "@/services/market-simulation.service";
 import { realTimeMarketService } from "@/services/realtime-market.service";
 import { isTradingEnabled } from "@/lib/system-control";
+import { calculateFuturesRequiredMargin } from "@/lib/trading/futures-margin";
 
 type AccountState = "NORMAL" | "MARGIN_STRESSED" | "LIQUIDATING";
 
@@ -28,6 +29,7 @@ type PositionRisk = {
     marginUsage: number;
     unrealizedLoss: number;
     notional: number;
+    underlying: string | null;
 };
 
 type RiskState = {
@@ -53,7 +55,18 @@ function round2(value: number): number {
 
 function computeRequiredMargin(position: PositionRisk): number {
     const notional = Math.abs(position.quantity) * position.markPrice;
-    if (position.instrumentType === "FUTURE") return notional * 0.15;
+    if (position.instrumentType === "FUTURE") {
+        return calculateFuturesRequiredMargin({
+            price: position.markPrice,
+            quantity: Math.abs(position.quantity),
+            leverage: 1,
+            instrument: {
+                underlying: position.underlying || undefined,
+                name: position.underlying || undefined,
+                tradingsymbol: position.symbol,
+            },
+        });
+    }
     if (position.instrumentType === "OPTION") {
         return position.quantity >= 0 ? notional : notional * 1.2;
     }
@@ -329,6 +342,7 @@ export class LiquidationEngineService {
                 marginUsage: 0,
                 unrealizedLoss: 0,
                 notional: Math.abs(quantity) * markPrice,
+                underlying: instrument?.underlying || instrument?.name || null,
             };
 
             if (quantity >= 0) {

@@ -58,6 +58,12 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   onChartReady,
   onLoadMore 
 }, ref) => {
+  const CANDLE_TOP_MARGIN_WITH_VOLUME = 0.10;
+  const CANDLE_BOTTOM_MARGIN_WITH_VOLUME = 0.22;
+  const CANDLE_TOP_MARGIN_FULL = 0.05;
+  const CANDLE_BOTTOM_MARGIN_FULL = 0.05;
+  const VOLUME_TOP_MARGIN = 0.82;
+  const VOLUME_BOTTOM_MARGIN = 0.02;
   const LEFT_EDGE_TRIGGER_BARS = 40;
   const LOAD_MORE_LOCK_TIMEOUT_MS = 7000;
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -346,8 +352,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     // Configure candlestick scale margins (top 70% of chart)
     chart.priceScale('right').applyOptions({
       scaleMargins: {
-        top: 0.05,   // 5% from top
-        bottom: 0.30, // Leave 30% for volume (increased gap)
+        top: CANDLE_TOP_MARGIN_WITH_VOLUME,
+        bottom: CANDLE_BOTTOM_MARGIN_WITH_VOLUME,
       },
     });
 
@@ -365,8 +371,8 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
     // Configure volume scale margins (bottom 18% of chart)
     chart.priceScale('volume').applyOptions({
       scaleMargins: {
-        top: 0.82,    // Start at 82% down (increased gap)
-        bottom: 0.02, // 2% from bottom
+        top: VOLUME_TOP_MARGIN,
+        bottom: VOLUME_BOTTOM_MARGIN,
       },
     });
 
@@ -735,16 +741,23 @@ export const BaseChart = forwardRef<BaseChartRef, BaseChartProps>(({
   useEffect(() => {
     if (!chartRef.current || !candleSeriesRef.current) return;
 
-    const bottomWithVolume = showVolume ? 0.30 : 0.05;
+    const topWithVolume = CANDLE_TOP_MARGIN_WITH_VOLUME;
+    const bottomWithVolume = CANDLE_BOTTOM_MARGIN_WITH_VOLUME;
     if (hasMacd) {
       // Shrink Main Candle Series
       candleSeriesRef.current.priceScale().applyOptions({
-        scaleMargins: { top: 0.05, bottom: bottomWithVolume }
+        scaleMargins: {
+          top: showVolume ? topWithVolume : CANDLE_TOP_MARGIN_FULL,
+          bottom: showVolume ? bottomWithVolume : CANDLE_BOTTOM_MARGIN_FULL,
+        }
       });
     } else {
       // Full height
       candleSeriesRef.current.priceScale().applyOptions({
-        scaleMargins: { top: 0.05, bottom: showVolume ? 0.30 : 0.05 }
+        scaleMargins: {
+          top: showVolume ? topWithVolume : CANDLE_TOP_MARGIN_FULL,
+          bottom: showVolume ? bottomWithVolume : CANDLE_BOTTOM_MARGIN_FULL,
+        }
       });
     }
   }, [hasMacd, showVolume]);

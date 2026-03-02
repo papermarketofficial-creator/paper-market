@@ -4,27 +4,18 @@ import { config } from "../config";
 import * as schema from "./schema";
 import { logger } from "../logger";
 
-function withVerifyFullSslMode(databaseUrl: string): string {
-    if (!databaseUrl) return databaseUrl;
-    try {
-        const parsed = new URL(databaseUrl);
-        parsed.searchParams.set("sslmode", "verify-full");
-        return parsed.toString();
-    } catch {
-        const joiner = databaseUrl.includes("?") ? "&" : "?";
-        if (databaseUrl.includes("sslmode=")) {
-            return databaseUrl.replace(/sslmode=[^&]*/i, "sslmode=verify-full");
-        }
-        return `${databaseUrl}${joiner}sslmode=verify-full`;
-    }
+function shouldEnableSsl(databaseUrl: string): boolean {
+    return databaseUrl.toLowerCase().includes("neon.tech");
 }
 
 // Use standard node-postgres Pool
 // This supports transactions perfectly and works in standard Node.js environments
+const databaseUrl = config.db.url;
+const useSsl = shouldEnableSsl(databaseUrl);
+
 const pool = new Pool({
-    connectionString: withVerifyFullSslMode(config.db.url),
-    // Note: We deliberately rely on the connection string or system certs
-    // Never use rejectUnauthorized: false in production
+    connectionString: databaseUrl,
+    ssl: useSsl ? { rejectUnauthorized: true } : false,
 });
 
 // Initialize Drizzle with the schema

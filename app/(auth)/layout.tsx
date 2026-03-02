@@ -12,15 +12,15 @@ export default function AuthLayout({
             {/* Left Panel - Visuals */}
             <div className="hidden lg:flex flex-col relative bg-zinc-900 border-r border-zinc-800 text-white p-10 overflow-hidden">
                 {/* Abstract Background Effects */}
-                <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-900/40 via-zinc-900 to-zinc-900" />
+                <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-blue-900/40 via-zinc-900 to-zinc-900" />
                 <div className="absolute inset-0 bg-[url('/grid-pattern.svg')] opacity-10" />
 
                 {/* Floating Abstract "Market" Element circles */}
-                <div className="absolute top-1/3 left-1/4 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl animate-pulse" />
+                <div className="absolute top-1/3 left-1/4 w-72 h-72 bg-sky-500/10 rounded-full blur-3xl animate-pulse" />
                 <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl" />
 
                 <div className="relative z-10 mb-20">
-                    <Logo className="text-white [&_path.stroke-primary]:stroke-emerald-500 [&_span]:text-white" />
+                    <Logo className="text-white [&_path.stroke-primary]:stroke-blue-500 [&_span]:text-white" />
                 </div>
 
                 <div className="relative z-10 mt-auto mb-20 space-y-4">
@@ -37,7 +37,7 @@ export default function AuthLayout({
                 {/* Dynamic Chart Line Decoration */}
                 <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-zinc-900 to-transparent z-20" />
                 <svg
-                    className="absolute bottom-0 left-0 right-0 w-full h-48 text-emerald-500/20 z-10"
+                    className="absolute bottom-0 left-0 right-0 w-full h-48 text-blue-500/20 z-10"
                     fill="none"
                     viewBox="0 0 400 100"
                     preserveAspectRatio="none"

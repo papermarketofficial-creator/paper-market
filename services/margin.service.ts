@@ -7,6 +7,7 @@ import {
     calculateLongOptionMargin,
     calculateShortOptionMargin,
 } from "@/lib/trading/option-margin";
+import { calculateFuturesRequiredMargin } from "@/lib/trading/futures-margin";
 
 /**
  * MarginService - Calculates required margin for different instrument types.
@@ -109,9 +110,12 @@ export class MarginService {
                 return quantity * price;
 
             case "FUTURE": {
-                const notionalValue = quantity * price;
-                const spanMargin = notionalValue * 0.15;
-                return spanMargin;
+                return calculateFuturesRequiredMargin({
+                    price,
+                    quantity,
+                    leverage: orderPayload.leverage,
+                    instrument,
+                });
             }
 
             case "OPTION":

@@ -7,12 +7,14 @@ import { realTimeMarketService } from "@/services/realtime-market.service";
 import { WalletService } from "@/services/wallet.service";
 import { instrumentStore } from "@/stores/instrument.store";
 import { calculateShortOptionMargin } from "@/lib/trading/option-margin";
+import { calculateFuturesRequiredMargin, resolveEffectiveLeverage } from "@/lib/trading/futures-margin";
 
 type RiskPosition = {
     instrumentToken: string;
     quantity: number;
     instrumentType: string;
     markPrice: number;
+    leverage: number;
 };
 
 type WalletFallback = {
@@ -26,6 +28,7 @@ type ProjectedPosition = {
     instrumentType: string;
     markPrice: number;
     notional: number;
+    leverage: number;
 };
 
 const EPSILON = 0.000001;
@@ -117,10 +120,21 @@ function computeRequiredMargin(
     instrumentType: string,
     quantity: number,
     markPrice: number,
-    instrumentToken: string
+    instrumentToken: string,
+    leverage: number
 ): number {
     const notional = Math.abs(quantity) * markPrice;
-    if (instrumentType === "FUTURE") return notional * 0.15;
+    if (instrumentType === "FUTURE") {
+        const instrument = instrumentStore.isReady()
+            ? instrumentStore.getByToken(instrumentToken)
+            : null;
+        return calculateFuturesRequiredMargin({
+            price: markPrice,
+            quantity: Math.abs(quantity),
+            leverage,
+            instrument,
+        });
+    }
     if (instrumentType === "OPTION") {
         if (quantity >= 0) return notional;
 
@@ -230,7 +244,8 @@ export class PreTradeRiskService {
                     item.instrumentType,
                     item.quantity,
                     item.markPrice,
-                    item.instrumentToken
+                    item.instrumentToken,
+                    item.leverage
                 ),
             0
         );
@@ -282,6 +297,7 @@ export class PreTradeRiskService {
             quantity: item.quantity,
             instrumentType: item.instrumentType,
             markPrice: Math.max(0.01, toNumber(item.markPrice, item.averagePrice)),
+            leverage: 1,
         }));
     }
 
@@ -291,6 +307,7 @@ export class PreTradeRiskService {
         instrument: Instrument
     ): ProjectedPosition[] {
         const qtyDelta = payload.side === "BUY" ? payload.quantity : -payload.quantity;
+        const requestedLeverage = resolveEffectiveLeverage(payload.leverage);
         const nextByToken = new Map<string, RiskPosition>();
 
         for (const row of current) {
@@ -303,12 +320,16 @@ export class PreTradeRiskService {
             existing.quantity += qtyDelta;
             existing.markPrice = Math.max(0.01, referencePrice);
             existing.instrumentType = instrument.instrumentType;
+            if (instrument.instrumentType === "FUTURE") {
+                existing.leverage = requestedLeverage;
+            }
         } else {
             nextByToken.set(instrument.instrumentToken, {
                 instrumentToken: instrument.instrumentToken,
                 quantity: qtyDelta,
                 instrumentType: instrument.instrumentType,
                 markPrice: Math.max(0.01, referencePrice),
+                leverage: instrument.instrumentType === "FUTURE" ? requestedLeverage : 1,
             });
         }
 
@@ -326,6 +347,7 @@ export class PreTradeRiskService {
                 instrumentType: instType,
                 markPrice,
                 notional: Math.abs(item.quantity) * markPrice,
+                leverage: instType === "FUTURE" ? resolveEffectiveLeverage(item.leverage) : 1,
             });
         }
 

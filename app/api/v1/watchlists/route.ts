@@ -32,6 +32,15 @@ export async function GET() {
       watchlists = await WatchlistService.getUserWatchlists(session.user.id);
     }
 
+    // Self-heal existing users: if default exists but has no items, backfill it.
+    const emptyDefault = watchlists.find(
+      (w) => w.isDefault && Number(w.instrumentCount ?? 0) === 0
+    );
+    if (emptyDefault) {
+      await WatchlistService.seedWatchlistIfEmpty(emptyDefault.id, session.user.id);
+      watchlists = await WatchlistService.getUserWatchlists(session.user.id);
+    }
+
     return NextResponse.json({
       success: true,
       data: watchlists,

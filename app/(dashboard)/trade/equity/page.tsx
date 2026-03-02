@@ -70,7 +70,7 @@ export default function EquityPage() {
           setSearchModalOpen(false);
         }}
       />
-      <div className="h-full min-h-0 overflow-hidden flex flex-col">
+      <div className="h-[calc(100vh-2rem)] min-h-0 overflow-hidden flex flex-col">
         <div className="flex-1 min-h-0">
           <TradeLayout
             watchlist={

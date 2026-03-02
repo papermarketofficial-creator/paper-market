@@ -147,7 +147,7 @@ function SignupForm() {
                             disabled={loading}
                         />
                     </div>
-                    <Button className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-semibold" disabled={loading}>
+                    <Button className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold" disabled={loading}>
                         {loading ? "Creating Account..." : "Create Account"}
                     </Button>
                 </form>

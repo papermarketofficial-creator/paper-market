@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
-import { Skeleton } from "@/components/ui/skeleton";
 import { GlobalSearchModal } from "@/components/trade/search/GlobalSearchModal";
 import { FuturesTradeForm } from "@/components/trade/FuturesTradeForm";
+import { ChartLoadingIndicator } from "@/components/trade/chart/ChartLoadingIndicator";
 import { Stock } from "@/types/equity.types";
 import { symbolToIndexInstrumentKey } from "@/lib/market/symbol-normalization";
 
@@ -14,7 +14,7 @@ const CandlestickChartComponent = dynamic(
       default: mod.CandlestickChart,
     })),
   {
-    loading: () => <Skeleton className="h-full w-full rounded-none" />,
+    loading: () => <ChartLoadingIndicator />,
     ssr: false,
   },
 );
@@ -52,10 +52,60 @@ function isIndexUnderlying(value: string): boolean {
   );
 }
 
+async function fetchFuturesContracts(underlying: string): Promise<Stock[]> {
+  const params = new URLSearchParams({
+    underlying,
+    instrumentType: "FUTURE",
+  });
+
+  const res = await fetch(`/api/v1/instruments/derivatives?${params.toString()}`, {
+    cache: "no-store",
+  });
+  const payload = await res.json();
+  return payload?.data?.instruments || [];
+}
+
 export default function FuturesPage() {
   const [currentInstruments, setCurrentInstruments] = useState<Stock[]>([]);
   const [selectedStock, setSelectedStock] = useState<Stock | null>(null);
   const [searchModalOpen, setSearchModalOpen] = useState(false);
+  const [isBootstrappingDefault, setIsBootstrappingDefault] = useState(false);
+
+  useEffect(() => {
+    if (selectedStock) {
+      setIsBootstrappingDefault(false);
+      return;
+    }
+
+    let cancelled = false;
+    setIsBootstrappingDefault(true);
+
+    const loadDefaultNiftyFuture = async () => {
+      try {
+        const contracts = await fetchFuturesContracts("NIFTY");
+        if (cancelled || contracts.length === 0) return;
+
+        // API returns futures sorted by nearest expiry first.
+        const defaultContract = contracts[0];
+        setCurrentInstruments(contracts);
+        setSelectedStock((prev) => prev ?? defaultContract);
+      } catch {
+        if (!cancelled) {
+          setCurrentInstruments([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrappingDefault(false);
+        }
+      }
+    };
+
+    loadDefaultNiftyFuture();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStock]);
 
   useEffect(() => {
     if (!selectedStock) {
@@ -67,19 +117,7 @@ export default function FuturesPage() {
     const underlying = resolveUnderlyingName(selectedStock);
 
     const loadSiblingContracts = async () => {
-      const params = new URLSearchParams({
-        underlying,
-        instrumentType: "FUTURE",
-      });
-
-      const res = await fetch(
-        `/api/v1/instruments/derivatives?${params.toString()}`,
-        {
-          cache: "no-store",
-        },
-      );
-      const payload = await res.json();
-      const contracts: Stock[] = payload?.data?.instruments || [];
+      const contracts = await fetchFuturesContracts(underlying);
 
       if (cancelled) return;
 
@@ -103,11 +141,7 @@ export default function FuturesPage() {
     return () => {
       cancelled = true;
     };
-  }, [
-    selectedStock?.instrumentToken,
-    selectedStock?.name,
-    selectedStock?.symbol,
-  ]);
+  }, [selectedStock]);
 
   const chartBinding = useMemo(() => {
     const headerSymbol = selectedStock?.symbol || "FUTURES";
@@ -149,23 +183,21 @@ export default function FuturesPage() {
         }}
       />
 
-      {/* Single full-height grid — no duplicated search */}
       <div className="h-[calc(100vh-32px)] min-h-0 overflow-hidden bg-[#080c16]">
-        <div className="h-full min-h-0 grid gap-0 lg:grid-cols-[320px_minmax(0,1fr)]">
-          {/* LEFT: Order form panel */}
-          <div className="min-h-0 h-full border-r border-white/[0.06]">
+        <div className="grid h-full min-h-0 gap-0 lg:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="h-full min-h-0 border-r border-white/[0.06]">
             <FuturesTradeForm
               selectedStock={selectedStock}
               onStockSelect={setSelectedStock}
               instruments={currentInstruments}
               onOpenSearch={() => setSearchModalOpen(true)}
+              isBootstrapping={isBootstrappingDefault}
             />
           </div>
 
-          {/* RIGHT: Chart — fills remaining height exactly */}
-          <div className="min-h-0 h-full flex flex-col bg-[#0d1422]">
+          <div className="flex h-full min-h-0 flex-col bg-[#0d1422]">
             {selectedStock ? (
-              <div className="flex-1 min-h-0 relative">
+              <div className="relative min-h-0 flex-1">
                 <div className="absolute inset-0">
                   <CandlestickChartComponent
                     symbol={chartBinding.symbol}
@@ -175,13 +207,16 @@ export default function FuturesPage() {
                   />
                 </div>
               </div>
+            ) : isBootstrappingDefault ? (
+              <div className="min-h-0 flex-1">
+                <ChartLoadingIndicator />
+              </div>
             ) : (
-              /* Empty state — single search entry point */
-              <div className="flex-1 flex items-center justify-center">
-                <div className="text-center px-8 max-w-xs">
-                  <div className="mb-5 mx-auto w-16 h-16 rounded-2xl bg-[#2d6cff]/10 border border-[#2d6cff]/20 flex items-center justify-center">
+              <div className="flex flex-1 items-center justify-center">
+                <div className="max-w-xs px-8 text-center">
+                  <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-[#2d6cff]/20 bg-[#2d6cff]/10">
                     <svg
-                      className="w-7 h-7 text-[#2d6cff]"
+                      className="h-7 w-7 text-[#2d6cff]"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
@@ -194,20 +229,17 @@ export default function FuturesPage() {
                       />
                     </svg>
                   </div>
-                  <h2 className="text-base font-bold text-white mb-1.5">
-                    Futures Terminal
-                  </h2>
-                  <p className="text-xs text-slate-500 mb-5 leading-relaxed">
-                    Search any index or stock futures contract to view live
-                    chart and place orders.
+                  <h2 className="mb-1.5 text-base font-bold text-white">Futures Terminal</h2>
+                  <p className="mb-5 text-xs leading-relaxed text-slate-500">
+                    Search any index or stock futures contract to view live chart and place orders.
                   </p>
                   <button
                     type="button"
                     onClick={() => setSearchModalOpen(true)}
-                    className="w-full h-10 rounded-lg bg-[#2d6cff] hover:bg-[#3c76ff] text-white text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+                    className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-[#2d6cff] text-sm font-semibold text-white transition-colors hover:bg-[#3c76ff]"
                   >
                     <svg
-                      className="w-4 h-4"
+                      className="h-4 w-4"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
@@ -219,18 +251,16 @@ export default function FuturesPage() {
                     Search Futures Contract
                   </button>
                   <div className="mt-4 grid grid-cols-3 gap-2">
-                    {["NIFTY FUT", "BANKNIFTY FUT", "FINNIFTY FUT"].map(
-                      (label) => (
-                        <button
-                          key={label}
-                          type="button"
-                          onClick={() => setSearchModalOpen(true)}
-                          className="rounded-md bg-white/[0.04] border border-white/[0.06] px-2 py-1.5 text-[10px] font-semibold text-slate-500 hover:text-slate-300 hover:bg-white/[0.08] transition-colors"
-                        >
-                          {label}
-                        </button>
-                      ),
-                    )}
+                    {["NIFTY FUT", "BANKNIFTY FUT", "FINNIFTY FUT"].map((label) => (
+                      <button
+                        key={label}
+                        type="button"
+                        onClick={() => setSearchModalOpen(true)}
+                        className="rounded-md border border-white/[0.06] bg-white/[0.04] px-2 py-1.5 text-[10px] font-semibold text-slate-500 transition-colors hover:bg-white/[0.08] hover:text-slate-300"
+                      >
+                        {label}
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>

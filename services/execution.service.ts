@@ -23,6 +23,7 @@ import { instrumentStore } from "@/stores/instrument.store";
 import { eventBus } from "@/lib/event-bus";
 import { priceOracle } from "@/services/price-oracle.service";
 import { mtmEngineService } from "@/services/mtm-engine.service";
+import { resolveEffectiveLeverage } from "@/lib/trading/futures-margin";
 
 const PAPER_TRADING_MODE =
     String(process.env.PAPER_TRADING_MODE ?? "true").trim().toLowerCase() !== "false";
@@ -114,7 +115,7 @@ export class ExecutionService {
      */
     static async tryExecuteOrder(
         order: typeof orders.$inferSelect,
-        options: { force?: boolean } = {}
+        options: { force?: boolean; leverage?: number } = {}
     ): Promise<boolean> {
         const startMs = performance.now();
         let marginMs = 0;
@@ -208,6 +209,7 @@ export class ExecutionService {
                             quantity: fillQuantity,
                             orderType: "LIMIT" as const,
                             limitPrice: Number(order.limitPrice || executionPrice),
+                            leverage: resolveEffectiveLeverage(options.leverage),
                     }
                     : {
                         instrumentToken,
@@ -215,6 +217,7 @@ export class ExecutionService {
                         side: order.side,
                         quantity: fillQuantity,
                             orderType: "MARKET" as const,
+                            leverage: resolveEffectiveLeverage(options.leverage),
                     };
 
                 const marginStartMs = performance.now();

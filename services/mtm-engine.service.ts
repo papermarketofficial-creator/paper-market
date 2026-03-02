@@ -10,6 +10,7 @@ import { marginCurveService } from "@/services/margin-curve.service";
 import { liquidationEngineService } from "@/services/liquidation-engine.service";
 import { instrumentStore } from "@/stores/instrument.store";
 import { calculateShortOptionMargin } from "@/lib/trading/option-margin";
+import { calculateFuturesRequiredMargin } from "@/lib/trading/futures-margin";
 
 type MarginStatus = "NORMAL" | "MARGIN_STRESSED";
 type AccountState = "NORMAL" | "MARGIN_STRESSED" | "LIQUIDATING";
@@ -92,7 +93,17 @@ function computeRequiredMargin(
     const notional = qty * markPrice;
     const instrumentType = position.instrumentType;
 
-    if (instrumentType === "FUTURE") return notional * 0.15;
+    if (instrumentType === "FUTURE") {
+        const instrument = instrumentStore.isReady()
+            ? instrumentStore.getByToken(position.instrumentToken)
+            : null;
+        return calculateFuturesRequiredMargin({
+            price: markPrice,
+            quantity: qty,
+            leverage: 1,
+            instrument,
+        });
+    }
     if (instrumentType === "OPTION") {
         if (position.quantity >= 0) return notional;
         const underlyingPrice = resolveUnderlyingPrice(position.instrumentToken, markPrice);

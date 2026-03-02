@@ -13,6 +13,7 @@ type OrderPlacementParams = {
   side: Position["side"];
   quantity: number;
   entryPrice?: number;
+  leverage?: number;
 };
 
 interface TradeExecutionState {
@@ -90,6 +91,9 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
         quantity: tradeParams.quantity,
         orderType: orderType,
       };
+      if (Number.isFinite(tradeParams.leverage)) {
+        payload.leverage = tradeParams.leverage;
+      }
 
       console.log("[DEBUG] Sending payload:", payload);
 
