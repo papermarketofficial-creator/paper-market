@@ -14,6 +14,7 @@ import {
   CandlestickChart
 } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,6 +26,7 @@ interface ChartHeaderProps {
   symbol: string;
   displaySymbol?: string;
   chartStyle?: ChartStyle;
+  compact?: boolean;
   isInstantOrderActive: boolean;
   onToggleInstantOrder: () => void;
   onUndo?: () => void;
@@ -41,6 +43,7 @@ export function ChartHeader({
     symbol, 
     displaySymbol,
     chartStyle = "CANDLE",
+    compact = false,
     isInstantOrderActive, 
     onToggleInstantOrder,
     onUndo,
@@ -64,9 +67,15 @@ export function ChartHeader({
   } as const;
 
   return (
-    <div className="flex items-center justify-between p-1.5 border-b border-border bg-card z-30 shrink-0 h-11">
+    <div
+      className={cn(
+        "z-30 shrink-0 border-b border-border bg-card p-1.5",
+        compact ? "h-auto" : "h-11",
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
       {/* Left Section */}
-      <div className="flex items-center gap-1.5 h-full">
+      <div className={cn("flex h-full items-center gap-1.5", compact && "min-w-0 overflow-x-auto")}>
         {/* Symbol Search Trigger */}
         <Button 
           variant="ghost" 
@@ -84,7 +93,8 @@ export function ChartHeader({
           <span className="text-[10px] text-muted-foreground bg-muted px-1 rounded-sm border border-border">NSE</span>
         </Button>
 
-
+        {!compact && (
+          <>
 
         <Separator orientation="vertical" className="h-4 bg-border/50 mx-1" />
 
@@ -154,11 +164,32 @@ export function ChartHeader({
         <Separator orientation="vertical" className="h-4 bg-border/50 mx-1" />
         
        
+          </>
+        )}
+        {compact && (
+          <div className="flex items-center gap-1">
+            <Button
+              size="sm"
+              className="h-8 px-3 bg-trade-buy hover:bg-trade-buy/90 text-white text-[10px] font-bold uppercase"
+              onClick={() => (window as any).triggerTrade?.('BUY')}
+            >
+              Buy
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 px-3 bg-trade-sell hover:bg-trade-sell/90 text-white text-[10px] font-bold uppercase"
+              onClick={() => (window as any).triggerTrade?.('SELL')}
+            >
+              Sell
+            </Button>
+          </div>
+        )}
 
-        
+       
       </div>
 
       {/* Right Section */}
+      {!compact ? (
       <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={onUndo}>
               <Undo2 className="h-4 w-4" />
@@ -176,6 +207,8 @@ export function ChartHeader({
            <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={onMaximize}>
               {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
           </Button>
+      </div>
+      ) : null}
       </div>
     </div>
   );

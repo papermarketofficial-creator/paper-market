@@ -8,6 +8,7 @@ interface OptionsTradeFormProps {
   selectedStock: Stock | null;
   onStockSelect: (stock: Stock) => void;
   instruments: Stock[];
+  sheetMode?: boolean;
   activeInstrumentType?: InstrumentType;
   onInstrumentTypeChange?: (type: InstrumentType) => void;
   allowedInstrumentTypes?: InstrumentType[];
@@ -17,6 +18,7 @@ export function OptionsTradeForm({
   selectedStock,
   onStockSelect,
   instruments,
+  sheetMode = false,
   activeInstrumentType,
   onInstrumentTypeChange,
   allowedInstrumentTypes,
@@ -27,6 +29,7 @@ export function OptionsTradeForm({
       onStockSelect={onStockSelect}
       instruments={instruments}
       instrumentMode="options"
+      sheetMode={sheetMode}
       activeInstrumentType={activeInstrumentType}
       onInstrumentTypeChange={onInstrumentTypeChange}
       allowedInstrumentTypes={allowedInstrumentTypes}

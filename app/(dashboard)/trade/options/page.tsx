@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { GlobalSearchModal } from "@/components/trade/search/GlobalSearchModal";
-import { TradingLayout } from "@/components/trade/options/TradingLayout";
 import { TerminalHeader } from "@/components/trade/options/TerminalHeader";
 import { OptionChainTable } from "@/components/trade/options/OptionChainTable";
 import { OrderPanel } from "@/components/trade/options/OrderPanel";
@@ -13,10 +13,21 @@ import { OptionChainRow } from "@/components/trade/options/types";
 import { Stock } from "@/types/equity.types";
 import { useMarketStore } from "@/stores/trading/market.store";
 import { symbolToIndexInstrumentKey } from "@/lib/market/symbol-normalization";
+import { AdaptiveTradeLayout } from "@/components/trade/layout/AdaptiveTradeLayout";
+import { MobileTradeTopBar } from "@/components/trade/mobile/MobileTradeTopBar";
+import { PositionsCards } from "@/components/trade/mobile/PositionsCards";
+import { useWalletStore } from "@/stores/wallet.store";
 
 type TradeMode = "single" | "strategy";
 
-/* ── helpers ──────────────────────────────────────────────────────────────── */
+const CandlestickChartComponent = dynamic(
+  () =>
+    import("@/components/trade/CandlestickChart").then((mod) => ({
+      default: mod.CandlestickChart,
+    })),
+  { ssr: false },
+);
+
 function normalizeKey(v: string): string {
   return String(v || "").trim().toUpperCase().replace(/\s+/g, "");
 }
@@ -52,8 +63,14 @@ function getDaysToExpiry(dateKey: string): number | null {
   return Math.ceil((exp.getTime() - now.getTime()) / 86_400_000);
 }
 
-/* ══════════════════════════════════════════════════════════════════════════ */
+function formatBalance(value: number): string {
+  if (!Number.isFinite(value)) return "--";
+  return `INR ${value.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
+}
+
 export default function OptionsPage() {
+  const walletBalance = useWalletStore((state) => state.balance);
+
   const [searchOpen, setSearchOpen] = useState(false);
   const [underlying, setUnderlying] = useState("NIFTY");
   const [selectedExpiry, setSelectedExpiry] = useState("");
@@ -61,23 +78,27 @@ export default function OptionsPage() {
   const [selectedContract, setSelectedContract] = useState<Stock | null>(null);
   const [initialSide, setInitialSide] = useState<"BUY" | "SELL">("BUY");
   const [mode, setMode] = useState<TradeMode>("single");
+  const [mobileOrderOpen, setMobileOrderOpen] = useState(false);
 
-  /* stores */
   const fetchOptionChain = useMarketStore((s) => s.fetchOptionChain);
   const chainKey = useMemo(
     () => buildOptionChainKey(underlying, selectedExpiry || undefined),
-    [selectedExpiry, underlying]
+    [selectedExpiry, underlying],
   );
   const optionChain = useMarketStore((s) => s.optionChainByKey[chainKey] || null);
   const isFetching = useMarketStore(
-    (s) => s.isFetchingChain && s.fetchingOptionChainKey === chainKey
+    (s) => s.isFetchingChain && s.fetchingOptionChainKey === chainKey,
   );
   const selectPrice = useMarketStore((s) => s.selectPrice);
   const selectQuote = useMarketStore((s) => s.selectQuote);
 
-  /* Load contracts for underlying */
   useEffect(() => {
-    if (!underlying) { setContracts([]); setSelectedContract(null); setSelectedExpiry(""); return; }
+    if (!underlying) {
+      setContracts([]);
+      setSelectedContract(null);
+      setSelectedExpiry("");
+      return;
+    }
     let cancelled = false;
     const load = async () => {
       const params = new URLSearchParams({ underlying, instrumentType: "OPTION" });
@@ -86,11 +107,14 @@ export default function OptionsPage() {
       const items: Stock[] = payload?.data?.instruments || [];
       if (!cancelled) setContracts(items);
     };
-    load().catch(() => { if (!cancelled) setContracts([]); });
-    return () => { cancelled = true; };
+    load().catch(() => {
+      if (!cancelled) setContracts([]);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [underlying]);
 
-  /* Expiry list */
   const expiries = useMemo(() => {
     const keys = new Set<string>();
     for (const item of contracts) {
@@ -101,13 +125,19 @@ export default function OptionsPage() {
   }, [contracts]);
 
   useEffect(() => {
-    if (expiries.length === 0) { setSelectedExpiry(""); return; }
+    if (expiries.length === 0) {
+      setSelectedExpiry("");
+      return;
+    }
     if (!selectedExpiry || !expiries.includes(selectedExpiry)) setSelectedExpiry(expiries[0]);
   }, [expiries, selectedExpiry]);
 
   const filteredContracts = useMemo(
-    () => (selectedExpiry ? contracts.filter((c) => toDateKey(c.expiryDate) === selectedExpiry) : []),
-    [contracts, selectedExpiry]
+    () =>
+      selectedExpiry
+        ? contracts.filter((c) => toDateKey(c.expiryDate) === selectedExpiry)
+        : [],
+    [contracts, selectedExpiry],
   );
 
   const optionTokenBySymbol = useMemo<Record<string, string>>(() => {
@@ -120,16 +150,14 @@ export default function OptionsPage() {
     return map;
   }, [filteredContracts]);
 
-  /* Invalidate selected contract when expiry changes */
   useEffect(() => {
     if (!selectedContract) return;
     const exists = filteredContracts.some(
-      (c) => c.instrumentToken === selectedContract.instrumentToken
+      (c) => c.instrumentToken === selectedContract.instrumentToken,
     );
     if (!exists) setSelectedContract(null);
   }, [filteredContracts, selectedContract]);
 
-  /* Fetch chain (debounced) */
   useEffect(() => {
     if (!underlying) return;
     if (optionChain) return;
@@ -139,7 +167,6 @@ export default function OptionsPage() {
     return () => window.clearTimeout(timer);
   }, [fetchOptionChain, optionChain, selectedExpiry, underlying]);
 
-  /* Chain rows */
   const chainRows = useMemo<OptionChainRow[]>(() => {
     const strikes = optionChain?.strikes || [];
     return (strikes as Array<Record<string, unknown>>)
@@ -166,7 +193,6 @@ export default function OptionsPage() {
       .sort((a, b) => a.strike - b.strike);
   }, [optionChain?.strikes]);
 
-  /* Pricing */
   const underlyingQuote = selectQuote(underlying);
   const chainPrice = Number(optionChain?.underlyingPrice || 0);
   const fallbackPrice = Number(selectPrice(underlying) || 0);
@@ -178,21 +204,22 @@ export default function OptionsPage() {
   const changePercent =
     Number.isFinite(chainChange) && chainChange !== 0 ? chainChange : quoteChange;
 
-  /* ATM */
   const atmStrike = useMemo(() => {
     if (!chainRows.length || !Number.isFinite(underlyingPrice) || underlyingPrice <= 0) return null;
     let best = chainRows[0].strike;
     let minD = Math.abs(best - underlyingPrice);
     for (const r of chainRows) {
       const d = Math.abs(r.strike - underlyingPrice);
-      if (d < minD) { minD = d; best = r.strike; }
+      if (d < minD) {
+        minD = d;
+        best = r.strike;
+      }
     }
     return best;
   }, [chainRows, underlyingPrice]);
 
   const daysToExpiry = getDaysToExpiry(selectedExpiry);
 
-  /* Handlers */
   const handleSearchSelect = (stock: Stock) => {
     setUnderlying(resolveUnderlying(stock));
     const exp = toDateKey(stock.expiryDate);
@@ -208,23 +235,25 @@ export default function OptionsPage() {
       contracts.find((c) => c.symbol === symbol);
     if (!found) return;
 
-    // Derive the LTP from the option chain rows (the chain API has prices,
-    // the derivatives API Stock object typically has price=0).
     let chainLtp = 0;
     for (const row of chainRows) {
-      if (row.ce?.symbol === symbol && row.ce.ltp > 0) { chainLtp = row.ce.ltp; break; }
-      if (row.pe?.symbol === symbol && row.pe.ltp > 0) { chainLtp = row.pe.ltp; break; }
+      if (row.ce?.symbol === symbol && row.ce.ltp > 0) {
+        chainLtp = row.ce.ltp;
+        break;
+      }
+      if (row.pe?.symbol === symbol && row.pe.ltp > 0) {
+        chainLtp = row.pe.ltp;
+        break;
+      }
     }
 
-    // Inject price so OrderPanel has a valid premium from the start
     const contractWithPrice = chainLtp > 0 ? { ...found, price: chainLtp } : found;
     setSelectedContract(contractWithPrice);
     setInitialSide(side);
     setMode("single");
   };
 
-  /* Right panel content */
-  const renderPanel = () => {
+  const renderPanel = (sheetMode = false) => {
     if (mode === "strategy") {
       return (
         <div className="h-full overflow-y-auto">
@@ -247,6 +276,7 @@ export default function OptionsPage() {
           daysToExpiry={daysToExpiry}
           initialSide={initialSide}
           onClose={() => setSelectedContract(null)}
+          sheetMode={sheetMode}
         />
       );
     }
@@ -263,7 +293,50 @@ export default function OptionsPage() {
 
   const hasPanelContent = mode === "strategy" || !!selectedContract;
 
-  /* ── render ── */
+  const headerNode = (
+    <TerminalHeader
+      underlyingLabel={underlying}
+      underlyingPrice={underlyingPrice}
+      underlyingChangePercent={changePercent}
+      selectedExpiry={selectedExpiry}
+      expiries={expiries}
+      daysToExpiry={daysToExpiry}
+      atmStrike={atmStrike}
+      mode={mode}
+      onOpenSearch={() => setSearchOpen(true)}
+      onModeChange={(m) => {
+        setMode(m);
+        if (m === "strategy") setSelectedContract(null);
+      }}
+      onExpiryChange={setSelectedExpiry}
+    />
+  );
+
+  const chainNode = (
+    <OptionChainTable
+      rows={chainRows}
+      underlyingPrice={underlyingPrice}
+      atmStrike={atmStrike}
+      expiryKey={optionChain?.expiry || selectedExpiry || ""}
+      chainKey={chainKey}
+      optionTokenBySymbol={optionTokenBySymbol}
+      selectedSymbol={selectedContract?.symbol || null}
+      onSelectSymbol={handleSelectChainSymbol}
+      isLoading={isFetching}
+    />
+  );
+
+  const chartNode = (
+    <div className="h-full min-h-0 overflow-hidden bg-[#0d1422]">
+      <CandlestickChartComponent
+        symbol={underlying}
+        headerSymbol={underlying}
+        instrumentKey={symbolToIndexInstrumentKey(underlying) || undefined}
+        onSearchClick={() => setSearchOpen(true)}
+      />
+    </div>
+  );
+
   return (
     <>
       <GlobalSearchModal
@@ -274,42 +347,77 @@ export default function OptionsPage() {
         onSelectStock={handleSearchSelect}
       />
 
-      <TradingLayout
-        hasPanelContent={hasPanelContent}
-        header={
-          <TerminalHeader
-            underlyingLabel={underlying}
-            underlyingPrice={underlyingPrice}
-            underlyingChangePercent={changePercent}
-            selectedExpiry={selectedExpiry}
-            expiries={expiries}
-            daysToExpiry={daysToExpiry}
-            atmStrike={atmStrike}
-            mode={mode}
-            onOpenSearch={() => setSearchOpen(true)}
-            onModeChange={(m) => {
-              setMode(m);
-              if (m === "strategy") setSelectedContract(null);
-            }}
-            onExpiryChange={setSelectedExpiry}
-          />
-        }
-        chain={
-          <OptionChainTable
-            rows={chainRows}
-            underlyingPrice={underlyingPrice}
-            atmStrike={atmStrike}
-            expiryKey={optionChain?.expiry || selectedExpiry || ""}
-            chainKey={chainKey}
-            optionTokenBySymbol={optionTokenBySymbol}
-            selectedSymbol={selectedContract?.symbol || null}
-            onSelectSymbol={handleSelectChainSymbol}
-            isLoading={isFetching}
-          />
-        }
-        panel={renderPanel()}
-        bottomBar={<BottomBar />}
-      />
+      <div className="h-[calc(100vh-32px)] min-h-0 overflow-hidden bg-[#080c16]">
+        <AdaptiveTradeLayout
+          header={headerNode}
+          footer={<BottomBar />}
+          desktopCenter={chainNode}
+          desktopRight={
+            <div className="h-full min-h-0 overflow-y-auto border-l border-white/[0.06]">{renderPanel()}</div>
+          }
+          desktopRightWidth={hasPanelContent ? "340px" : "300px"}
+          tabletTop={chartNode}
+          tabletLeft={<div className="h-full min-h-0 overflow-y-auto">{renderPanel()}</div>}
+          tabletRight={chainNode}
+          mobileTopBar={
+            <MobileTradeTopBar
+              instrumentLabel={underlying}
+              ltp={underlyingPrice}
+              changePercent={changePercent}
+              balanceLabel={formatBalance(walletBalance)}
+              onBuy={() => {
+                setMode("single");
+                setInitialSide("BUY");
+                setMobileOrderOpen(true);
+              }}
+              onSell={() => {
+                setMode("single");
+                setInitialSide("SELL");
+                setMobileOrderOpen(true);
+              }}
+            />
+          }
+          mobileTabs={[
+            { id: "chart", label: "Chart", content: chartNode, keepMounted: true },
+            { id: "order", label: "Order", onSelect: () => setMobileOrderOpen(true) },
+            { id: "positions", label: "Positions", content: <PositionsCards instrumentFilter="options" /> },
+            {
+              id: "chain",
+              label: "Option Chain",
+              content: (
+                <OptionChainTable
+                  rows={chainRows}
+                  underlyingPrice={underlyingPrice}
+                  atmStrike={atmStrike}
+                  expiryKey={optionChain?.expiry || selectedExpiry || ""}
+                  chainKey={chainKey}
+                  optionTokenBySymbol={optionTokenBySymbol}
+                  selectedSymbol={selectedContract?.symbol || null}
+                  onSelectSymbol={handleSelectChainSymbol}
+                  isLoading={isFetching}
+                  mobileMode
+                />
+              ),
+            },
+            ...(mode === "strategy"
+              ? [
+                  {
+                    id: "strategy",
+                    label: "Strategy",
+                    content: (
+                      <div className="h-full min-h-0 overflow-y-auto">{renderPanel(true)}</div>
+                    ),
+                  },
+                ]
+              : []),
+          ]}
+          mobileDefaultTab="chart"
+          mobileOrderOpen={mobileOrderOpen}
+          onMobileOrderOpenChange={setMobileOrderOpen}
+          mobileOrderDrawer={<div className="h-[82vh] min-h-0 overflow-y-auto">{renderPanel(true)}</div>}
+        />
+      </div>
     </>
   );
 }
+

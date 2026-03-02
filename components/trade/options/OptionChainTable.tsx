@@ -15,6 +15,7 @@ type OptionChainTableProps = {
   selectedSymbol?: string | null;
   onSelectSymbol: (symbol: string, side?: "BUY" | "SELL") => void;
   isLoading?: boolean;
+  mobileMode?: boolean;
 };
 
 type FlashDir = "up" | "down";
@@ -238,7 +239,7 @@ const ChainRow = memo(function ChainRow({
 
 export function OptionChainTable({
   rows, underlyingPrice, atmStrike, expiryKey, chainKey,
-  optionTokenBySymbol, selectedSymbol, onSelectSymbol, isLoading = false,
+  optionTokenBySymbol, selectedSymbol, onSelectSymbol, isLoading = false, mobileMode = false,
 }: OptionChainTableProps) {
   const quotes = useMarketStore((s) => s.quotesByInstrument);
   const rowRefs = useRef<Record<number, HTMLDivElement | null>>({});
@@ -348,7 +349,8 @@ export function OptionChainTable({
   }, [rowsWithDisplay]);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
+    <div className={cn("flex h-full flex-col overflow-hidden", mobileMode && "overflow-x-auto")}>
+      <div className={cn("flex h-full flex-col overflow-hidden", mobileMode && "min-w-[640px]")}>
       {/* Sticky column headers */}
       <div className="shrink-0 border-b border-white/[0.06] bg-[#0d1422]">
         {/* Sub-header: range selector */}
@@ -381,6 +383,13 @@ export function OptionChainTable({
 
       {/* Scrollable rows */}
       <div className="flex-1 overflow-y-auto [scrollbar-color:rgba(148,163,184,.25)_transparent] [scrollbar-width:thin]">
+        {mobileMode && (
+          <div className="sticky top-0 z-20 border-b border-white/[0.06] bg-[#0d1422] px-4 py-1.5 text-[11px] text-slate-400">
+            ATM: <span className="font-semibold text-[#8fb3ff]">{derivedAtm ? derivedAtm.toLocaleString("en-IN") : "--"}</span>
+            <span className="mx-2 text-white/20">|</span>
+            Spot: <span className="font-semibold text-slate-200">{fmtLtp(underlyingPrice)}</span>
+          </div>
+        )}
         {isLoading ? (
           <div>
             {Array.from({ length: 21 }, (_, i) => (
@@ -404,21 +413,40 @@ export function OptionChainTable({
             
             {rowsWithDisplay.map(({ row, ceLtp, peLtp }) => {
               const isAtm = derivedAtm !== null && row.strike === derivedAtm;
+              const isExpanded =
+                selectedSymbol === row.ce?.symbol || selectedSymbol === row.pe?.symbol;
               return (
-                <ChainRow
-                  key={row.strike}
-                  row={row}
-                  ceLtp={ceLtp}
-                  peLtp={peLtp}
-                  isAtm={isAtm}
-                  spotPrice={underlyingPrice}
-                  atm={derivedAtm}
-                  selectedSymbol={selectedSymbol}
-                  onSelectSymbol={onSelectSymbol}
-                  ceFlash={flashMap[row.ce?.symbol || ""]}
-                  peFlash={flashMap[row.pe?.symbol || ""]}
-                  rowRef={(el) => { rowRefs.current[row.strike] = el; }}
-                />
+                <div key={row.strike}>
+                  <ChainRow
+                    row={row}
+                    ceLtp={ceLtp}
+                    peLtp={peLtp}
+                    isAtm={isAtm}
+                    spotPrice={underlyingPrice}
+                    atm={derivedAtm}
+                    selectedSymbol={selectedSymbol}
+                    onSelectSymbol={onSelectSymbol}
+                    ceFlash={flashMap[row.ce?.symbol || ""]}
+                    peFlash={flashMap[row.pe?.symbol || ""]}
+                    rowRef={(el) => { rowRefs.current[row.strike] = el; }}
+                  />
+                  {mobileMode && isExpanded && (
+                    <div className="grid grid-cols-2 border-b border-white/[0.04] bg-white/[0.02] px-4 py-2 text-[11px] text-slate-400">
+                      <div className="pr-2">
+                        <p className="font-semibold text-emerald-300">CE details</p>
+                        <p>OI: {fmtOI(Number(row.ce?.oi ?? 0))}</p>
+                        <p>VOL: {fmtOI(Number(row.ce?.volume ?? 0))}</p>
+                        <p>LTP: {fmtLtp(ceLtp)}</p>
+                      </div>
+                      <div className="pl-2 text-right">
+                        <p className="font-semibold text-rose-300">PE details</p>
+                        <p>OI: {fmtOI(Number(row.pe?.oi ?? 0))}</p>
+                        <p>VOL: {fmtOI(Number(row.pe?.volume ?? 0))}</p>
+                        <p>LTP: {fmtLtp(peLtp)}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               );
             })}
 
@@ -432,6 +460,7 @@ export function OptionChainTable({
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

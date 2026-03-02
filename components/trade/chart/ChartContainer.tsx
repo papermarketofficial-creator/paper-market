@@ -15,6 +15,7 @@ import { toCanonicalSymbol, toInstrumentKey } from '@/lib/market/symbol-normaliz
 import { computeIndicators, scheduleIndicatorComputation, type ComputedIndicator } from '@/lib/analysis/indicator-engine';
 import { trackAnalysisEvent } from '@/lib/analysis/telemetry';
 import { Eye, EyeOff, Lock, Unlock, Trash2 } from 'lucide-react';
+import { useTradeViewport } from '@/hooks/use-trade-viewport';
 
 // Dynamic imports to avoid SSR issues with LWC
 const BaseChart = dynamic(() => import('./BaseChart').then(mod => mod.BaseChart), { ssr: false });
@@ -47,6 +48,7 @@ const INITIAL_VISIBLE_BARS_BY_RANGE: Record<string, number> = {
 
 
 export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchClick }: ChartContainerProps) {
+  const { isMobile } = useTradeViewport();
   const canonicalSymbol = toCanonicalSymbol(symbol);
   const analysisV2Enabled = process.env.NEXT_PUBLIC_ANALYSIS_V2 === "true";
   const {
@@ -715,6 +717,7 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
             symbol={symbol}
             displaySymbol={headerSymbol}
             chartStyle={chartStyle}
+            compact={isMobile}
             isInstantOrderActive={showTradingPanel}
             onToggleInstantOrder={() => setShowTradingPanel(!showTradingPanel)}
             onUndo={handleUndo}
@@ -741,6 +744,7 @@ export function ChartContainer({ symbol, headerSymbol, instrumentKey, onSearchCl
               symbol={symbol}
               displaySymbol={headerSymbol}
               chartStyle={chartStyle}
+              compact={isMobile}
               isInstantOrderActive={showTradingPanel}
               onToggleInstantOrder={() => setShowTradingPanel(!showTradingPanel)}
               onUndo={handleUndo}

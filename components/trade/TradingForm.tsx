@@ -43,6 +43,7 @@ interface TradingFormProps {
   instruments: Stock[];
   instrumentMode: InstrumentMode;
   allowedInstrumentTypes?: InstrumentType[];
+  sheetMode?: boolean;
 }
 
 function parseExpiryDate(value: unknown): Date | null {
@@ -61,7 +62,7 @@ function toExpiryIso(value: unknown): string {
   return parsed ? parsed.toISOString() : '';
 }
 
-export function TradingForm({ selectedStock, onStockSelect, instruments: propInstruments, instrumentMode, allowedInstrumentTypes, activeInstrumentType, onInstrumentTypeChange }: TradingFormProps & { activeInstrumentType?: InstrumentType, onInstrumentTypeChange?: (type: InstrumentType) => void }) {
+export function TradingForm({ selectedStock, onStockSelect, instruments: propInstruments, instrumentMode, allowedInstrumentTypes, sheetMode = false, activeInstrumentType, onInstrumentTypeChange }: TradingFormProps & { activeInstrumentType?: InstrumentType, onInstrumentTypeChange?: (type: InstrumentType) => void }) {
   // New State for Redesign
   const [localInstrumentType, setLocalInstrumentType] = useState<InstrumentType>("NIFTY");
 
@@ -382,7 +383,12 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
 
   return (
     <TooltipProvider>
-      <Card className="bg-card border-border h-full rounded-sm shadow-none flex flex-col min-h-0">
+      <Card
+        className={cn(
+          "bg-card border-border h-full rounded-sm shadow-none flex flex-col min-h-0",
+          sheetMode && "rounded-none border-0 bg-transparent",
+        )}
+      >
         {!isEquityMode && (
           <CardHeader className="pb-2 p-3">
             <InstrumentSelector
@@ -394,12 +400,12 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
           </CardHeader>
         )}
 
-        <CardHeader className={cn("pt-2 p-3", !isEquityMode && "pt-0")}>
+        <CardHeader className={cn("pt-2 p-3", !isEquityMode && "pt-0", sheetMode && "p-4")}>
           {/* TradeTypeSelector removed - derived from route */}
           {isEquityMode && <CardTitle className="text-foreground">Place Order</CardTitle>}
         </CardHeader>
 
-        <CardContent className="space-y-4 p-3 flex-1 min-h-0 overflow-y-auto">
+        <CardContent className={cn("space-y-4 p-3 flex-1 min-h-0 overflow-y-auto", sheetMode && "px-4 pb-24")}>
           {showQuickFuturesSearch && (
             <StockSearch
               selectedStock={selectedStock}
@@ -589,7 +595,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                 )}
               </div>
 
-              <div className="mt-4 space-y-4">
+              <div className={cn("mt-4 space-y-4", sheetMode && "sticky bottom-0 border-t border-white/[0.08] bg-[#0d1422] py-3")}>
                 <ProductTypeSelector productType={productType} onProductTypeChange={setProductType} />
                 <LeverageSelector leverage={leverage} onLeverageChange={setLeverage} />
                 <MarginDisplay selectedStock={selectedStock} currentPrice={currentPrice} requiredMargin={requiredMargin} balance={balance} />
@@ -607,7 +613,7 @@ export function TradingForm({ selectedStock, onStockSelect, instruments: propIns
                   disabled={!canTrade}
                   variant="default"
                   className={cn(
-                    'w-full h-9 text-sm font-bold uppercase tracking-widest transition-all rounded-sm shadow-none',
+                    'w-full min-h-11 text-sm font-bold uppercase tracking-widest transition-all rounded-sm shadow-none',
                     side === 'BUY'
                       ? 'bg-trade-buy hover:bg-trade-buy/90 text-white'
                       : 'bg-trade-sell hover:bg-trade-sell/90 text-white'

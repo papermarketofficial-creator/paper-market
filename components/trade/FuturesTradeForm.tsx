@@ -25,6 +25,7 @@ interface FuturesTradeFormProps {
   instruments: Stock[];
   onOpenSearch: () => void;
   isBootstrapping?: boolean;
+  sheetMode?: boolean;
 }
 
 function parseExpiryDate(value: unknown): Date | null {
@@ -73,6 +74,7 @@ export function FuturesTradeForm({
   instruments,
   onOpenSearch,
   isBootstrapping = false,
+  sheetMode = false,
 }: FuturesTradeFormProps) {
   const [selectedExpiry, setSelectedExpiry] = useState<string>("");
   const [side, setSide] = useState<"BUY" | "SELL">("BUY");
@@ -282,7 +284,7 @@ export function FuturesTradeForm({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0d1422]">
+    <div className={cn("flex h-full min-h-0 flex-col bg-[#0d1422]", sheetMode && "rounded-none")}>
       <div className="flex shrink-0 items-center justify-between border-b border-white/[0.06] px-4 py-3">
         <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">
           Futures Order
@@ -297,7 +299,7 @@ export function FuturesTradeForm({
         </button>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3 [scrollbar-width:thin]">
+      <div className={cn("flex-1 space-y-3 overflow-y-auto px-4 py-3 [scrollbar-width:thin]", sheetMode && "pb-20")}>
         {!selectedStock ? (
           <div className="flex h-full min-h-[220px] items-center justify-center rounded-xl border border-white/[0.06] bg-[#0b1120]">
             {isBootstrapping ? (
@@ -538,13 +540,13 @@ export function FuturesTradeForm({
       </div>
 
       {selectedStock && (
-        <div className="shrink-0 border-t border-white/[0.06] p-4">
+        <div className={cn("shrink-0 border-t border-white/[0.06] p-4", sheetMode && "sticky bottom-0 bg-[#0d1422]")}>
           <button
             type="button"
             onClick={handleExecute}
             disabled={!canTrade}
             className={cn(
-              "w-full rounded-xl py-3 text-sm font-bold tracking-wide transition-all",
+              "w-full min-h-11 rounded-xl py-3 text-sm font-bold tracking-wide transition-all",
               !canTrade
                 ? "cursor-not-allowed bg-white/[0.06] text-slate-600"
                 : side === "BUY"

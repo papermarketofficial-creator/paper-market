@@ -18,6 +18,7 @@ type OrderPanelProps = {
   daysToExpiry?: number | null;
   initialSide?: "BUY" | "SELL";
   onClose: () => void;
+  sheetMode?: boolean;
 };
 
 function getOptionType(contract: Stock): "CE" | "PE" {
@@ -44,7 +45,7 @@ function fmtPrice(v: number): string {
  * Clean, professional order panel — Zerodha/Upstox style.
  * No modals. No confirmations. Instant paper execution.
  */
-export function OrderPanel({ contract, underlyingPrice, daysToExpiry, initialSide, onClose }: OrderPanelProps) {
+export function OrderPanel({ contract, underlyingPrice, daysToExpiry, initialSide, onClose, sheetMode = false }: OrderPanelProps) {
   const [side, setSide] = useState<"BUY" | "SELL">(initialSide || "BUY");
   const [lots, setLots] = useState("1");
   const [orderType, setOrderType] = useState<OrderType>("MARKET");
@@ -149,7 +150,7 @@ export function OrderPanel({ contract, underlyingPrice, daysToExpiry, initialSid
   const buyActive = side === "BUY";
 
   return (
-    <div className="flex h-full flex-col bg-[#0d1422]">
+    <div className={cn("flex h-full flex-col bg-[#0d1422]", sheetMode && "rounded-none")}>
       {/* ── Header ── */}
       <div className="flex shrink-0 items-start justify-between border-b border-white/[0.06] px-4 py-3">
         <div className="min-w-0">
@@ -208,7 +209,7 @@ export function OrderPanel({ contract, underlyingPrice, daysToExpiry, initialSid
       </div>
 
       {/* ── Scrollable body ── */}
-      <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3 [scrollbar-width:thin]">
+      <div className={cn("flex-1 space-y-3 overflow-y-auto px-4 py-3 [scrollbar-width:thin]", sheetMode && "pb-20")}>
 
         {/* BUY / SELL tabs */}
         <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-white/[0.08] bg-white/[0.03]">
@@ -376,13 +377,13 @@ export function OrderPanel({ contract, underlyingPrice, daysToExpiry, initialSid
       </div>
 
       {/* ── Execute button (sticky bottom) ── */}
-      <div className="shrink-0 border-t border-white/[0.06] p-4">
+      <div className={cn("shrink-0 border-t border-white/[0.06] p-4", sheetMode && "sticky bottom-0 bg-[#0d1422]")}>
         <button
           type="button"
           onClick={handleExecute}
           disabled={isDisabled}
           className={cn(
-            "w-full rounded-xl py-3 text-sm font-bold tracking-wide transition-all",
+            "w-full min-h-11 rounded-xl py-3 text-sm font-bold tracking-wide transition-all",
             isDisabled
               ? "cursor-not-allowed bg-white/[0.06] text-slate-600"
               : side === "BUY"
