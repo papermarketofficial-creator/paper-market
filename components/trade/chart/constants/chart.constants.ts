@@ -1,0 +1,8 @@
+export const CANDLE_TOP_MARGIN_WITH_VOLUME = 0.10;
+export const CANDLE_BOTTOM_MARGIN_WITH_VOLUME = 0.22;
+export const CANDLE_TOP_MARGIN_FULL = 0.05;
+export const CANDLE_BOTTOM_MARGIN_FULL = 0.05;
+export const VOLUME_TOP_MARGIN = 0.82;
+export const VOLUME_BOTTOM_MARGIN = 0.02;
+export const LEFT_EDGE_TRIGGER_BARS = 40;
+export const LOAD_MORE_LOCK_TIMEOUT_MS = 7000;

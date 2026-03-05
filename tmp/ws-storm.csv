@@ -1,0 +1,2 @@
+time,mode,label,step_index,users,duration_sec,connect_success_pct,connect_p95_ms,disconnect_pct,messages,ticks,tick_latency_p95_ms,tick_latency_max_ms,avg_messages_per_sec,avg_ticks_per_sec,avg_bytes_per_sec,bytes_per_user,event_loop_lag_p95_ms,event_loop_lag_max_ms,heap_growth_mb,heap_continuous_growth,resubscribe_count,pass,fail_reasons,stop_reason
+2026-02-14T17:15:25.650Z,single,single,1,200,123,100.00,3.0,0.00,10725,0,0.00,0.00,87.20,0.00,3945,2425.93,10.89,20.89,3.81,false,4567,PASS,,Interrupted by SIGINT.

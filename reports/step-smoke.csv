@@ -1,0 +1,5 @@
+time,mode,label,step_index,users,duration_sec,connect_success_pct,connect_p95_ms,sse_read_errors,sse_events,tick_events,subscribe_success_pct,unsubscribe_success_pct,subscribe_p95_ms,unsubscribe_p95_ms,pass,fail_reasons,stop_reason
+2026-02-12T08:48:53.392Z,step,step-1,1,25,60,100.00,4227.1,0,54300,54225,100.00,100.00,1766.5,701.6,PASS,,Duration complete.
+2026-02-12T08:49:54.631Z,step,step-2,2,50,61,100.00,1165.1,0,117851,117700,100.00,100.00,2278.5,1052.9,PASS,,Duration complete.
+2026-02-12T08:50:58.767Z,step,step-3,3,100,64,100.00,3242.1,0,215274,214974,100.00,100.00,3023.7,6297.0,PASS,,Duration complete.
+2026-02-12T08:52:03.864Z,step,step-4,4,200,65,100.00,5015.5,0,384466,383866,100.00,100.00,5458.8,5322.7,FAIL,connectP95 5015.5ms > 5000ms,Duration complete.

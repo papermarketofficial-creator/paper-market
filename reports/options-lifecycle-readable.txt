@@ -1,0 +1,81 @@
+???? Creating UpstoxWebSocket singleton
+??? Memory monitor started (60s interval)
+MarketFeedSupervisor initialized
+???? Subscribing to candle updates from market-engine...
+??? Candle subscription initialized
+???? Creating RealTimeMarketService singleton
+?????? Reusing UpstoxWebSocket singleton
+{"level":30,"time":1772172114172,"pid":20252,"hostname":"Sumanth","msg":"Initializing InstrumentRepository into Heap Memory..."}
+Query: select "instrumentToken", "exchangeToken", "tradingsymbol", "name", "underlying", "expiry", "strike", "optionType", "tickSize", "lotSize", "instrumentType", "segment", "exchange", "isActive", "lastSyncedAt", "createdAt", "updatedAt" from "instruments" where 
+                        "isActive" = true
+                        AND (
+                            expiry IS NULL
+                            OR expiry >= NOW() - interval '1 day'
+                        )
+                    
+{"level":30,"time":1772172125070,"pid":20252,"hostname":"Sumanth","futuresLoaded":627,"msg":"Futures instruments loaded into repository"}
+{"level":30,"time":1772172125070,"pid":20252,"hostname":"Sumanth","count":45351,"tokens":45351,"groups":8466,"memoryMB":98,"duration":"10897ms","msg":"InstrumentRepository loaded successfully"}
+Query: select "instrumentToken", "expiry" from "instruments" where "instruments"."instrumentToken" = $1 limit $2 -- params: ["NSE_FO|54710", 1]
+Query: update "instruments" set "expiry" = $1, "updatedAt" = $2 where "instruments"."instrumentToken" = $3 -- params: ["2026-02-26T06:02:26.839Z", "2026-02-27T06:02:26.841Z", "NSE_FO|54710"]
+Query: select "instrumentToken", "exchangeToken", "tradingsymbol", "name", "underlying", "expiry", "strike", "optionType", "tickSize", "lotSize", "instrumentType", "segment", "exchange", "isActive", "lastSyncedAt", "createdAt", "updatedAt" from "instruments" where "instruments"."instrumentToken" = $1 limit $2 -- params: ["NSE_FO|54710", 1]
+Query: select "id", "userId", "symbol", "instrumentToken", "quantity" from "positions" where ("positions"."instrumentToken" = $1 and "positions"."quantity" <> 0) -- params: ["NSE_FO|54710"]
+Query: select "instrumentToken" from "instruments" where ("instruments"."isActive" = $1 and "instruments"."instrumentType" in ($2, $3) and upper("instruments"."tradingsymbol") = upper($4) OR upper("instruments"."name") = upper($5)) limit $6 -- params: [true, "INDEX", "EQUITY", "NIFTY", "NIFTY", 1]
+Query: select "id", "userId", "accessToken", "expiresAt", "createdAt", "updatedAt" from "upstox_tokens" where "upstox_tokens"."expiresAt" > $1 order by "upstox_tokens"."updatedAt" desc limit $2 -- params: ["2026-02-27T06:02:27.377Z", 1]
+{"level":30,"time":1772172147720,"pid":20252,"hostname":"Sumanth","count":1,"msg":"Fetched detailed snapshot quotes"}
+{"level":50,"time":1772172147720,"pid":20252,"hostname":"Sumanth","event":"SETTLEMENT_SYNTHETIC_PRICE_USED","instrumentToken":"NSE_FO|54963","fallbackPrice":100,"msg":"Settlement price unavailable, using synthetic fallback"}
+{"level":30,"time":1772172147720,"pid":20252,"hostname":"Sumanth","lookupSymbol":"NIFTY 23100 CE 02 MAR 26","lookupToken":"NSE_FO|54710","msg":"Looking up instrument"}
+{"level":30,"time":1772172147842,"pid":20252,"hostname":"Sumanth","count":1,"msg":"Fetched detailed snapshot quotes"}
+{"level":30,"time":1772172147944,"pid":20252,"hostname":"Sumanth","count":1,"msg":"Fetched detailed snapshot quotes"}
+Query: select "id", "userId", "balance", "equity", "marginStatus", "accountState", "blockedBalance", "currency", "lastReconciled", "createdAt", "updatedAt" from "wallets" where "wallets"."userId" = $1 limit $2 -- params: ["abb65e47-5aef-49fb-b770-73530538cfe3", 1]
+{"level":30,"time":1772172147944,"pid":20252,"hostname":"Sumanth","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","symbol":"NIFTY 23100 CE 02 MAR 26","requiredMargin":3793.935,"msg":"Margin calculated"}
+Query: insert into "orders" ("id", "userId", "symbol", "instrumentToken", "side", "quantity", "orderType", "limitPrice", "status", "executionPrice", "executedAt", "createdAt", "updatedAt", "rejectionReason", "exitReason", "idempotencyKey", "averagePrice", "realizedPnL") values (default, $1, $2, $3, $4, $5, $6, $7, $8, default, default, default, default, default, $9, $10, default, default) returning "id", "userId", "symbol", "instrumentToken", "side", "quantity", "orderType", "limitPrice", "status", "executionPrice", "executedAt", "createdAt", "updatedAt", "rejectionReason", "exitReason", "idempotencyKey", "averagePrice", "realizedPnL" -- params: ["abb65e47-5aef-49fb-b770-73530538cfe3", "NIFTY 23100 CE 02 MAR 26", "NSE_FO|54710", "SELL", 1, "MARKET", "0", "OPEN", "EXPIRY", "SETTLEMENT-NSE_FO|54710-2026-02-27"]
+{"level":30,"time":1772172148144,"pid":20252,"hostname":"Sumanth","orderId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","symbol":"NIFTY 23100 CE 02 MAR 26","availableBalance":9974690.95,"msg":"Order placed (paper trading)"}
+Query: begin
+{"level":30,"time":1772172148144,"pid":20252,"hostname":"Sumanth","orderId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","msg":"Executing MARKET order immediately"}
+{"level":40,"time":1772172148145,"pid":20252,"hostname":"Sumanth","orderId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","instrumentToken":"NSE_FO|54710","executionPrice":2226,"fallbackReason":"FILLABLE","priceSource":"ORACLE_FALLBACK","msg":"EXECUTED_USING_ORACLE_PRICE"}
+Query: select "quantity", "averagePrice" from "positions" where ("positions"."userId" = $1 and "positions"."instrumentToken" = $2) limit $3 -- params: ["abb65e47-5aef-49fb-b770-73530538cfe3", "NSE_FO|54710", 1]
+Query: insert into "write_ahead_journal" ("id", "journalId", "createdAt", "operationType", "status", "userId", "referenceId", "payload", "checksum", "committedAt") values (default, $1, default, $2, $3, $4, $5, $6, $7, default) on conflict ("journalId") do nothing returning "id", "journalId", "createdAt", "operationType", "status", "userId", "referenceId", "payload", "checksum", "committedAt" -- params: ["a8cc7025-b249-474a-8ceb-b729218ed7d3", "EXPIRY_SETTLEMENT", "PREPARED", "abb65e47-5aef-49fb-b770-73530538cfe3", "a8cc7025-b249-474a-8ceb-b729218ed7d3", "{\"orderId\":\"a8cc7025-b249-474a-8ceb-b729218ed7d3\",\"userId\":\"abb65e47-5aef-49fb-b770-73530538cfe3\",\"instrumentToken\":\"NSE_FO|54710\",\"side\":\"SELL\",\"orderType\":\"MARKET\",\"fillQuantity\":1,\"executionPrice\":2226,\"priceSource\":\"ORACLE_FALLBACK\",\"marginRequired\":3793.935,\"exitReason\":\"EXPIRY\",\"rejectionReason\":null,\"idempotencyKeys\":[\"EXPIRY-a8cc7025-b249-474a-8ceb-b729218ed7d3-OPTION_PREMIUM_CREDIT\"]}", "24c6733cc1f62bc2ff64c3fc2a59b7baa372b44a108cf8ceb3fca56a99a86891"]
+{"level":30,"time":1772172148463,"pid":20252,"hostname":"Sumanth","event":"WAJ_PREPARED","journalId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","operationType":"EXPIRY_SETTLEMENT","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","referenceId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","status":"PREPARED","msg":"WAJ_PREPARED"}
+Query: update "orders" set "status" = $1, "executionPrice" = $2, "executedAt" = $3, "updatedAt" = $4 where "orders"."id" = $5 -- params: ["FILLED", "2226", "2026-02-27T06:02:28.463Z", "2026-02-27T06:02:28.463Z", "a8cc7025-b249-474a-8ceb-b729218ed7d3"]
+Query: insert into "trades" ("id", "orderId", "userId", "symbol", "instrumentToken", "side", "quantity", "price", "executedAt", "createdAt") values (default, $1, $2, $3, $4, $5, $6, $7, $8, default) returning "id", "orderId", "userId", "symbol", "instrumentToken", "side", "quantity", "price", "executedAt", "createdAt" -- params: ["a8cc7025-b249-474a-8ceb-b729218ed7d3", "abb65e47-5aef-49fb-b770-73530538cfe3", "NIFTY 23100 CE 02 MAR 26", "NSE_FO|54710", "SELL", 1, "2226", "2026-02-27T06:02:28.463Z"]
+Query: select "id", "userId", "balance", "equity", "marginStatus", "accountState", "blockedBalance", "currency", "lastReconciled", "createdAt", "updatedAt" from "wallets" where "wallets"."userId" = $1 limit $2 -- params: ["abb65e47-5aef-49fb-b770-73530538cfe3", 1]
+Query: select "id", "accountType" from "ledger_accounts" where "ledger_accounts"."userId" = $1 -- params: ["abb65e47-5aef-49fb-b770-73530538cfe3"]
+Query: insert into "ledger_entries" ("id", "globalSequence", "debitAccountId", "creditAccountId", "amount", "currency", "referenceType", "referenceId", "idempotencyKey", "createdAt") values (default, default, $1, $2, $3, $4, $5, $6, $7, default) on conflict ("idempotencyKey") do nothing returning "id", "globalSequence" -- params: ["77fdb471-73a9-4331-b9c9-aae05d6fd463", "b760d7a7-cac3-4992-89b5-4cfc19a2a735", "2226", "INR", "OPTION_REALIZED_PNL", "5ec5491c-f8af-4eb5-b14c-0f4e334c8054", "EXPIRY-a8cc7025-b249-474a-8ceb-b729218ed7d3-OPTION_PREMIUM_CREDIT"]
+{"level":30,"time":1772172148962,"pid":20252,"hostname":"Sumanth","event":"WALLET_LEDGER_PROCEEDS","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","amount":"2226","ledgerReferenceType":"OPTION_REALIZED_PNL","ledgerReferenceId":"5ec5491c-f8af-4eb5-b14c-0f4e334c8054","idempotencyKey":"EXPIRY-a8cc7025-b249-474a-8ceb-b729218ed7d3-OPTION_PREMIUM_CREDIT","description":"Option Premium Credit NIFTY 23100 CE 02 MAR 26","msg":"WALLET_LEDGER_PROCEEDS"}
+Query: select "id", "userId", "symbol", "instrumentToken", "quantity", "averagePrice", "realizedPnL", "createdAt", "updatedAt" from "positions" where ("positions"."userId" = $1 and "positions"."instrumentToken" = $2) limit $3 -- params: ["abb65e47-5aef-49fb-b770-73530538cfe3", "NSE_FO|54710", 1]
+Query: update "orders" set "averagePrice" = $1, "realizedPnL" = $2 where "orders"."id" = $3 -- params: ["25309.05", "-23083.05", "a8cc7025-b249-474a-8ceb-b729218ed7d3"]
+Query: delete from "positions" where ("positions"."userId" = $1 and "positions"."instrumentToken" = $2) -- params: ["abb65e47-5aef-49fb-b770-73530538cfe3", "NSE_FO|54710"]
+{"level":20,"time":1772172149269,"pid":20252,"hostname":"Sumanth","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","symbol":"NIFTY 23100 CE 02 MAR 26","pnl":-23083.05,"msg":"Position closed"}
+Query: select "id", "userId", "balance", "equity", "marginStatus", "accountState", "blockedBalance", "currency", "lastReconciled", "createdAt", "updatedAt" from "wallets" where "wallets"."userId" = $1 limit $2 -- params: ["abb65e47-5aef-49fb-b770-73530538cfe3", 1]
+Query: select "ledger_accounts"."id", "ledger_accounts"."accountType", 
+                    coalesce(
+                        sum(
+                            case
+                                when "ledger_entries"."debitAccountId" = "ledger_accounts"."id" then "ledger_entries"."amount"::numeric
+                                when "ledger_entries"."creditAccountId" = "ledger_accounts"."id" then -"ledger_entries"."amount"::numeric
+                                else 0
+                            end
+                        ),
+                        0
+                    )::text
+                 from "ledger_accounts" left join "ledger_entries" on ("ledger_entries"."debitAccountId" = "ledger_accounts"."id" or "ledger_entries"."creditAccountId" = "ledger_accounts"."id") where "ledger_accounts"."id" in ($1, $2, $3, $4, $5) group by "ledger_accounts"."id", "ledger_accounts"."accountType" -- params: ["77fdb471-73a9-4331-b9c9-aae05d6fd463", "f0bd78c3-35e3-44c2-9431-497774587d58", "2244cb8c-3a50-4529-ae0a-9f4dbf2bef12", "b760d7a7-cac3-4992-89b5-4cfc19a2a735", "88d6e4dc-960a-455f-a9d0-a7882e2137a1"]
+Query: update "wallets" set "balance" = $1, "equity" = $2, "blockedBalance" = $3, "lastReconciled" = $4, "updatedAt" = $5 where "wallets"."userId" = $6 -- params: ["9976916.95", "9976916.95", "0", "2026-02-27T06:02:29.493Z", "2026-02-27T06:02:29.493Z", "abb65e47-5aef-49fb-b770-73530538cfe3"]
+Query: select "id", "journalId", "createdAt", "operationType", "status", "userId", "referenceId", "payload", "checksum", "committedAt" from "write_ahead_journal" where "write_ahead_journal"."journalId" = $1 limit $2 -- params: ["a8cc7025-b249-474a-8ceb-b729218ed7d3", 1]
+Query: update "write_ahead_journal" set "status" = $1, "payload" = $2, "committedAt" = $3 where "write_ahead_journal"."journalId" = $4 -- params: ["COMMITTED", "{\"side\":\"SELL\",\"userId\":\"abb65e47-5aef-49fb-b770-73530538cfe3\",\"orderId\":\"a8cc7025-b249-474a-8ceb-b729218ed7d3\",\"orderType\":\"MARKET\",\"exitReason\":\"EXPIRY\",\"priceSource\":\"ORACLE_FALLBACK\",\"fillQuantity\":1,\"executionPrice\":2226,\"marginRequired\":3793.935,\"idempotencyKeys\":[\"EXPIRY-a8cc7025-b249-474a-8ceb-b729218ed7d3-OPTION_PREMIUM_CREDIT\"],\"instrumentToken\":\"NSE_FO|54710\",\"rejectionReason\":null,\"__commitMeta\":{\"ledgerSequences\":[394],\"committedAt\":\"2026-02-27T06:02:29.676Z\",\"mutationMeta\":{\"orderId\":\"a8cc7025-b249-474a-8ceb-b729218ed7d3\",\"tradeId\":\"5ec5491c-f8af-4eb5-b14c-0f4e334c8054\",\"priceSource\":\"ORACLE_FALLBACK\"}}}", "2026-02-27T06:02:29.676Z", "a8cc7025-b249-474a-8ceb-b729218ed7d3"]
+{"level":30,"time":1772172149793,"pid":20252,"hostname":"Sumanth","event":"WAJ_COMMITTED","journalId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","operationType":"EXPIRY_SETTLEMENT","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","referenceId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","ledgerSequences":[394],"msg":"WAJ_COMMITTED"}
+Query: commit
+{"level":30,"time":1772172149885,"pid":20252,"hostname":"Sumanth","orderId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","symbol":"NIFTY 23100 CE 02 MAR 26","side":"SELL","quantity":1,"price":2226,"source":"ORACLE_FALLBACK","priceSource":"ORACLE_FALLBACK","slippageBps":0,"msg":"Order executed"}
+{"level":50,"time":1772172149885,"pid":20252,"hostname":"Sumanth","event":"ORDER_EXECUTION_TIMING","orderId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","instrumentToken":"NSE_FO|54710","order_validation_ms":0,"margin_ms":0.17,"ledger_ms":1130.42,"execution_ms":1739.99,"total_ms":1740.8,"msg":"ORDER_EXECUTION_TIMING"}
+{"level":50,"time":1772172149885,"pid":20252,"hostname":"Sumanth","event":"ORDER_PATH_TIMING","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","orderId":"a8cc7025-b249-474a-8ceb-b729218ed7d3","instrumentToken":"NSE_FO|54710","order_validation_ms":0,"margin_ms":222.8,"ledger_ms":0,"execution_ms":1741.49,"total_ms":2165.01,"msg":"ORDER_PATH_TIMING"}
+{"level":40,"time":1772172149885,"pid":20252,"hostname":"Sumanth","event":"POSITION_SETTLED","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","instrumentToken":"NSE_FO|54710","quantity":1,"side":"SELL","settlementPrice":0,"msg":"POSITION_SETTLED"}
+{"level":40,"time":1772172149885,"pid":20252,"hostname":"Sumanth","event":"OPTION_EXPIRED","userId":"abb65e47-5aef-49fb-b770-73530538cfe3","instrumentToken":"NSE_FO|54710","optionType":"CE","msg":"OPTION_EXPIRED"}
+Query: update "instruments" set "expiry" = $1, "updatedAt" = $2 where "instruments"."instrumentToken" = $3 -- params: ["2026-03-02T18:29:59.000Z", "2026-02-27T06:02:30.286Z", "NSE_FO|54710"]
+{"level":30,"time":1772172170647,"pid":20252,"hostname":"Sumanth","heapUsedMB":72,"heapTotalMB":76,"rssMB":142,"externalMB":5,"arrayBuffersMB":0,"msg":"MemoryTelemetry"}
+{
+  "longOptionLifecycle": "PASS",
+  "shortOptionLifecycle": "PASS",
+  "expirySettlement": "PASS",
+  "marginIntegrity": "PASS",
+  "ledgerIntegrity": "PASS",
+  "overallStatus": "PASS"
+}
