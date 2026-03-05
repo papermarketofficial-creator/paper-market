@@ -87,6 +87,11 @@ export class MarketFeedSupervisor extends EventEmitter {
       return;
     }
 
+    if (!this.shouldExpectTicks()) {
+      console.log("Skipping market feed connect: session closed (symbols retained)");
+      return;
+    }
+
     console.log("Connecting to market feed...");
     await this.ws.connect((data: any) => {
       this.handleTick(data);

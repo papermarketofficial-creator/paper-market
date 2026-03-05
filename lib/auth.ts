@@ -41,7 +41,8 @@ const { handlers, auth: nextAuth, signIn, signOut } = NextAuth({
             if (account?.provider === "google" && profile?.email) {
                 try {
                     const emailStr = String(profile.email);
-                    
+                    let appUserId: string | null = null;
+
                     const [existingUser] = await db
                         .select()
                         .from(users)
@@ -51,7 +52,7 @@ const { handlers, auth: nextAuth, signIn, signOut } = NextAuth({
                     if (!existingUser) {
                         const nameStr = profile.name ? String(profile.name) : "User";
                         const imageStr = profile.image ? String(profile.image) : null;
-                        
+
                         const [created] = await db
                             .insert(users)
                             .values({
@@ -62,14 +63,22 @@ const { handlers, auth: nextAuth, signIn, signOut } = NextAuth({
                             })
                             .returning({ id: users.id });
 
+                        appUserId = created.id;
+
                         await db.transaction(async (tx) => {
-                            await WalletService.createWallet(created.id, tx);
-                            await bootstrapUserLedgerState(created.id, tx);
+                            await WalletService.createWallet(appUserId!, tx);
+                            await bootstrapUserLedgerState(appUserId!, tx);
                         });
+                    } else {
+                        appUserId = existingUser.id;
+                    }
+
+                    if (appUserId) {
+                        (user as any).id = appUserId;
                     }
                 } catch (error) {
-                    console.error("🔥 Error creating user in DB:", error);
-                    return true; 
+                    console.error("Error creating user in DB:", error);
+                    return false;
                 }
             }
             return true;
@@ -187,6 +196,49 @@ export const auth = async () => {
         return cached;
     }
 
+    const sessionEmail = String(session.user.email);
+    try {
+        let [appUser] = await db
+            .select({ id: users.id })
+            .from(users)
+            .where(eq(users.email, sessionEmail))
+            .limit(1);
+
+        if (!appUser) {
+            const sessionName = session.user.name ? String(session.user.name) : "User";
+            const sessionImage = session.user.image ? String(session.user.image) : null;
+            try {
+                const [created] = await db
+                    .insert(users)
+                    .values({
+                        email: sessionEmail,
+                        name: sessionName,
+                        image: sessionImage,
+                        balance: "1000000.00",
+                    })
+                    .returning({ id: users.id });
+                appUser = created;
+            } catch (error: any) {
+                if (error?.code === "23505") {
+                    const [existing] = await db
+                        .select({ id: users.id })
+                        .from(users)
+                        .where(eq(users.email, sessionEmail))
+                        .limit(1);
+                    appUser = existing;
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        if (appUser?.id) {
+            (session.user as any).id = appUser.id;
+        }
+    } catch (error) {
+        console.error("Failed to align auth session user with app user:", error);
+    }
+
     // Cache miss - store in cache for next request
     sessionCache.set(cacheKey, session);
     
@@ -194,3 +246,4 @@ export const auth = async () => {
 };
 
 export { handlers, signIn, signOut };
+

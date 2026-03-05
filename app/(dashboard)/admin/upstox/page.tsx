@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { auth } from "@/lib/auth";
 import { UpstoxAuthService } from "@/services/upstox-auth.service";
-import Link from "next/link";
 import { AlertCircle, CheckCircle2, Clock } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { StreamControl } from "@/components/admin/StreamControl";
@@ -94,9 +93,9 @@ export default async function UpstoxAdminPage({
              )}
 
              <Button asChild className="w-full" variant={isConnected ? "outline" : "default"}>
-                <Link href="/api/upstox/login">
+                <a href="/api/upstox/login">
                     {isConnected ? "Reconnect Upstox" : "Connect Upstox Account"}
-                </Link>
+                </a>
              </Button>
           </CardContent>
         </Card>
