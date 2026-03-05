@@ -42,7 +42,8 @@ export function EquityCurveChart() {
     return value.toString();
   };
 
-  const formatDate = (time: number) => format(new Date(time), 'dd MMM');
+  const formatDate = (time: number) =>
+    format(new Date(time), 'dd MMM');
 
   if (chartData.length === 0) return null;
 
@@ -86,7 +87,9 @@ export function EquityCurveChart() {
             
             <Tooltip 
               contentStyle={{ backgroundColor: "hsl(var(--popover))", borderColor: "hsl(var(--border))", fontSize: "12px" }}
-              labelFormatter={(label) => format(new Date(label), 'dd MMM HH:mm')}
+              labelFormatter={(label) =>
+                format(new Date(label), 'dd MMM HH:mm')
+              }
               formatter={(value: number, name: string) => [
                 `₹${value.toLocaleString()}`, 
                 name === 'equity' ? 'Balance' : 'Drawdown'

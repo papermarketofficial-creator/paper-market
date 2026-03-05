@@ -284,7 +284,9 @@ useEffect(() => {
                     </div>
                     <div className="flex items-center justify-between mt-3">
                       <p className="text-xs text-muted-foreground">
-                        {!isNaN(new Date(trade.entryTime).getTime()) ? format(new Date(trade.entryTime), 'dd MMM yyyy, HH:mm') : '-'}
+                        {!isNaN(new Date(trade.entryTime).getTime())
+                          ? format(new Date(trade.entryTime), 'dd MMM yyyy, HH:mm')
+                          : '-'}
                       </p>
                       {(trade.status === 'PENDING' || trade.status === 'OPEN') && (
                         <Button
@@ -346,10 +348,14 @@ useEffect(() => {
                         <TableCell className="text-foreground">
                           <div>
                             <p className="font-medium">
-                              {!isNaN(new Date(trade.entryTime).getTime()) ? format(new Date(trade.entryTime), 'dd MMM yyyy') : '-'}
+                              {!isNaN(new Date(trade.entryTime).getTime())
+                                ? format(new Date(trade.entryTime), 'dd MMM yyyy')
+                                : '-'}
                             </p>
                             <p className="text-xs text-muted-foreground">
-                              {!isNaN(new Date(trade.entryTime).getTime()) ? format(new Date(trade.entryTime), 'HH:mm:ss') : '-'}
+                              {!isNaN(new Date(trade.entryTime).getTime())
+                                ? format(new Date(trade.entryTime), 'HH:mm:ss')
+                                : '-'}
                             </p>
                           </div>
                         </TableCell>

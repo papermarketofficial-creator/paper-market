@@ -123,14 +123,25 @@ export const useTradeExecutionStore = create<TradeExecutionState>((set, get) => 
           (typeof apiError?.code === "string" && apiError.code) ||
           (typeof data?.code === "string" && data.code) ||
           "";
-        const backendMessage =
-          errorCode === "PARTIAL_EXIT_NOT_ALLOWED"
-            ? "Partial exit is disabled in paper trading mode."
-            : (typeof apiError === "string" && apiError) ||
-              apiError?.message ||
-              (typeof data?.message === "string" && data.message) ||
-              (!data && rawBody ? rawBody.slice(0, 300) : null) ||
-              `Order placement failed (HTTP ${res.status})`;
+        const backendMessage = (() => {
+          if (errorCode === "MARKET_CLOSED")
+            return "Market is closed. Trading hours are 9:15 AM – 3:30 PM IST (Mon–Fri). You can still exit existing positions anytime.";
+          if (errorCode === "INSUFFICIENT_FUNDS")
+            return apiError?.message || data?.message || "Insufficient balance to place this order.";
+          if (errorCode === "INSTRUMENT_INACTIVE")
+            return "This instrument is no longer active or has expired.";
+          if (errorCode === "INSTRUMENT_NOT_ALLOWED")
+            return "Trading this instrument is not allowed in paper trading mode.";
+          if (errorCode === "PARTIAL_EXIT_NOT_ALLOWED")
+            return "Partial exit is disabled in paper trading mode.";
+          return (
+            (typeof apiError === "string" && apiError) ||
+            apiError?.message ||
+            (typeof data?.message === "string" && data.message) ||
+            (!data && rawBody ? rawBody.slice(0, 300) : null) ||
+            `Order placement failed (HTTP ${res.status})`
+          );
+        })();
 
         console.error("Place Order API Failed:", {
           status: res.status,

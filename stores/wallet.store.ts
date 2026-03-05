@@ -158,7 +158,15 @@ export const useWalletStore = create<WalletState>((set, get) => ({
                 set({
                     transactions: result.data.transactions.map((t: any) => ({
                         ...t,
-                        createdAt: new Date(t.createdAt),
+                        balanceAfter: t.balance_after ?? t.balanceAfter ?? "0",
+                        createdAt: (() => {
+                                // Drizzle returns timestamps without 'Z'; append it to force UTC parsing
+                                const raw: string = t.createdAt ?? t.created_at ?? '';
+                                const iso = typeof raw === 'string' && raw.length > 0 && !raw.endsWith('Z') && !raw.includes('+')
+                                    ? raw + 'Z'
+                                    : raw;
+                                return new Date(iso);
+                            })(),
                     })),
                     transactionsPagination: result.data.pagination,
                     isLoadingTransactions: false,

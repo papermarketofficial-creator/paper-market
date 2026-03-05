@@ -115,7 +115,7 @@ export class OrderService {
     static async placeOrder(
         userId: string,
         payload: PlaceOrder,
-        options: { force?: boolean } = {}
+        options: { force?: boolean; isClosingOrder?: boolean } = {}
     ) {
         const startMs = performance.now();
         let orderValidationMs = 0;
@@ -186,7 +186,7 @@ export class OrderService {
             const marketClosed = isInstrumentSessionClosed(instrument, now);
             const stageAfterHours = !isForcedRiskFlow && marketClosed && ALLOW_AFTER_HOURS_ORDER_STAGING;
 
-            if (marketClosed && !isForcedRiskFlow && !stageAfterHours) {
+            if (marketClosed && !isForcedRiskFlow && !stageAfterHours && !options.isClosingOrder) {
                 throw new ApiError(
                     "Market is closed for now",
                     400,
@@ -195,7 +195,8 @@ export class OrderService {
             }
 
             const validationStartMs = performance.now();
-            if (!stageAfterHours && !isForcedRiskFlow) {
+            // Closing orders skip all pre-trade checks — margin is already blocked from open
+            if (!stageAfterHours && !isForcedRiskFlow && !options.isClosingOrder) {
                 assertFeedHealthy(instrument.instrumentToken);
                 await OrderAcceptanceService.validateOrder(payload, instrument, { userId });
 
@@ -210,7 +211,7 @@ export class OrderService {
                         throw new Error("OrderService safety validation missing");
                     }
                 }
-            } else {
+            } else if (!options.isClosingOrder) {
                 if (!PAPER_TRADING_MODE) {
                     await PreTradeRiskService.validateOrder(userId, payload, instrument);
                 }
@@ -229,21 +230,26 @@ export class OrderService {
                 );
             }
 
-            // Calculate required margin
+            // Calculate required margin — SKIP for closing orders (margin was already blocked at open)
             const marginStartMs = performance.now();
-            const requiredMargin = await MarginService.calculateRequiredMargin(payload, instrument);
-            marginMs = performance.now() - marginStartMs;
-            logger.info({ userId, symbol: payload.symbol, requiredMargin }, "Margin calculated");
+            if (!options.isClosingOrder) {
+                const requiredMargin = await MarginService.calculateRequiredMargin(payload, instrument);
+                marginMs = performance.now() - marginStartMs;
+                logger.info({ userId, symbol: payload.symbol, requiredMargin }, "Margin calculated");
 
-            // 🎯 PAPER TRADING: Simple balance check using wallet
-            const availableBalance = await WalletService.getAvailableBalance(userId);
-            
-            if (requiredMargin > availableBalance) {
-                throw new ApiError(
-                    `Insufficient balance. Available: ₹${availableBalance.toFixed(2)}, Required: ₹${requiredMargin.toFixed(2)}`,
-                    400,
-                    "INSUFFICIENT_FUNDS"
-                );
+                // 🎯 PAPER TRADING: Simple balance check using wallet
+                const availableBalance = await WalletService.getAvailableBalance(userId);
+
+                if (requiredMargin > availableBalance) {
+                    throw new ApiError(
+                        `Insufficient balance. Available: ₹${availableBalance.toFixed(2)}, Required: ₹${requiredMargin.toFixed(2)}`,
+                        400,
+                        "INSUFFICIENT_FUNDS"
+                    );
+                }
+            } else {
+                marginMs = performance.now() - marginStartMs;
+                logger.info({ userId, symbol: payload.symbol }, "Closing order — skipping margin check");
             }
             
             // Create order (simplified for paper trading)
@@ -267,7 +273,7 @@ export class OrderService {
 
             const [order] = await db.insert(orders).values(newOrder).returning();
 
-            logger.info({ orderId: order.id, userId, symbol: payload.symbol, availableBalance }, "Order placed (paper trading)");
+            logger.info({ orderId: order.id, userId, symbol: payload.symbol }, "Order placed (paper trading)");
             
             // ✅ Execute MARKET orders immediately
             if (payload.orderType === "MARKET" && !stageAfterHours) {

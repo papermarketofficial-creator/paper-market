@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { asc, eq, inArray, or } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
@@ -98,12 +98,14 @@ type WalletTransactionView = {
     amount: string;
     balanceBefore: string;
     balanceAfter: string;
+    balance_after: string;
     blockedBefore: string;
     blockedAfter: string;
     referenceType: string | null;
     referenceId: string | null;
     description: string | null;
     createdAt: Date;
+    created_at: Date;
 };
 
 function deriveTransactionType(debitType: LedgerAccountType, creditType: LedgerAccountType): LegacyTransactionType {
@@ -129,6 +131,30 @@ function deriveWajOperationType(referenceType: string): WriteAheadOperationType 
     return "LEDGER_ENTRY";
 }
 
+function toSignedCashDelta(type: LegacyTransactionType, amount: string): string {
+    if (type === "CREDIT" || type === "UNBLOCK") {
+        return amount;
+    }
+
+    if (type === "DEBIT" || type === "BLOCK") {
+        return LedgerService.subtract("0", amount);
+    }
+
+    return "0";
+}
+
+function toSignedBlockedDelta(type: LegacyTransactionType, amount: string): string {
+    if (type === "BLOCK") {
+        return amount;
+    }
+
+    if (type === "UNBLOCK") {
+        return LedgerService.subtract("0", amount);
+    }
+
+    return "0";
+}
+
 type WalletJournalOptions = {
     ledgerReferenceType?: LedgerReferenceType;
     skipWaj?: boolean;
@@ -137,6 +163,7 @@ type WalletJournalOptions = {
     wajJournalId?: string;
     sequenceCollector?: number[];
     idempotencyKey?: string;
+    isSettlement?: boolean; // When true, skips cash-sufficiency check (P&L loss covered by blocked margin)
 };
 
 export class WalletService {
@@ -191,9 +218,9 @@ export class WalletService {
     }
 
     static async getAvailableBalance(userId: string): Promise<number> {
-        const wallet = await this.getWallet(userId);
-        const available = LedgerService.subtract(wallet.balance, wallet.blockedBalance);
-        return toNumber(available);
+        // Read from ledger (source of truth) — bypasses stale wallet cache
+        const snapshot = await LedgerService.reconstructUserEquity(userId);
+        return toNumber(snapshot.cash);
     }
 
     static async creditBalance(
@@ -406,13 +433,16 @@ export class WalletService {
 
         await this.getWallet(userId, tx);
 
-        const snapshot = await LedgerService.reconstructUserEquity(userId, tx);
-        if (LedgerService.compare(snapshot.cash, normalizedAmount) < 0) {
-            throw new ApiError(
-                `Insufficient balance. Available: ${snapshot.cash}`,
-                400,
-                "INSUFFICIENT_FUNDS"
-            );
+        // For P&L settlement debits, blocked margin already covers the loss — skip cash check
+        if (!options.isSettlement) {
+            const snapshot = await LedgerService.reconstructUserEquity(userId, tx);
+            if (LedgerService.compare(snapshot.cash, normalizedAmount) < 0) {
+                throw new ApiError(
+                    `Insufficient balance. Available: ${snapshot.cash}`,
+                    400,
+                    "INSUFFICIENT_FUNDS"
+                );
+            }
         }
 
         const debitAccountType = deriveDebitAccountType(referenceType);
@@ -620,60 +650,10 @@ export class WalletService {
 
         const debitAccounts = alias(ledgerAccounts, "debit_accounts");
         const creditAccounts = alias(ledgerAccounts, "credit_accounts");
-        const transactionTypeCase = sql<string>`
-            case
-                when ${debitAccounts.accountType} = 'MARGIN_BLOCKED' and ${creditAccounts.accountType} = 'CASH' then 'BLOCK'
-                when ${debitAccounts.accountType} = 'CASH' and ${creditAccounts.accountType} = 'MARGIN_BLOCKED' then 'UNBLOCK'
-                when ${debitAccounts.accountType} = 'CASH' then 'CREDIT'
-                when ${creditAccounts.accountType} = 'CASH' then 'DEBIT'
-                else 'SETTLEMENT'
-            end
-        `;
 
-        const whereConditions: any[] = [
-            or(
-                inArray(ledgerEntries.debitAccountId, accountIds),
-                inArray(ledgerEntries.creditAccountId, accountIds)
-            ),
-        ];
-
-        if (filters.referenceType) {
-            whereConditions.push(eq(ledgerEntries.referenceType, toLedgerReferenceType(filters.referenceType)));
-        }
-
-        if (filters.startDate) {
-            whereConditions.push(gte(ledgerEntries.createdAt, filters.startDate));
-        }
-
-        if (filters.endDate) {
-            whereConditions.push(lte(ledgerEntries.createdAt, filters.endDate));
-        }
-
-        if (filters.type) {
-            whereConditions.push(sql`${transactionTypeCase} = ${filters.type}`);
-        }
-
-        // PERFORMANCE FIX: Move pagination into SQL instead of loading all rows
-        const limit = Math.max(1, Math.min(100, Number(filters.limit || 20)));
-        const page = Math.max(1, Number(filters.page || 1));
-        const offset = (page - 1) * limit;
-
-        // Get total count first
-        const [countRow] = await db
-            .select({ count: sql<number>`count(*)::int` })
-            .from(ledgerEntries)
-            .innerJoin(debitAccounts, eq(ledgerEntries.debitAccountId, debitAccounts.id))
-            .innerJoin(creditAccounts, eq(ledgerEntries.creditAccountId, creditAccounts.id))
-            .where(and(...whereConditions));
-        
-        const totalCount = countRow?.count || 0;
-
-        // Fetch only the page we need
         const rawEntries = await db
             .select({
                 id: ledgerEntries.id,
-                debitAccountId: ledgerEntries.debitAccountId,
-                creditAccountId: ledgerEntries.creditAccountId,
                 amount: ledgerEntries.amount,
                 referenceType: ledgerEntries.referenceType,
                 referenceId: ledgerEntries.referenceId,
@@ -684,36 +664,114 @@ export class WalletService {
             .from(ledgerEntries)
             .innerJoin(debitAccounts, eq(ledgerEntries.debitAccountId, debitAccounts.id))
             .innerJoin(creditAccounts, eq(ledgerEntries.creditAccountId, creditAccounts.id))
-            .where(and(...whereConditions))
-            .orderBy(desc(ledgerEntries.createdAt))
-            .limit(limit)
-            .offset(offset);
+            .where(
+                or(
+                    inArray(ledgerEntries.debitAccountId, accountIds),
+                    inArray(ledgerEntries.creditAccountId, accountIds)
+                )
+            )
+            .orderBy(asc(ledgerEntries.createdAt), asc(ledgerEntries.id));
 
-        const transactions = rawEntries.map((entry) => {
+        const currentSnapshot = await LedgerService.reconstructUserEquity(userId);
+        let totalCashDelta = "0";
+        let totalBlockedDelta = "0";
+
+        const entriesWithDeltas = rawEntries.map((entry) => {
             const debitType = entry.debitType || "REALIZED_PNL";
             const creditType = entry.creditType || "REALIZED_PNL";
             const type = deriveTransactionType(debitType, creditType);
+            const amount = LedgerService.normalizeAmount(entry.amount);
+            const cashDelta = toSignedCashDelta(type, amount);
+            const blockedDelta = toSignedBlockedDelta(type, amount);
+
+            totalCashDelta = LedgerService.add(totalCashDelta, cashDelta);
+            totalBlockedDelta = LedgerService.add(totalBlockedDelta, blockedDelta);
+
+            return {
+                ...entry,
+                type,
+                amount,
+                cashDelta,
+                blockedDelta,
+            };
+        });
+
+        const openingCash = LedgerService.subtract(currentSnapshot.cash, totalCashDelta);
+        const openingBlocked = LedgerService.subtract(currentSnapshot.marginBlocked, totalBlockedDelta);
+
+        let runningCashDelta = "0";
+        let runningBlockedDelta = "0";
+        const computedTransactionsAsc: WalletTransactionView[] = entriesWithDeltas.map((entry) => {
+            const cashBefore = LedgerService.add(openingCash, runningCashDelta);
+            const blockedBefore = LedgerService.add(openingBlocked, runningBlockedDelta);
+            // balanceBefore = running cash balance (BLOCK reduces cash; UNBLOCK increases cash)
+            const balanceBefore = cashBefore;
+
+            runningCashDelta = LedgerService.add(runningCashDelta, entry.cashDelta);
+            runningBlockedDelta = LedgerService.add(runningBlockedDelta, entry.blockedDelta);
+
+            const cashAfter = LedgerService.add(openingCash, runningCashDelta);
+            const blockedAfter = LedgerService.add(openingBlocked, runningBlockedDelta);
+            // balanceAfter = running cash balance after this transaction
+            const balanceAfter = cashAfter;
 
             return {
                 id: entry.id,
                 userId,
                 walletId: wallet.id,
-                type,
-                amount: LedgerService.normalizeAmount(entry.amount),
-                balanceBefore: "0",
-                balanceAfter: "0",
-                blockedBefore: "0",
-                blockedAfter: "0",
+                type: entry.type,
+                amount: entry.amount,
+                balanceBefore,
+                balanceAfter,
+                balance_after: balanceAfter,
+                blockedBefore,
+                blockedAfter,
                 referenceType: entry.referenceType,
                 referenceId: entry.referenceId,
                 description: null,
                 createdAt: entry.createdAt,
+                created_at: entry.createdAt,
             } satisfies WalletTransactionView;
         });
 
+        const requestedReferenceType = filters.referenceType
+            ? toLedgerReferenceType(filters.referenceType)
+            : undefined;
+
+        const filteredTransactions = computedTransactionsAsc.filter((transaction) => {
+            if (filters.type && transaction.type !== filters.type) {
+                return false;
+            }
+
+            if (requestedReferenceType && transaction.referenceType !== requestedReferenceType) {
+                return false;
+            }
+
+            if (filters.startDate && transaction.createdAt < filters.startDate) {
+                return false;
+            }
+
+            if (filters.endDate && transaction.createdAt > filters.endDate) {
+                return false;
+            }
+
+            return true;
+        });
+
+        const sortedTransactions = [...filteredTransactions].sort((a, b) => {
+            const timeDiff = b.createdAt.getTime() - a.createdAt.getTime();
+            if (timeDiff !== 0) return timeDiff;
+            return b.id.localeCompare(a.id);
+        });
+
+        const limit = Math.max(1, Math.min(100, Number(filters.limit || 20)));
+        const page = Math.max(1, Number(filters.page || 1));
+        const offset = (page - 1) * limit;
+        const transactions = sortedTransactions.slice(offset, offset + limit);
+
         return {
             transactions,
-            total: totalCount,
+            total: filteredTransactions.length,
         };
     }
 

@@ -441,6 +441,7 @@ export class ExecutionService {
                                         skipWalletSync: true,
                                         sequenceCollector: ledgerSequences,
                                         idempotencyKey: this.buildLedgerIdempotencyKey(order, "REALIZED_PNL_DEBIT"),
+                                        isSettlement: true,
                                     }
                                 );
                             }

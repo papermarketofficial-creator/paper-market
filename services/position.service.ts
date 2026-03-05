@@ -318,7 +318,7 @@ export class PositionService {
                 side: oppositeSide,
                 quantity: closeQuantity,
                 orderType: "MARKET", // Always use MARKET for closing
-            });
+            }, { isClosingOrder: true }); // Skip margin/balance check — margin already blocked
 
             logger.info({ 
                 userId, 
